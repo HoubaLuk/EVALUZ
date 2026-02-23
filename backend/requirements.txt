@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+python-docx
+pydantic
+openai
+sqlalchemy
+striprtf
+pymupdf
+fpdf2
