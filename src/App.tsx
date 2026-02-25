@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronRight, CheckCircle2, Lock, UserPlus, LogIn, Loader2 } from 'lucide-react';
 
 import { Tab, ClassData, DEFAULT_CLASS_DATA } from './types';
@@ -37,11 +38,37 @@ export default function App() {
 
   const [activeClassId, setActiveClassId] = useState<string | null>(null);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
+  const [cachedAnalytics, setCachedAnalytics] = useState<Record<string, any>>({});
+  const [scenariosWithAnalysis, setScenariosWithAnalysis] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Načíst z DB jaké scénáře už mají hotovou analýzu
+    fetch('http://localhost:8000/api/v1/analytics/class/1/status', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setScenariosWithAnalysis(data);
+        }
+      })
+      .catch(e => console.error(e));
+  }, []);
 
   const handleSelectScenario = (classId: string, scenarioId: string) => {
     setActiveClassId(classId);
     setActiveScenarioId(scenarioId);
   };
+
+  useEffect(() => {
+    if (classes && classes.length > 0 && !activeClassId) {
+      const firstClass = classes[0];
+      if (firstClass.scenarios && firstClass.scenarios.length > 0 && !activeScenarioId) {
+        setActiveClassId(firstClass.id);
+        setActiveScenarioId(firstClass.scenarios[0].id);
+      }
+    }
+  }, [classes, activeClassId, activeScenarioId]);
 
   const activeClass = classes.find(c => c.id === activeClassId);
   const activeScenario = activeClass?.scenarios.find(s => s.id === activeScenarioId);
@@ -226,9 +253,22 @@ export default function App() {
                 { id: 'analytics', num: '3', label: 'Analýza třídy' }
               ].map((step, index) => {
                 const isActive = activeTab === step.id;
-                const isPast =
-                  (activeTab === 'evaluation' && index === 0) ||
-                  (activeTab === 'analytics' && index <= 1);
+                let isCompleted = false;
+                if (index === 0) {
+                  isCompleted = activeTab === 'evaluation' || activeTab === 'analytics';
+                } else if (index === 1) {
+                  isCompleted = activeTab === 'analytics';
+                } else if (index === 2) {
+                  isCompleted = !!(activeScenarioId && cachedAnalytics[activeScenarioId]);
+                }
+
+                const circleColorClass = isActive && isCompleted && index === 2
+                  ? 'bg-[#D4AF37] text-white ring-4 ring-[#D4AF37]/20 shadow-md'
+                  : isActive
+                    ? 'bg-[#002855] text-white ring-4 ring-[#002855]/20 shadow-md'
+                    : isCompleted
+                      ? 'bg-[#D4AF37] text-white'
+                      : 'bg-white text-slate-400 border-2 border-slate-200 hover:border-slate-300';
 
                 return (
                   <button
@@ -236,15 +276,10 @@ export default function App() {
                     onClick={() => setActiveTab(step.id as Tab)}
                     className="relative z-10 flex flex-col items-center gap-2 group"
                   >
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${isActive
-                      ? 'bg-[#002855] text-white ring-4 ring-[#002855]/20 shadow-md'
-                      : isPast
-                        ? 'bg-[#D4AF37] text-white'
-                        : 'bg-white text-slate-400 border-2 border-slate-200 hover:border-slate-300'
-                      }`}>
-                      {isPast ? <CheckCircle2 className="w-5 h-5" /> : step.num}
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${circleColorClass}`}>
+                      {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.num}
                     </div>
-                    <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855]' : isPast ? 'text-slate-700' : 'text-slate-400'
+                    <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855]' : isCompleted ? 'text-slate-700' : 'text-slate-400'
                       }`}>
                       {step.label}
                     </span>
@@ -269,7 +304,26 @@ export default function App() {
                 scenarioId={activeScenarioId}
               />
             )}
-            {activeTab === 'analytics' && <TabAnalytics />}
+            {activeTab === 'analytics' && (
+              <TabAnalytics
+                scenarioId={activeScenarioId}
+                cachedData={activeScenarioId ? cachedAnalytics[activeScenarioId] : null}
+                onCacheData={(data) => {
+                  if (activeScenarioId) {
+                    setCachedAnalytics(prev => ({ ...prev, [activeScenarioId]: data }));
+                    if (!scenariosWithAnalysis.includes(activeScenarioId)) {
+                      const newArr = [...scenariosWithAnalysis, activeScenarioId];
+                      setScenariosWithAnalysis(newArr);
+                      localStorage.setItem('upvsp_analysis_completed', JSON.stringify(newArr));
+                    }
+                  }
+                }}
+                onNavigateToStudent={(studentId) => {
+                  setSelectedStudent(studentId);
+                  setActiveTab('evaluation');
+                }}
+              />
+            )}
           </div>
         </main>
       </div>

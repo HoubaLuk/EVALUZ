@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Download, BarChart3, PieChart as PieChartIcon, Wand2, RefreshCw, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { Download, BarChart3, PieChart as PieChartIcon, Wand2, RefreshCw, AlertCircle, AlertTriangle, ExternalLink, X, CheckCircle2, FileText } from 'lucide-react';
 import {
     BarChart,
     Bar,
@@ -19,28 +20,55 @@ interface AnalyticsData {
     top_errors: string[];
     ai_insight: string;
     score_distribution: { "0_50": number, "51_80": number, "81_100": number };
+    average_score: number;
+    needs_help: string[];
+    criterion_failures: Record<string, { id: number, name: string, oduvodneni: string }[]>;
+    scenario_id?: string;
 }
 
 const PIE_COLORS = ['#ef4444', '#f59e0b', '#10b981']; // Red, Amber, Emerald
 
-export function TabAnalytics() {
+interface TabAnalyticsProps {
+    scenarioId: string | null;
+    cachedData?: any | null;
+    onCacheData?: (data: any) => void;
+    onNavigateToStudent?: (studentId: number) => void;
+}
+
+export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [selectedCriterion, setSelectedCriterion] = useState<string | null>(null);
+    const [previewStudentId, setPreviewStudentId] = useState<number | null>(null);
+    const [previewStudentData, setPreviewStudentData] = useState<any>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
 
     const fetchAnalytics = async (force: boolean = false) => {
         setLoading(true);
         setError(null);
         try {
-            // Force parameter could be implemented on backend to bypass cache.
-            // For now we just re-fetch the latest db evaluations.
-            const res = await fetch('http://localhost:8000/api/v1/analytics/class/1/summary', {
+            let url = scenarioId
+                ? `http://localhost:8000/api/v1/analytics/class/1/summary?scenario_id=${scenarioId}`
+                : `http://localhost:8000/api/v1/analytics/class/1/summary`;
+
+            if (force) {
+                url += scenarioId ? '&force=true' : '?force=true';
+            }
+
+            const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
             if (!res.ok) throw new Error("Chyba při stahování analytiky");
 
             const json = await res.json();
             setData(json);
+            if (onCacheData && !force) {
+                // Not force because forcing just updates the data directly. Actually even if force, we want to update the cache so the checkmark stays or we don't care. Yes, we want to update the cache.
+                onCacheData(json);
+            } else if (onCacheData && force) {
+                onCacheData(json);
+            }
         } catch (e: any) {
             setError(e.message);
         } finally {
@@ -58,23 +86,65 @@ export function TabAnalytics() {
         { name: '81-100 %', value: data.score_distribution["81_100"] }
     ].filter(d => d.value > 0) : []; // filter out empty bands
 
-    const handleExportCSV = async () => {
+    const handleExportExcel = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/v1/export/class/1/csv', {
+            const url = scenarioId
+                ? `http://localhost:8000/api/v1/export/class/1/excel?scenario_id=${scenarioId}`
+                : `http://localhost:8000/api/v1/export/class/1/excel`;
+
+            const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
             if (!res.ok) throw new Error('Export selhal');
             const blob = await res.blob();
-            const url = window.URL.createObjectURL(blob);
+            const blobUrl = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = `vysledky_trida_1.csv`;
+            a.href = blobUrl;
+            a.download = `vysledky_trida_1.xlsx`;
             document.body.appendChild(a);
             a.click();
-            window.URL.revokeObjectURL(url);
+            window.URL.revokeObjectURL(blobUrl);
             document.body.removeChild(a);
         } catch (e: any) {
             alert(e.message);
+        }
+    };
+
+    const handleExportPDF = () => {
+        const token = localStorage.getItem('upvsp_token');
+        const url = `http://localhost:8000/api/v1/export/class-report/${scenarioId}?token=${token}`;
+        window.open(url, '_blank');
+    };
+
+    const handlePreviewStudent = async (studentId: number) => {
+        setPreviewStudentId(studentId);
+        setPreviewLoading(true);
+        try {
+            const res = await fetch('http://localhost:8000/api/v1/analytics/class/1', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
+            if (res.ok) {
+                const students = await res.json();
+                const targetStudent = students.find((s: any) => s.id === studentId);
+                if (targetStudent) {
+                    let parsedResults = [];
+                    try {
+                        const parsed = typeof targetStudent.json_result === 'string' ? JSON.parse(targetStudent.json_result) : targetStudent.json_result;
+                        parsedResults = parsed.vysledky || [];
+                    } catch (e) { }
+
+                    setPreviewStudentData({
+                        name: targetStudent.jmeno_studenta,
+                        score: targetStudent.celkove_skore,
+                        vysledky: parsedResults,
+                        zpetna_vazba: targetStudent.zpetna_vazba
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("Nepodařilo se načíst detail studenta", e);
+        } finally {
+            setPreviewLoading(false);
         }
     };
 
@@ -96,8 +166,17 @@ export function TabAnalytics() {
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         Aktualizovat
                     </button>
+                    <a
+                        href={`http://localhost:8000/api/v1/export/class-report/${data?.scenario_id || scenarioId}?token=${localStorage.getItem('upvsp_token')}`}
+                        download
+                        target="_blank"
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium shadow-sm"
+                    >
+                        <FileText className="w-4 h-4" />
+                        Exportovat PDF report
+                    </a>
                     <button
-                        onClick={handleExportCSV}
+                        onClick={handleExportExcel}
                         className="flex items-center gap-2 px-4 py-2 bg-[#002855] text-white rounded-lg hover:bg-[#002855]/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
                         disabled={loading || !data}
                     >
@@ -124,27 +203,39 @@ export function TabAnalytics() {
                 </div>
             ) : data ? (
                 <>
+                    {/* Top Stats Cards */}
                     <div className="grid grid-cols-3 gap-6">
-                        {/* Bar Chart - Success rates */}
-                        <div className="col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[400px]">
-                            <div className="flex items-center gap-2 mb-6">
-                                <BarChart3 className="w-5 h-5 text-[#002855]" />
-                                <h4 className="font-semibold text-[#002855]">Úspěšnost jednotlivých kritérií</h4>
+                        <div className="col-span-1 bg-gradient-to-br from-[#002855] to-[#001a38] p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center text-white relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4AF37] rounded-full mix-blend-multiply filter blur-2xl opacity-20 translate-x-1/2 -translate-y-1/2"></div>
+                            <h4 className="font-semibold text-lg text-slate-100 mb-2 z-10">Průměrné Skóre Třídy</h4>
+                            <div className="text-5xl font-bold tracking-tight z-10 text-[#D4AF37]">
+                                {data.average_score} <span className="text-xl text-slate-300 font-normal">b.</span>
                             </div>
-                            <div className="h-80 w-full relative -left-4">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={data.stats} layout="vertical" margin={{ top: 5, right: 30, left: 30, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#E2E8F0" />
-                                        <XAxis type="number" domain={[0, 100]} unit=" %" />
-                                        <YAxis dataKey="name" type="category" width={180} tick={{ fontSize: 11, fill: '#475569' }} />
-                                        <RechartsTooltip
-                                            formatter={(value) => [`${value} %`, 'Splnilo']}
-                                            cursor={{ fill: '#F1F5F9' }}
-                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }}
-                                        />
-                                        <Bar dataKey="success_rate" fill="#002855" radius={[0, 4, 4, 0]} barSize={20} />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                        </div>
+
+                        {/* Needs Help Roster */}
+                        <div className="col-span-1 bg-red-50 p-6 rounded-xl border border-red-100 shadow-sm flex flex-col">
+                            <div className="flex items-center gap-2 mb-4">
+                                <AlertTriangle className="w-5 h-5 text-red-600" />
+                                <h4 className="font-semibold text-red-700">Individuální pomoc ({data.needs_help?.length || 0})</h4>
+                            </div>
+                            <p className="text-sm text-red-600 mb-3">
+                                Studenti s celkovým hodnocením pod 50 %, kteří mohou vyžadovat dodatečnou konzultaci.
+                            </p>
+                            <div className="flex-1 overflow-y-auto max-h-[160px] pr-2">
+                                {data.needs_help && data.needs_help.length > 0 ? (
+                                    <ul className="space-y-2">
+                                        {data.needs_help.map((name, idx) => (
+                                            <li key={idx} className="bg-white px-3 py-2 rounded-md shadow-sm text-sm border border-red-100 font-medium text-slate-700 flex justify-between items-center">
+                                                <span>{name}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <div className="h-full flex items-center justify-center text-red-400/80 text-sm font-medium">
+                                        Všichni studenti prospěli.
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -152,18 +243,18 @@ export function TabAnalytics() {
                         <div className="col-span-1 bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
                             <div className="flex items-center gap-2 mb-4">
                                 <PieChartIcon className="w-5 h-5 text-[#002855]" />
-                                <h4 className="font-semibold text-[#002855]">Rozložení ziskovosti (%)</h4>
+                                <h4 className="font-semibold text-[#002855]">Percentuální ziskovost (rozložení studentů)</h4>
                             </div>
-                            <div className="flex-1 w-full h-full min-h-[250px] flex items-center justify-center">
+                            <div className="flex-1 w-full h-full min-h-[160px] flex items-center justify-center">
                                 {pieData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height="100%">
+                                    <ResponsiveContainer width="100%" height={160}>
                                         <PieChart>
                                             <Pie
                                                 data={pieData}
                                                 cx="50%"
                                                 cy="50%"
-                                                innerRadius={60}
-                                                outerRadius={80}
+                                                innerRadius={45}
+                                                outerRadius={65}
                                                 paddingAngle={5}
                                                 dataKey="value"
                                             >
@@ -172,7 +263,7 @@ export function TabAnalytics() {
                                                 ))}
                                             </Pie>
                                             <RechartsTooltip formatter={(value) => [value, 'Studentů']} />
-                                            <Legend verticalAlign="bottom" height={36} />
+                                            <Legend verticalAlign="middle" align="right" layout="vertical" />
                                         </PieChart>
                                     </ResponsiveContainer>
                                 ) : (
@@ -182,22 +273,209 @@ export function TabAnalytics() {
                         </div>
                     </div>
 
-                    {/* AI Recommendations */}
-                    <div className="bg-gradient-to-br from-[#002855] to-[#001a38] rounded-xl p-6 text-white shadow-md relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-[#D4AF37] rounded-full mix-blend-multiply filter blur-3xl opacity-20 translate-x-1/2 -translate-y-1/2"></div>
-                        <div className="relative z-10">
-                            <div className="flex items-center gap-2 mb-4 text-[#D4AF37]">
-                                <Wand2 className="w-6 h-6" />
-                                <h4 className="font-semibold text-lg">Pedagogické shrnutí od AI Asistenta</h4>
+                    <div className="grid grid-cols-1 gap-6">
+                        {/* Bar Chart - Success rates */}
+                        <div className="col-span-1 bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                            <div className="flex items-center gap-2 mb-6">
+                                <BarChart3 className="w-5 h-5 text-[#002855]" />
+                                <h4 className="font-semibold text-[#002855]">Úspěšnost jednotlivých kritérií</h4>
                             </div>
+                            <div className="h-[500px] w-full relative -left-4">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={data.stats.slice(0, 25).map((s, i) => ({ ...s, shortLabel: `K${i + 1}`, fullLabel: `K${i + 1}: ${s.name}` }))} layout="vertical" margin={{ top: 5, right: 30, left: 30, bottom: 5 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#E2E8F0" />
+                                        <XAxis type="number" domain={[0, 100]} unit=" %" />
+                                        <YAxis dataKey="shortLabel" type="category" width={40} interval={0} tick={{ fontSize: 11, fill: '#1e293b', fontWeight: 600 }} />
+                                        <RechartsTooltip
+                                            content={({ active, payload }) => {
+                                                if (active && payload && payload.length) {
+                                                    const pData = payload[0].payload;
+                                                    return (
+                                                        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-md max-w-[250px] z-50">
+                                                            <p className="font-semibold text-slate-800 text-sm mb-1 break-words">{pData.fullLabel}</p>
+                                                            <p className="text-[#002855] font-medium text-sm">Splnilo: {pData.success_rate} %</p>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            }}
+                                            cursor={{ fill: '#F1F5F9' }}
+                                        />
+                                        <Bar
+                                            dataKey="success_rate"
+                                            radius={[0, 4, 4, 0]}
+                                            barSize={20}
+                                            onClick={(barData) => {
+                                                // barData contains the payload for this specific bar.
+                                                // we must use original un-truncated name 'full_name' for dict lookup
+                                                const identifier = (barData as any).full_name;
+                                                setSelectedCriterion(identifier === selectedCriterion ? null : identifier);
+                                            }}
+                                            cursor="pointer"
+                                        >
+                                            {data.stats.slice(0, 25).map((entry, index) => {
+                                                const isActive = selectedCriterion === null || selectedCriterion === entry.full_name;
+                                                const baseColor = entry.success_rate < 50 ? '#ef4444' : entry.success_rate < 80 ? '#f59e0b' : '#10b981';
 
-                            <div className="space-y-4 text-slate-200 text-sm leading-relaxed max-w-4xl bg-white/5 p-5 rounded-lg border border-white/10 whitespace-pre-wrap font-serif">
-                                {data.ai_insight}
+                                                return <Cell key={`cell-${index}`} fill={baseColor} opacity={isActive ? 1 : 0.3} />;
+                                            })}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
                             </div>
                         </div>
+
+                        {/* Dynamic Roster section */}
+                        {selectedCriterion && (
+                            <div className="col-span-1 bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col mt-2">
+                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+                                    <h4 className="font-semibold text-[#002855] flex items-center gap-2">
+                                        <AlertCircle className="w-5 h-5 text-[#f59e0b]" />
+                                        Neúspěšní studenti v kritériu: <span className="text-slate-600 font-normal truncate max-w-sm ml-1" title={selectedCriterion}>{selectedCriterion}</span>
+                                    </h4>
+                                    <button onClick={() => setSelectedCriterion(null)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors" title="Zavřít filtr">
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
+
+                                {data.criterion_failures && data.criterion_failures[selectedCriterion] && data.criterion_failures[selectedCriterion].length > 0 ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2">
+                                        {data.criterion_failures[selectedCriterion].map((student, idx) => (
+                                            <div key={idx} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between">
+                                                <div>
+                                                    <h5 className="font-semibold text-slate-800 mb-1">{student.name}</h5>
+                                                    <p className="text-sm text-slate-500 line-clamp-2 italic" title={student.oduvodneni}>
+                                                        "{student.oduvodneni || 'Zdůvodnění chybí'}"
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handlePreviewStudent(student.id)}
+                                                    className="mt-3 flex items-center justify-center gap-1.5 w-full py-1.5 text-sm font-medium text-[#002855] bg-blue-50 border border-blue-100 rounded-md hover:bg-[#002855] hover:text-white transition-colors"
+                                                >
+                                                    Rychlý náhled <ExternalLink className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center py-8 text-slate-400">
+                                        <CheckCircle2 className="w-10 h-10 text-emerald-400 mb-2 opacity-50" />
+                                        <p>V tomto kritériu uspěli všichni studenti.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* AI Recommendations */}
+                    <div className="bg-gradient-to-br from-[#002855] to-[#001a38] rounded-xl p-6 text-white shadow-md relative overflow-hidden mb-6">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-[#D4AF37] rounded-full mix-blend-multiply filter blur-3xl opacity-20 translate-x-1/2 -translate-y-1/2"></div>
+                        <div className="relative z-10 flex items-center gap-2 mb-2 text-[#D4AF37]">
+                            <Wand2 className="w-6 h-6" />
+                            <h4 className="font-semibold text-lg">Pedagogické shrnutí od AI Asistenta</h4>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {data.ai_insight.split('### ').filter(s => s.trim().length > 0).map((section, idx) => {
+                            const lines = section.split('\n');
+                            const title = lines[0].trim().replace(/\*\*/g, ''); // Ensure title is not double-bolded
+                            const content = lines.slice(1).join('\n').trim();
+                            return (
+                                <div key={idx} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col hover:shadow-md transition-shadow">
+                                    <h5 className="font-bold text-slate-900 mb-4 text-lg border-b border-slate-100 pb-3">{title}</h5>
+                                    <div className="text-slate-700 text-[14px] leading-relaxed flex-1 font-sans">
+                                        <ReactMarkdown
+                                            components={{
+                                                p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
+                                                strong: ({ node, ...props }) => <strong className="font-bold text-slate-900" {...props} />,
+                                                ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
+                                                li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                                ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />
+                                            }}
+                                        >
+                                            {content}
+                                        </ReactMarkdown>
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </>
             ) : null}
+
+            {/* Quick Preview Modal */}
+            {previewStudentId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                    <div className="bg-white max-w-2xl w-full max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+                            <div>
+                                <h3 className="text-lg font-bold text-[#002855]">
+                                    {previewStudentData?.name || 'Načítání...'}
+                                </h3>
+                                {previewStudentData && (
+                                    <p className="text-sm text-slate-500">
+                                        Skóre: <span className="font-semibold text-slate-700">{previewStudentData.score} / 25 bodů</span>
+                                    </p>
+                                )}
+                            </div>
+                            <button onClick={() => { setPreviewStudentId(null); setPreviewStudentData(null); }} className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 bg-white">
+                            {previewLoading ? (
+                                <div className="flex flex-col items-center justify-center py-12">
+                                    <RefreshCw className="w-8 h-8 text-blue-500 animate-spin mb-4" />
+                                    <p className="text-slate-500">Načítám detail studenta...</p>
+                                </div>
+                            ) : previewStudentData ? (
+                                <div className="space-y-6">
+                                    <div>
+                                        <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2 border-b pb-2">
+                                            <Wand2 className="w-5 h-5 text-blue-600" />
+                                            Zpětná vazba AI
+                                        </h4>
+                                        <div className="text-slate-700 text-sm leading-relaxed bg-slate-50 p-4 rounded-lg border border-slate-100 font-sans">
+                                            <ReactMarkdown
+                                                components={{
+                                                    strong: ({ node, ...props }) => <strong className="font-bold text-slate-900" {...props} />,
+                                                }}
+                                            >
+                                                {previewStudentData.zpetna_vazba}
+                                            </ReactMarkdown>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2 border-b pb-2">
+                                            <AlertTriangle className="w-5 h-5 text-amber-500" />
+                                            Nesplněná kritéria
+                                        </h4>
+                                        <div className="space-y-2">
+                                            {previewStudentData.vysledky.filter((v: any) => !v.splneno).length > 0 ? (
+                                                previewStudentData.vysledky.filter((v: any) => !v.splneno).map((v: any, i: number) => (
+                                                    <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm">
+                                                        <p className="font-semibold text-red-800 mb-1">{v.nazev}</p>
+                                                        <p className="text-red-600">{v.oduvodneni}</p>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <p className="text-emerald-600 font-medium">Student splnil všechna kritéria.</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 text-slate-500">
+                                    Detail se nepodařilo načíst.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

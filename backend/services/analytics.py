@@ -1,13 +1,24 @@
 from sqlalchemy.orm import Session
 import json
-from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation
+from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, ClassAnalysis
 from services.llm_engine import chat_completion
 
-def generate_class_summary(class_id: int, db: Session) -> dict:
+def generate_class_summary_sync(class_id: int, db: Session) -> dict:
+    pass
+
+async def generate_class_summary(class_id: int, scenario_id: str, force: bool, db: Session) -> dict:
     """
     Agreguje data z hodnocení třídy, vypočítá statistiky pro frontend a zavolá 
     lokální vLLM pro vytvoření pedagogického shrnutí/insightu na základě Fáze 3 promptu.
     """
+    if not force:
+        cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == scenario_id).first()
+        if cached_analysis:
+            try:
+                return json.loads(cached_analysis.content_json)
+            except Exception:
+                pass
+                
     evaluations = db.query(StudentEvaluation).filter(StudentEvaluation.class_id == class_id).all()
     
     if not evaluations:
@@ -15,13 +26,17 @@ def generate_class_summary(class_id: int, db: Session) -> dict:
             "stats": [],
             "top_errors": [],
             "ai_insight": "Není dostatek dat pro analýzu. Zatím nebyla vyhodnocena žádná modelová situace.",
-            "score_distribution": {"0_50": 0, "51_80": 0, "81_100": 0}
+            "score_distribution": {"0_50": 0, "51_80": 0, "81_100": 0},
+            "average_score": 0,
+            "needs_help": [],
+            "criterion_failures": {}
         }
         
     # --- 1. Aggregation of frontend chart stats ---
     criteria_totals = {}
     criteria_counts = {}
     student_scores = []
+    criterion_failures = {}
     
     for eval_record in evaluations:
         try:
@@ -38,10 +53,17 @@ def generate_class_summary(class_id: int, db: Session) -> dict:
                 
                 if name not in criteria_totals:
                     criteria_totals[name] = {"short_name": short_name, "passes": 0, "total": 0, "total_pts": 0}
+                    criterion_failures[name] = []
                     
                 criteria_totals[name]["total"] += 1
                 if is_met:
                     criteria_totals[name]["passes"] += 1
+                else:
+                    criterion_failures[name].append({
+                        "id": eval_record.id,
+                        "name": eval_record.student_name.replace(',', ''),
+                        "oduvodneni": criteria.get("oduvodneni", "")
+                    })
                 criteria_totals[name]["total_pts"] += bod_award
                 
         except Exception:
@@ -71,6 +93,19 @@ def generate_class_summary(class_id: int, db: Session) -> dict:
     # We will compute percentage using the max score found or default 25
     max_score = max(student_scores) if student_scores and max(student_scores) > 0 else 25
     dist = {"0_50": 0, "51_80": 0, "81_100": 0}
+    needs_help = []
+    
+    # Needs help threshold = < 50%
+    for eval_record in evaluations:
+        try:
+            data = json.loads(eval_record.json_result)
+            total = data.get("celkove_skore", 0)
+            percent = (total / max_score) * 100
+            if percent < 50:
+                needs_help.append(eval_record.student_name.replace(',', ''))
+        except Exception:
+            pass
+
     for score in student_scores:
         percent = (score / max_score) * 100
         if percent <= 50:
@@ -81,10 +116,16 @@ def generate_class_summary(class_id: int, db: Session) -> dict:
             dist["81_100"] += 1
 
     # --- 2. Request AI Insight via vLLM ---
+    # Overall class average score
+    average_score = round(sum(student_scores) / len(student_scores), 1) if student_scores else 0
+
     # Fetch phase 3 prompt
     prompt_record = db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt3").first()
-    system_prompt = prompt_record.content if prompt_record else "Jsi analytik ÚZ. Zhodnoť trendy třídy."
+    db_system_prompt = prompt_record.content if prompt_record else "Jsi analytik ÚZ. Zhodnoť trendy třídy."
     temperature = prompt_record.temperature if prompt_record else 0.7
+    
+    # Přidání tvrdých formátovacích pravidel proti markdown tabulkám a pro vizuální oddělení
+    system_prompt = f"{db_system_prompt}\n\nDŮLEŽITÉ POKYNY K FORMÁTOVÁNÍ:\n1. NIKDY nepoužívej Markdown tabulky (v PDF se rozpadají).\n2. Strukturu tvoř výhradně pomocí nadpisů třetí úrovně (### Celkové zhodnocení, ### Nejčastější chyby, ### Pedagogická doporučení), tučného písma (**text**) a standardních odrážek (- text). Každou logickou sekci MUSÍ oddělovat nadpis ###."
     
     # Fetch criteria for MS2 to give the LLM exact context
     criteria_record = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == "MS2").first()
@@ -103,7 +144,8 @@ def generate_class_summary(class_id: int, db: Session) -> dict:
     ]
     
     try:
-        ai_insight = chat_completion(
+        from services.llm_engine import chat_completion
+        ai_insight = await chat_completion(
             messages=messages,
             system_prompt=system_prompt,
             temperature=temperature,
@@ -113,9 +155,25 @@ def generate_class_summary(class_id: int, db: Session) -> dict:
         print(f"Failed to generate insight: {e}")
         ai_insight = "Nepodařilo se spojit s asistentem pro vygenerování analýzy. Zkontrolujte připojení k vLLM."
 
-    return {
+    res = {
+        "scenario_id": str(scenario_id),
         "stats": stats,
         "top_errors": top_errors,
         "ai_insight": ai_insight,
-        "score_distribution": dist
+        "score_distribution": dist,
+        "average_score": average_score,
+        "needs_help": needs_help,
+        "criterion_failures": criterion_failures
     }
+
+    import datetime
+    cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == scenario_id).first()
+    if not cached_analysis:
+        cached_analysis = ClassAnalysis(scenario_id=scenario_id)
+        db.add(cached_analysis)
+    
+    cached_analysis.content_json = json.dumps(res, ensure_ascii=False)
+    cached_analysis.created_at = datetime.datetime.now().isoformat()
+    db.commit()
+
+    return res

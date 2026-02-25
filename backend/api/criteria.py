@@ -114,9 +114,7 @@ def save_criteria(request: SaveCriteriaRequest, db: Session = Depends(get_db), c
     parsed_items = parse_criteria_markdown(request.markdown_content)
     print(f">>> PARSER: Identifikováno {len(parsed_items)} samostatných kritérií z textu.")
     
-    # DEBUG VÝPIS: První 3 nalezená kritéria
-    for i, item in enumerate(parsed_items[:3]):
-        print(f">>> DEBUG NÁZEV {i+1}: {item['nazev']}")
+
     
     if criteria_record:
         criteria_record.markdown_content = request.markdown_content

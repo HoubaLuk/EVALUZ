@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 import json
 
 from core.database import get_db
-from models.db_models import StudentEvaluation, Lecturer
+from models.db_models import StudentEvaluation, Lecturer, ClassAnalysis
 from models.evaluation import EvaluationResponse
 from services.analytics import generate_class_summary
 from api.auth import get_current_lecturer
@@ -42,13 +42,13 @@ def get_class_evaluations(class_id: int, db: Session = Depends(get_db), current_
     return results
 
 @router.get("/class/{class_id}/summary")
-def get_class_summary(class_id: int, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+async def get_class_summary(class_id: int, scenario_id: str = "default", force: bool = False, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """
     Computes aggregated stats from student evaluations and requests
     an AI pedagogical insight from the vLLM engine based on Phase 3 prompt
-    and context.
+    and context. Checks db for cached analysis first unless forced.
     """
-    return generate_class_summary(class_id, db, current_user.id)
+    return await generate_class_summary(class_id, scenario_id, force, db)
 
 @router.delete("/evaluation/{evaluation_id}")
 def delete_evaluation(evaluation_id: int, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
@@ -65,3 +65,12 @@ def delete_evaluation(evaluation_id: int, db: Session = Depends(get_db), current
     db.delete(eval_record)
     db.commit()
     return {"status": "success", "message": "Záznam byl smazán."}
+
+@router.get("/class/{class_id}/status")
+def get_class_analysis_status(class_id: int, db: Session = Depends(get_db)):
+    """
+    Vrátí seznam scenario_id, pro které již existuje uložená globální analýza.
+    Slouží pro UI (zlatá fajfka ve Stepperu), aniž by se musela tahat/generovat velká data.
+    """
+    analyses = db.query(ClassAnalysis.scenario_id).all()
+    return [a[0] for a in analyses]
