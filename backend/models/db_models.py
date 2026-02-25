@@ -57,3 +57,10 @@ class AppSettings(Base):
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String, unique=True, index=True)
     value = Column(String)
+
+class ClassAnalysis(Base):
+    __tablename__ = "class_analyses"
+    id = Column(Integer, primary_key=True, index=True)
+    scenario_id = Column(String, index=True, unique=True)
+    content_json = Column(Text)
+    created_at = Column(String)

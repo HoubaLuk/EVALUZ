@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Folder, ChevronDown, MoreVertical, FileText, Edit2, Trash2, Copy } from 'lucide-react';
+import { Folder, ChevronDown, MoreVertical, FileText, Edit2, Trash2, Copy, ChevronLeft, ChevronRight } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 import { ClassData } from '../types';
@@ -21,12 +21,11 @@ type EditMode =
 
 export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, onSelectScenario }: SidebarProps) {
     React.useEffect(() => {
-        console.log("SIDEBAR MOUNTED");
-        return () => console.log("SIDEBAR UNMOUNTED");
     }, []);
 
     const [editMode, setEditMode] = React.useState<EditMode>(null);
     const [editValue, setEditValue] = React.useState('');
+    const [isCollapsed, setIsCollapsed] = useState(false);
 
     const saveClasses = React.useCallback((newClasses: ClassData[]) => {
         setClasses(newClasses);
@@ -95,14 +94,12 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
     }, [classes, saveClasses]);
 
     const deleteClass = React.useCallback((id: string, name: string) => {
-        console.log("Otevírám dialog pro: Smazat třídu", name);
         if (window.confirm(`Opravdu chcete smazat třídu "${name}" i se všemi modelovými situacemi?`)) {
             saveClasses(classes.filter(c => c.id !== id));
         }
     }, [classes, saveClasses]);
 
     const duplicateScenario = React.useCallback((classId: string, scenId: string) => {
-        console.log("Provádím akci: Duplikovat situaci ID:", scenId);
         saveClasses(classes.map(c => {
             if (c.id === classId) {
                 const target = c.scenarios.find(s => s.id === scenId);
@@ -118,7 +115,6 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
     }, [classes, saveClasses]);
 
     const deleteScenario = React.useCallback((classId: string, scenId: string, name: string) => {
-        console.log("Otevírám dialog pro: Smazat situaci", name);
         if (window.confirm(`Opravdu chcete smazat modelovou situaci "${name}"?`)) {
             saveClasses(classes.map(c => c.id === classId ? {
                 ...c,
@@ -128,44 +124,71 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
     }, [classes, saveClasses]);
 
     return (
-        <aside className="w-72 bg-white border-r border-slate-200 flex flex-col shadow-sm z-0">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Pracovní prostor</h2>
+        <aside className={`bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 transition-all duration-300 relative ${isCollapsed ? 'w-[68px]' : 'w-72'}`}>
+            <button
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className="absolute -right-3 top-4 bg-white border border-slate-200 rounded-full p-1 text-slate-400 hover:text-[#002855] hover:border-[#002855] transition-colors z-20 shadow-sm"
+            >
+                {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+            <div className={`p-4 border-b border-slate-100 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+                {!isCollapsed && <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Pracovní prostor</h2>}
             </div>
             <div className="p-4 border-b border-slate-100">
-                {editMode?.type === 'new_class' ? (
-                    <input
-                        autoFocus
-                        value={editValue}
-                        onChange={e => setEditValue(e.target.value)}
-                        onKeyDown={handleInputKeyDown}
-                        onBlur={handleSaveEdit}
-                        placeholder="Název třídy (Enter pro uložení)"
-                        className="w-full px-3 py-1.5 border border-[#002855]/30 rounded-md text-sm outline-none focus:border-[#002855] focus:ring-1 focus:ring-[#002855]"
-                    />
+                {!isCollapsed ? (
+                    editMode?.type === 'new_class' ? (
+                        <input
+                            autoFocus
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            onKeyDown={handleInputKeyDown}
+                            onBlur={handleSaveEdit}
+                            placeholder="Název třídy (Enter pro uložení)"
+                            className="w-full px-3 py-1.5 border border-[#002855]/30 rounded-md text-sm outline-none focus:border-[#002855] focus:ring-1 focus:ring-[#002855]"
+                        />
+                    ) : (
+                        <button
+                            onClick={(e) => startEdit(e, { type: 'new_class' })}
+                            className="w-full flex items-center justify-center gap-2 py-2 border-2 border-[#002855] text-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors text-sm font-semibold whitespace-nowrap"
+                        >
+                            <Folder className="w-4 h-4" />
+                            + Nová třída
+                        </button>
+                    )
                 ) : (
                     <button
-                        onClick={(e) => startEdit(e, { type: 'new_class' })}
-                        className="w-full flex items-center justify-center gap-2 py-2 border-2 border-[#002855] text-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors text-sm font-semibold"
+                        onClick={() => setIsCollapsed(false)}
+                        className="w-full flex items-center justify-center p-2 text-[#002855] border-2 border-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors"
+                        title="Přidat třídu"
                     >
-                        <Folder className="w-4 h-4" />
-                        + Nová třída
+                        <Folder className="w-5 h-5" />
                     </button>
                 )}
             </div>
-            <div className="p-4 flex-1 overflow-y-auto">
+            <div className="p-4 flex-1 overflow-y-auto overflow-x-hidden">
                 <div className="space-y-4">
                     {classes.map(cls => (
                         <div key={cls.id} className="space-y-1">
                             {/* Class Folder */}
-                            <div className="relative group/class flex items-center justify-between px-2 py-1.5 text-slate-700 hover:bg-slate-50 rounded-md transition-colors">
+                            <div
+                                className={`relative group/class flex items-center px-2 py-1.5 text-slate-700 hover:bg-slate-50 rounded-md transition-colors ${isCollapsed ? 'justify-center' : 'justify-between'}`}
+                                title={isCollapsed ? cls.name : undefined}
+                            >
                                 <div
-                                    className="flex items-center gap-2 cursor-pointer flex-1"
-                                    onClick={(e) => toggleClassExpansion(cls.id, e)}
+                                    className={`flex items-center gap-2 cursor-pointer ${isCollapsed ? '' : 'flex-1'}`}
+                                    onClick={(e) => {
+                                        if (isCollapsed) {
+                                            setIsCollapsed(false);
+                                            // Automatically expand this class when opening sidebar via folder click
+                                            if (!cls.expanded) toggleClassExpansion(cls.id, e);
+                                        } else {
+                                            toggleClassExpansion(cls.id, e);
+                                        }
+                                    }}
                                 >
-                                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${cls.expanded ? '' : '-rotate-90'}`} />
-                                    <Folder className="w-4 h-4 text-[#D4AF37]" />
-                                    {editMode?.type === 'rename_class' && editMode.classId === cls.id ? (
+                                    {!isCollapsed && <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${cls.expanded ? '' : '-rotate-90'}`} />}
+                                    <Folder className="w-4 h-4 text-[#D4AF37] flex-shrink-0" />
+                                    {!isCollapsed && (editMode?.type === 'rename_class' && editMode.classId === cls.id ? (
                                         <input
                                             autoFocus
                                             value={editValue}
@@ -176,52 +199,54 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                                             className="font-medium text-sm bg-transparent border-b border-[#002855] outline-none flex-1 max-w-[140px]"
                                         />
                                     ) : (
-                                        <span className="font-medium text-sm">{cls.name}</span>
-                                    )}
+                                        <span className="font-medium text-sm truncate max-w-[160px]">{cls.name}</span>
+                                    ))}
                                 </div>
-                                <div className="relative">
-                                    <DropdownMenu.Root>
-                                        <DropdownMenu.Trigger asChild>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                }}
-                                                className="opacity-0 group-hover/class:opacity-100 p-1 text-slate-400 hover:text-[#002855] transition-all rounded-md hover:bg-slate-200 focus:opacity-100 outline-none data-[state=open]:opacity-100 data-[state=open]:bg-slate-200"
-                                                title="Možnosti třídy"
-                                            >
-                                                <MoreVertical className="w-3.5 h-3.5" />
-                                            </button>
-                                        </DropdownMenu.Trigger>
+                                {!isCollapsed && (
+                                    <div className="relative">
+                                        <DropdownMenu.Root>
+                                            <DropdownMenu.Trigger asChild>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                    }}
+                                                    className="opacity-0 group-hover/class:opacity-100 p-1 text-slate-400 hover:text-[#002855] transition-all rounded-md hover:bg-slate-200 focus:opacity-100 outline-none data-[state=open]:opacity-100 data-[state=open]:bg-slate-200"
+                                                    title="Možnosti třídy"
+                                                >
+                                                    <MoreVertical className="w-3.5 h-3.5" />
+                                                </button>
+                                            </DropdownMenu.Trigger>
 
-                                        <DropdownMenu.Portal>
-                                            <DropdownMenu.Content
-                                                onCloseAutoFocus={(e) => e.preventDefault()}
-                                                className="w-44 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-50 animate-in fade-in-80 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2"
-                                                sideOffset={5}
-                                                align="end"
-                                            >
-                                                <DropdownMenu.Item
-                                                    onSelect={(e) => startEdit(undefined, { type: 'rename_class', classId: cls.id, currentName: cls.name }, cls.name)}
-                                                    className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer outline-none data-[highlighted]:bg-slate-50"
+                                            <DropdownMenu.Portal>
+                                                <DropdownMenu.Content
+                                                    onCloseAutoFocus={(e) => e.preventDefault()}
+                                                    className="w-44 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-50 animate-in fade-in-80 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2"
+                                                    sideOffset={5}
+                                                    align="end"
                                                 >
-                                                    <Edit2 className="w-4 h-4 text-slate-400" /> Přejmenovat
-                                                </DropdownMenu.Item>
-                                                <DropdownMenu.Separator className="h-px bg-slate-100 my-1" />
-                                                <DropdownMenu.Item
-                                                    onSelect={() => deleteClass(cls.id, cls.name)}
-                                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
-                                                >
-                                                    <Trash2 className="w-4 h-4 text-red-500" /> Smazat třídu
-                                                </DropdownMenu.Item>
-                                            </DropdownMenu.Content>
-                                        </DropdownMenu.Portal>
-                                    </DropdownMenu.Root>
-                                </div>
+                                                    <DropdownMenu.Item
+                                                        onSelect={(e) => startEdit(undefined, { type: 'rename_class', classId: cls.id, currentName: cls.name }, cls.name)}
+                                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer outline-none data-[highlighted]:bg-slate-50"
+                                                    >
+                                                        <Edit2 className="w-4 h-4 text-slate-400" /> Přejmenovat
+                                                    </DropdownMenu.Item>
+                                                    <DropdownMenu.Separator className="h-px bg-slate-100 my-1" />
+                                                    <DropdownMenu.Item
+                                                        onSelect={() => deleteClass(cls.id, cls.name)}
+                                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 text-red-500" /> Smazat třídu
+                                                    </DropdownMenu.Item>
+                                                </DropdownMenu.Content>
+                                            </DropdownMenu.Portal>
+                                        </DropdownMenu.Root>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Scenarios */}
-                            {cls.expanded && (
+                            {!isCollapsed && cls.expanded && (
                                 <div className="pl-6 space-y-1">
                                     {cls.scenarios.map(scen => {
                                         const isSelected = scen.id === activeScenarioId;

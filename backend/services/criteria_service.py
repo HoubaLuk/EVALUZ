@@ -28,7 +28,8 @@ def parse_criteria_markdown(markdown_text: str) -> list:
             
         # Extrakce názvu
         # Vezmeme úplně první řádek bloku, odstraníme hvězdičky a pak ořízneme začátek
-        first_line = block.split('\n')[0].replace('*', '').strip()
+        lines = block.split('\n')
+        first_line = lines[0].replace('*', '').strip()
         nazev = re.sub(r'^\d+\.\s*(Kritérium)?\s*:?\s*', '', first_line).strip()
         if not nazev:
             nazev = "Neznámé kritérium"
@@ -45,8 +46,11 @@ def parse_criteria_markdown(markdown_text: str) -> list:
                 except:
                     pass
         
-        # Popis je zbytek textu
-        popis = block.strip()
+        # Popis je zbytek textu, abychom zbytečně neduplikovali název
+        popis = '\n'.join(lines[1:]).strip()
+        if not popis:
+            popis = nazev
+
         
         results.append({
             "nazev": nazev,

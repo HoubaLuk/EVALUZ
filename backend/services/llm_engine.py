@@ -1,11 +1,11 @@
 import json
 import httpx
-from openai import OpenAI
+from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from core.config import settings
 from models.db_models import AppSettings
 
-def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session) -> dict:
+async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, student_log_prefix: str = "") -> dict:
     """
     Evaluates a police report against criteria using a local vLLM model dynamically configured from DB.
     """
@@ -25,14 +25,15 @@ def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
         api_url = "https://openrouter.ai/api/v1"
 
-    print(f">>> LLM volání směřuje na: {api_url} s modelem: {model_name}")
+    prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
+    print(f"{prefix}LLM volání směřuje na: {api_url} s modelem: {model_name}")
 
     # Initialize OpenAI client dynamically per request to ensure latest URL is used
-    client = OpenAI(
+    client = AsyncOpenAI(
         base_url=api_url,
         api_key=api_key or "sk-no-key-required",
         default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
-        http_client=httpx.Client(timeout=300.0)
+        http_client=httpx.AsyncClient(timeout=300.0)
     )
     
     strict_system_prompt = system_prompt
@@ -65,24 +66,24 @@ def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str
     NEPIŠ ŽÁDNÝ JINÝ TEXT OKOLO, ŽÁDNÉ VYSVĚTLIVKY ANI MARKDOWN BLOKY (např. ```json).
     """
 
-    print(f">>> FINAL PROMPT TO LLM:\n{user_prompt}\n<<< END OF PROMPT")
+    # print(f"{prefix}FINAL PROMPT TO LLM:\n{user_prompt}\n<<< END OF PROMPT")
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model_name,
             messages=[
                 {"role": "system", "content": strict_system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.1, # Low temperature for analytical consistency
-            max_tokens=16000,
+            max_tokens=16384,
             # If the vLLM supports JSON mode formatting, we can try to force it, otherwise prompt engineering handles it
             response_format={"type": "json_object"} 
         )
         
         # Extract the raw text response
         raw_response = response.choices[0].message.content.strip()
-        print(f"--- DEBUG: RAW LLM RESPONSE ---\n{raw_response}\n-------------------------------")
+
         
         import re
         # Odstraníme myšlenkové bloky z uvažujících modelů (qwen, deepseek, mistral)
@@ -99,14 +100,13 @@ def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str
         return json.loads(clean_response)
         
     except json.JSONDecodeError as e:
-        print(f"Failed to parse LLM response as JSON: {e}\nRaw Response: {raw_response}")
+        print(f"{prefix}Failed to parse LLM response as JSON: {e}\nRaw Response: {raw_response}")
         raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
     except Exception as e:
-        print(f"Error communicating with vLLM at {api_url}: {e}")
+        print(f"{prefix}Error communicating with vLLM at {api_url}: {e}")
         raise
 
-
-def chat_completion(messages: list, system_prompt: str, temperature: float, db: Session) -> str:
+async def chat_completion(messages: list, system_prompt: str, temperature: float, db: Session) -> str:
     """
     Sends a chat history to the local vLLM model.
     """
@@ -126,11 +126,11 @@ def chat_completion(messages: list, system_prompt: str, temperature: float, db: 
 
     print(f">>> LLM volání směřuje na: {api_url} s modelem: {model_name}")
 
-    client = OpenAI(
+    client = AsyncOpenAI(
         base_url=api_url,
         api_key=api_key or "sk-no-key-required",
         default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
-        http_client=httpx.Client(timeout=300.0)
+        http_client=httpx.AsyncClient(timeout=300.0)
     )
 
     formatted_messages = [{"role": "system", "content": system_prompt}]
@@ -140,11 +140,11 @@ def chat_completion(messages: list, system_prompt: str, temperature: float, db: 
         formatted_messages.append({"role": msg.get("role"), "content": msg.get("content")})
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model_name,
             messages=formatted_messages,
             temperature=temperature,
-            max_tokens=16000
+            max_tokens=16384
         )
         return response.choices[0].message.content.strip()
     except Exception as e:

@@ -41,36 +41,47 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
     const [evaluationProgress, setEvaluationProgress] = useState(0);
     const [files, setFiles] = useState<File[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const [isCancelling, setIsCancelling] = useState(false);
+    const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+    const fetchEvaluations = async () => {
+        try {
+            const res = await fetch('http://localhost:8000/api/v1/analytics/class/1', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+
+                const historyStudents: Student[] = data.map((evalRecord: any, index: number) => ({
+                    id: evalRecord.id || (10000 + index),
+                    name: evalRecord.jmeno_studenta,
+                    status: 'evaluated',
+                    score: evalRecord.celkove_skore,
+                    maxScore: 25,
+                    evaluationDetails: evalRecord.vysledky,
+                    zpetna_vazba: evalRecord.zpetna_vazba
+                }));
+
+                setStudents(current => {
+                    const pendingStudents = current.filter(s => s.status !== 'evaluated');
+                    const filteredPending = pendingStudents.filter(p => !historyStudents.some(h =>
+                        h.name.includes(p.name) || p.name.includes(h.name.replace('stržm. ', ''))
+                    ));
+                    return [...historyStudents, ...filteredPending];
+                });
+
+                if (historyStudents.length > 0 && !selectedStudent) {
+                    setSelectedStudent(historyStudents[0].id);
+                }
+            }
+        } catch (e) {
+            console.error("Nepodařilo se načíst historii evaluací", e);
+        }
+    };
 
     useEffect(() => {
-        const fetchHistory = async () => {
-            try {
-                const res = await fetch('http://localhost:8000/api/v1/analytics/class/1', {
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-
-                    const historyStudents: Student[] = data.map((evalRecord: any, index: number) => ({
-                        id: evalRecord.id || (10000 + index),
-                        name: evalRecord.jmeno_studenta,
-                        status: 'evaluated',
-                        score: evalRecord.celkove_skore,
-                        maxScore: 25,
-                        evaluationDetails: evalRecord.vysledky,
-                        zpetna_vazba: evalRecord.zpetna_vazba
-                    }));
-
-                    if (historyStudents.length > 0) {
-                        setStudents(historyStudents);
-                        setSelectedStudent(historyStudents[0].id);
-                    }
-                }
-            } catch (e) {
-                console.error("Nepodařilo se načíst historii evaluací", e);
-            }
-        };
-        fetchHistory();
+        fetchEvaluations();
     }, []);
 
     const toggleStudent = (id: number) => {
@@ -129,76 +140,101 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
             if (!scenarioId) alert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");
             return;
         }
+
+        // Setup AbortController
+        abortControllerRef.current = new AbortController();
         setIsEvaluating(true);
+        setIsCancelling(false);
         setEvaluationProgress(0);
 
         const idsToProcess = [...selectedIds];
-        let completedCount = 0;
+        const filesToUpload: File[] = [];
+        const studentIdsBeingProcessed: number[] = [];
+
+        // Najdeme pouze ty studenty, kteří ještě nejsou vyhodnoceni
+        for (const id of idsToProcess) {
+            const student = students.find(s => s.id === id);
+            if (!student || student.status === 'evaluated') continue;
+
+            const file = files.find(f => {
+                const cleanFileName = f.name.replace(/\.(docx|rtf|pdf)$/i, '').toLowerCase();
+                const studentNameLower = student.name.toLowerCase();
+                return cleanFileName.includes(studentNameLower) || studentNameLower.includes(cleanFileName) ||
+                    (cleanFileName.split('_').length >= 2 && studentNameLower.includes(cleanFileName.split('_')[0].toLowerCase()));
+            });
+
+            if (file) {
+                filesToUpload.push(file);
+                studentIdsBeingProcessed.push(id);
+            }
+        }
+
+        if (filesToUpload.length === 0) {
+            console.error(">>> Žádné soubory nebyly spárovány se zvolenými studenty!");
+            setIsEvaluating(false);
+            return;
+        }
+
+        // Hromadná aktualizace stavů na evaluating (aby React nespustil 20 překreslení zároveň)
+        setStudents(current => current.map(s =>
+            studentIdsBeingProcessed.includes(s.id) ? { ...s, status: 'evaluating' } : s
+        ));
+
+
+        const formData = new FormData();
+        filesToUpload.forEach(f => formData.append('files', f));
+        formData.append('scenario_id', scenarioId);
+
+
 
         try {
-            for (const id of idsToProcess) {
-                const student = students.find(s => s.id === id);
-                if (!student || student.status === 'evaluated') {
-                    completedCount++;
-                    setEvaluationProgress(Math.round((completedCount / idsToProcess.length) * 100));
-                    continue;
-                }
+            // Skutečná paralelizace - posíláme všechny soubory do backendu v jednom masivním batch dotazu
+            const response = await fetch('http://localhost:8000/api/v1/evaluate/batch', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+                body: formData,
+                signal: abortControllerRef.current.signal
+            });
 
-                // Update status to evaluating
-                setStudents(current => current.map(s => s.id === id ? { ...s, status: 'evaluating' } : s));
+            if (response.ok) {
+                // Po spěšném zápisu na backendu stačí jen překreslit tabulku čerstvými daty z DB
+                await fetchEvaluations();
 
-                // Find corresponding file. Correlation by index is shaky, matching clean name parts
-                const file = files.find(f => {
-                    const cleanFileName = f.name.replace(/\.(docx|rtf|pdf)$/i, '').toLowerCase();
-                    const studentNameLower = student.name.toLowerCase();
-                    return cleanFileName.includes(studentNameLower) || studentNameLower.includes(cleanFileName) ||
-                        (cleanFileName.split('_').length >= 2 && studentNameLower.includes(cleanFileName.split('_')[0].toLowerCase()));
-                });
-
-                if (!file) {
-                    console.warn(`File for student ${student.name} not found.`);
-                    setStudents(current => current.map(s => s.id === id ? { ...s, status: 'pending' } : s));
-                    completedCount++;
-                    setEvaluationProgress(Math.round((completedCount / idsToProcess.length) * 100));
-                    continue;
-                }
-
-                const formData = new FormData();
-                formData.append('files', file);
-                formData.append('scenario_id', scenarioId);
-
-                const response = await fetch('http://localhost:8000/api/v1/evaluate/batch', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
-                    body: formData,
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    const result = data.results[0]; // Since we send 1 file
-                    if (result) {
-                        setStudents(current => current.map(s => s.id === id ? {
-                            ...s,
-                            status: 'evaluated',
-                            score: result.celkove_skore,
-                            evaluationDetails: result.vysledky,
-                            zpetna_vazba: result.zpetna_vazba
-                        } : s));
-                    }
-                } else {
-                    console.error(`Evaluation failed for ${student.name}`);
-                    setStudents(current => current.map(s => s.id === id ? { ...s, status: 'pending' } : s));
-                }
-
-                completedCount++;
-                setEvaluationProgress(Math.round((completedCount / idsToProcess.length) * 100));
+                setToastMessage(`Vyhodnocení ${filesToUpload.length} studentů bylo úspěšně dokončeno a uloženo.`);
+                setTimeout(() => setToastMessage(null), 5000);
+                setEvaluationProgress(100);
+            } else {
+                console.error(`Batch evaluation failed with status: ${response.status}`);
+                throw new Error("Server error");
             }
-        } catch (error) {
-            console.error("Batch evaluation failed", error);
-            alert("Došlo k chybě při sekvenčním vyhodnocování.");
+
+        } catch (error: any) {
+            if (error.name === 'AbortError') {
+
+            } else {
+                console.error("Batch evaluation failed", error);
+                alert("Došlo k chybě při paralelním vyhodnocování. Server možná neodpovídá.");
+            }
+            // Vracíme na pending ty, které se nepodařilo zpracovat nebo byly zrušeny
+            setStudents(current => current.map(s => studentIdsBeingProcessed.includes(s.id) && s.status !== 'evaluated' ? { ...s, status: 'pending' } : s));
         } finally {
+            // Robustní obnova dat z backendu na závěr - pro jistotu
+            try {
+                await fetchEvaluations();
+            } catch (e) {
+                console.error("Failed to recover evaluation state from backend", e);
+            }
             setIsEvaluating(false);
-            setEvaluationProgress(0);
+            setIsCancelling(false);
+            abortControllerRef.current = null;
+            setTimeout(() => setEvaluationProgress(0), 2000); // Ukážeme 100% chvíli než to zmizne
+        }
+    };
+
+    const handleCancelEvaluation = () => {
+        if (abortControllerRef.current) {
+            setIsCancelling(true);
+            abortControllerRef.current.abort();
         }
     };
 
@@ -266,9 +302,20 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
     const activeStudentData = students.find(s => s.id === selectedStudent);
 
     return (
-        <div className="h-full flex flex-col gap-6 max-w-[1400px] mx-auto">
+        <div className="h-full flex flex-col gap-6 max-w-[1400px] mx-auto relative cursor-default">
+            {/* Global Success Toast Notifikace */}
+            {toastMessage && (
+                <div className="absolute top-0 right-1/2 translate-x-1/2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 z-50 animate-in fade-in slide-in-from-top-4">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <p className="font-semibold text-sm">{toastMessage}</p>
+                    <button onClick={() => setToastMessage(null)} className="p-1 hover:bg-emerald-100 rounded-md transition-colors ml-2">
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
             {/* Top Action Bar */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between mt-2">
                 <div className="flex items-center gap-4">
                     <input
                         type="file"
@@ -310,24 +357,39 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
                         </button>
                     )}
                 </div>
-                <button
-                    onClick={handleBatchEvaluate}
-                    disabled={isEvaluating || selectedIds.length === 0}
-                    className={`flex flex-col items-center justify-center px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md relative overflow-hidden min-w-[200px] ${isEvaluating || selectedIds.length === 0
-                        ? 'bg-slate-300 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028] hover:opacity-90'
-                        }`}
-                >
-                    <div className="flex items-center gap-2 relative z-10">
-                        {isEvaluating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                        <span>
-                            {isEvaluating ? 'Hromadně AI...' : 'Hromadně vyhodnotit (AI)'}
-                        </span>
-                    </div>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={handleBatchEvaluate}
+                        disabled={isEvaluating || selectedIds.length === 0}
+                        className={`flex flex-col items-center justify-center px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md relative overflow-hidden min-w-[200px] ${isEvaluating || selectedIds.length === 0
+                            ? 'bg-slate-300 cursor-not-allowed'
+                            : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028] hover:opacity-90'
+                            }`}
+                    >
+                        <div className="flex items-center gap-2 relative z-10">
+                            {isEvaluating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                            <span>
+                                {isEvaluating ? 'Hromadně AI...' : 'Hromadně vyhodnotit (AI)'}
+                            </span>
+                        </div>
+                        {isEvaluating && (
+                            <div className="absolute bottom-0 left-0 h-1 bg-white/30 transition-all duration-300" style={{ width: `${evaluationProgress}%` }}></div>
+                        )}
+                    </button>
                     {isEvaluating && (
-                        <div className="absolute bottom-0 left-0 h-1 bg-white/30 transition-all duration-300" style={{ width: `${evaluationProgress}%` }}></div>
+                        <button
+                            onClick={handleCancelEvaluation}
+                            disabled={isCancelling}
+                            className={`flex items-center gap-2 px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md h-[40px] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 ${isCancelling
+                                ? 'bg-rose-400 cursor-wait'
+                                : 'bg-rose-600 hover:bg-rose-700'
+                                }`}
+                        >
+                            <XCircle className="w-4 h-4" />
+                            {isCancelling ? 'Zastavuji...' : 'Zastavit'}
+                        </button>
                     )}
-                </button>
+                </div>
             </div>
 
             {/* Two-Column Layout */}
