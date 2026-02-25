@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 class CriterionResult(BaseModel):
     nazev: str
@@ -9,6 +9,7 @@ class CriterionResult(BaseModel):
     citace: str
 
 class EvaluationResponse(BaseModel):
+    id: Optional[int] = None
     jmeno_studenta: str
     vysledky: List[CriterionResult]
     celkove_skore: int

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
-from api import evaluate, admin, criteria, analytics, export
+from api import evaluate, admin, criteria, analytics, export, auth
 from core.database import init_db, get_db
 from core.seeder import seed_database
 
@@ -38,6 +38,7 @@ app.include_router(admin.router, prefix="/api/v1")
 app.include_router(criteria.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
 
 @app.get("/api/v1/health")
 def health_check():

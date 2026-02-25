@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, X, SlidersHorizontal, AlertCircle, Save, Loader2, CheckCircle2 } from 'lucide-react';
+import { Settings, X, SlidersHorizontal, AlertCircle, Save, Loader2, CheckCircle2, UserPen } from 'lucide-react';
 
 interface AdminModalProps {
     isOpen: boolean;
     onClose: () => void;
+    isSetupMode?: boolean;
+    onSetupComplete?: (token: string) => void;
 }
 
-export function AdminModal({ isOpen, onClose }: AdminModalProps) {
-    const [adminTab, setAdminTab] = useState<'prompt1' | 'prompt2' | 'prompt3' | 'vllm'>('prompt1');
+export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: AdminModalProps) {
+    const [adminTab, setAdminTab] = useState<'prompt1' | 'prompt2' | 'prompt3' | 'vllm' | 'profile'>(isSetupMode ? 'profile' : 'prompt1');
 
     // States for Prompts
     const [prompt1, setPrompt1] = useState('');
@@ -23,6 +25,19 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     const [vllmApiKey, setVllmApiKey] = useState('');
     const [isApiKeyFocused, setIsApiKeyFocused] = useState(false);
 
+    // Profile State
+    const [profile, setProfile] = useState({
+        title_before: '',
+        first_name: '',
+        last_name: '',
+        title_after: '',
+        rank_shortcut: '',
+        rank_full: '',
+        school_location: '',
+        email: '',
+        password: ''
+    });
+
     // UI states
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -30,16 +45,18 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     const [saveSuccess, setSaveSuccess] = useState(false);
 
     useEffect(() => {
-        if (isOpen) {
+        if (isOpen && !isSetupMode) {
             fetchAdminData();
         }
-    }, [isOpen]);
+    }, [isOpen, isSetupMode]);
 
     const fetchAdminData = async () => {
         setIsLoading(true);
         try {
             // Fetch Prompts
-            const promptRes = await fetch('http://localhost:8000/api/v1/admin/prompts');
+            const promptRes = await fetch('http://localhost:8000/api/v1/admin/prompts', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
             if (promptRes.ok) {
                 const promptsData = await promptRes.json();
                 promptsData.forEach((p: any) => {
@@ -50,7 +67,9 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
             }
 
             // Fetch Settings
-            const settingsRes = await fetch('http://localhost:8000/api/v1/admin/settings');
+            const settingsRes = await fetch('http://localhost:8000/api/v1/admin/settings', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
             if (settingsRes.ok) {
                 const settingsData = await settingsRes.json();
                 settingsData.forEach((s: any) => {
@@ -59,6 +78,25 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                     if (s.key === 'VLLM_API_KEY') setVllmApiKey(s.value);
                 });
             }
+
+            // Fetch Profile
+            const meRes = await fetch('http://localhost:8000/api/v1/auth/me', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
+            if (meRes.ok) {
+                const meData = await meRes.json();
+                setProfile({
+                    title_before: meData.title_before || '',
+                    first_name: meData.first_name || '',
+                    last_name: meData.last_name || '',
+                    title_after: meData.title_after || '',
+                    rank_shortcut: meData.rank_shortcut || '',
+                    rank_full: meData.rank_full || '',
+                    school_location: meData.school_location || '',
+                    email: meData.email || ''
+                });
+            }
+
         } catch (error) {
             console.error('Failed to fetch admin data:', error);
         } finally {
@@ -69,9 +107,12 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     const handleTestConnection = async () => {
         setIsTestingConnection(true);
         try {
-            const res = await fetch('http://localhost:8000/api/v1/admin/test-connection', {
+            const res = await fetch('http://localhost:8000/api/v1/admin/test-llm', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
                 body: JSON.stringify({
                     base_url: vllmUrl,
                     model_id: vllmModel,
@@ -96,26 +137,67 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
         setIsSaving(true);
         setSaveSuccess(false);
         try {
-            if (adminTab !== 'vllm') {
-                // Save Prompts
-                await fetch('http://localhost:8000/api/v1/admin/prompts', {
-                    method: 'PUT',
+            if (isSetupMode) {
+                const res = await fetch('http://localhost:8000/api/v1/auth/setup', {
+                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify([
-                        { phase_name: 'prompt1', content: prompt1, temperature: temp1 },
-                        { phase_name: 'prompt2', content: prompt2, temperature: temp2 },
-                        { phase_name: 'prompt3', content: prompt3, temperature: temp3 }
-                    ])
+                    body: JSON.stringify({
+                        email: profile.email,
+                        password: profile.password,
+                        first_name: profile.first_name,
+                        last_name: profile.last_name,
+                        title_before: profile.title_before,
+                        title_after: profile.title_after,
+                        rank_shortcut: profile.rank_shortcut,
+                        rank_full: profile.rank_full,
+                        school_location: profile.school_location
+                    })
                 });
-            } else {
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.detail || "Chyba při vytváření účtu");
+                }
+                const data = await res.json();
+                if (onSetupComplete) onSetupComplete(data.access_token);
+                return;
+            }
+
+            if (adminTab === 'vllm') {
                 // Save Settings
                 await fetch('http://localhost:8000/api/v1/admin/settings', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                    },
                     body: JSON.stringify([
                         { key: 'VLLM_API_URL', value: vllmUrl },
                         { key: 'VLLM_MODEL_NAME', value: vllmModel },
                         { key: 'VLLM_API_KEY', value: vllmApiKey }
+                    ])
+                });
+            } else if (adminTab === 'profile') {
+                // Save Profile
+                await fetch('http://localhost:8000/api/v1/auth/me', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                    },
+                    body: JSON.stringify(profile)
+                });
+            } else {
+                // Save Prompts
+                await fetch('http://localhost:8000/api/v1/admin/prompts', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                    },
+                    body: JSON.stringify([
+                        { phase_name: 'prompt1', content: prompt1, temperature: temp1 },
+                        { phase_name: 'prompt2', content: prompt2, temperature: temp2 },
+                        { phase_name: 'prompt3', content: prompt3, temperature: temp3 }
                     ])
                 });
             }
@@ -144,67 +226,151 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                 <div className="px-6 py-4 bg-[#002855] text-white flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <Settings className="w-5 h-5 text-[#D4AF37]" />
-                        <h2 className="text-lg font-semibold tracking-wide">Administrace systému & Prompt Engineering</h2>
+                        <h2 className="text-lg font-semibold tracking-wide">
+                            {isSetupMode ? "První spuštění: Vytvoření hlavního lektorského účtu" : "Administrace systému & Prompt Engineering"}
+                        </h2>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
+                    {!isSetupMode && (
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    )}
                 </div>
 
                 {/* Modal Body */}
                 <div className="flex-1 flex overflow-hidden relative">
                     {/* Modal Sidebar */}
-                    <div className="w-64 bg-slate-50 border-r border-slate-200 p-4 flex flex-col gap-1">
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">Kategorie promptů</h3>
-                        <button
-                            onClick={() => setAdminTab('prompt1')}
-                            className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt1'
-                                ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
-                                : 'text-slate-600 hover:bg-slate-100'
-                                }`}
-                        >
-                            Fáze 1: Precizace kritérií
-                        </button>
-                        <button
-                            onClick={() => setAdminTab('prompt2')}
-                            className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt2'
-                                ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
-                                : 'text-slate-600 hover:bg-slate-100'
-                                }`}
-                        >
-                            Fáze 2: Evaluace ÚZ (JSON)
-                        </button>
-                        <button
-                            onClick={() => setAdminTab('prompt3')}
-                            className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt3'
-                                ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
-                                : 'text-slate-600 hover:bg-slate-100'
-                                }`}
-                        >
-                            Fáze 3: Globální analýza
-                        </button>
-                        <div className="my-2 border-t border-slate-200"></div>
-                        <button
-                            onClick={() => setAdminTab('vllm')}
-                            className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${adminTab === 'vllm'
-                                ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
-                                : 'text-slate-600 hover:bg-slate-100'
-                                }`}
-                        >
-                            <SlidersHorizontal className="w-4 h-4" />
-                            Napojení na vLLM (API)
-                        </button>
-                    </div>
+                    {!isSetupMode && (
+                        <div className="w-64 bg-slate-50 border-r border-slate-200 p-4 flex flex-col gap-1">
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">Kategorie promptů</h3>
+                            <button
+                                onClick={() => setAdminTab('prompt1')}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt1'
+                                    ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
+                                    : 'text-slate-600 hover:bg-slate-100'
+                                    }`}
+                            >
+                                Fáze 1: Precizace kritérií
+                            </button>
+                            <button
+                                onClick={() => setAdminTab('prompt2')}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt2'
+                                    ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
+                                    : 'text-slate-600 hover:bg-slate-100'
+                                    }`}
+                            >
+                                Fáze 2: Evaluace ÚZ (JSON)
+                            </button>
+                            <button
+                                onClick={() => setAdminTab('prompt3')}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt3'
+                                    ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
+                                    : 'text-slate-600 hover:bg-slate-100'
+                                    }`}
+                            >
+                                Fáze 3: Globální analýza
+                            </button>
+                            <div className="my-2 border-t border-slate-200"></div>
+                            <button
+                                onClick={() => setAdminTab('vllm')}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${adminTab === 'vllm'
+                                    ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
+                                    : 'text-slate-600 hover:bg-slate-100'
+                                    }`}
+                            >
+                                <SlidersHorizontal className="w-4 h-4" />
+                                Napojení na vLLM (API)
+                            </button>
+
+                            <div className="my-2 border-t border-slate-200"></div>
+
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 mt-2">Uživatelský účet</h3>
+                            <button
+                                onClick={() => setAdminTab('profile')}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${adminTab === 'profile'
+                                    ? 'bg-[#002855]/10 text-[#002855] font-semibold border-l-4 border-[#002855]'
+                                    : 'text-slate-600 hover:bg-slate-100'
+                                    }`}
+                            >
+                                <UserPen className="w-4 h-4" />
+                                Profil a podpisová doložka
+                            </button>
+                        </div>
+                    )}
 
                     {/* Modal Content */}
                     <div className="flex-1 p-6 flex flex-col bg-white overflow-hidden">
                         {isLoading ? (
                             <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
                                 <Loader2 className="w-8 h-8 animate-spin mb-4" />
-                                <p>Načítám konfiguraci z databáze...</p>
+                                <p>Načítám z databáze...</p>
+                            </div>
+                        ) : adminTab === 'profile' ? (
+                            <div className="flex-1 flex flex-col overflow-y-auto pr-2">
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-bold text-[#002855] mb-1">Profil lektora a podpisová doložka</h3>
+                                    <p className="text-sm text-slate-500">Údaje zadané níže budou použity pro generování PDF a oddělení vašich dat.</p>
+                                </div>
+
+                                <div className="space-y-6 max-w-2xl">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">E-mail (Login API)</label>
+                                        <input type="email" required value={profile.email} disabled={!isSetupMode} onChange={e => setProfile({ ...profile, email: e.target.value })} className={`w-full border ${isSetupMode ? 'border-slate-300 focus:ring-2 focus:ring-[#002855]' : 'border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed'} rounded-lg px-4 py-2 text-sm outline-none`} />
+                                    </div>
+
+                                    {isSetupMode && (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Bezpečné heslo pro přihlášení</label>
+                                            <input type="password" minLength={12} pattern="(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{12,}" title="Min. 12 znaků, kombinace A, a, 1" required value={profile.password} onChange={e => setProfile({ ...profile, password: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                            <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Min. 12 znaků, kombinace A, a, 1</p>
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Titul před jménem</label>
+                                            <input type="text" placeholder="Bc., Mgr., Ing." value={profile.title_before} onChange={e => setProfile({ ...profile, title_before: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Titul za jménem</label>
+                                            <input type="text" placeholder="Ph.D." value={profile.title_after} onChange={e => setProfile({ ...profile, title_after: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Jméno</label>
+                                            <input type="text" value={profile.first_name} onChange={e => setProfile({ ...profile, first_name: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Příjmení</label>
+                                            <input type="text" value={profile.last_name} onChange={e => setProfile({ ...profile, last_name: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">hodnostní označení</label>
+                                            <input type="text" placeholder="plk., kpt., por." value={profile.rank_shortcut} onChange={e => setProfile({ ...profile, rank_shortcut: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Hodnost</label>
+                                            <select value={profile.rank_full} onChange={e => setProfile({ ...profile, rank_full: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white">
+                                                <option value="">Vyberte hodnost</option>
+                                                <option value="vrchní komisař">vrchní komisař</option>
+                                                <option value="rada">rada</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">Školní útvar / Pracoviště</label>
+                                        <input type="text" placeholder="Útvar policejního vzdělávání a služební přípravy" value={profile.school_location} onChange={e => setProfile({ ...profile, school_location: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                    </div>
+                                </div>
                             </div>
                         ) : adminTab !== 'vllm' ? (
                             <>
@@ -322,12 +488,14 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                         )}
                     </div>
                     <div className="flex items-center gap-3">
-                        <button
-                            onClick={onClose}
-                            className="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors text-sm font-medium shadow-sm"
-                        >
-                            Zrušit (Zavřít)
-                        </button>
+                        {!isSetupMode && (
+                            <button
+                                onClick={onClose}
+                                className="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors text-sm font-medium shadow-sm"
+                            >
+                                Zrušit (Zavřít)
+                            </button>
+                        )}
                         <button
                             onClick={handleSave}
                             disabled={isSaving || isLoading}
@@ -340,7 +508,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                             ) : (
                                 <Save className="w-4 h-4" />
                             )}
-                            {isSaving ? 'Ukládám...' : saveSuccess ? 'Uloženo' : 'Uložit do DB'}
+                            {isSaving ? 'Ukládám...' : saveSuccess ? 'Uloženo' : (isSetupMode ? 'Vytvořit účet' : 'Uložit do DB')}
                         </button>
                     </div>
                 </div>

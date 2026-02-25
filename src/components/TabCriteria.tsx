@@ -7,7 +7,12 @@ interface ChatMessage {
     uploadedText?: string;
 }
 
-export function TabCriteria() {
+interface TabCriteriaProps {
+    scenarioId: string | null;
+    scenarioName: string | null;
+}
+
+export function TabCriteria({ scenarioId, scenarioName }: TabCriteriaProps) {
     const [messages, setMessages] = useState<ChatMessage[]>([{
         role: 'assistant',
         content: 'Dobrý den, jsem váš AI asistent pro tvorbu hodnotících kritérií. Vložte prosím název modelové situace a svá heslovitá kritéria. Budu se vás následně doptávat na detaily.'
@@ -15,18 +20,29 @@ export function TabCriteria() {
     const [inputValue, setInputValue] = useState('');
     const [isChatLoading, setIsChatLoading] = useState(false);
 
-    const [criteriaMarkdown, setCriteriaMarkdown] = useState('Kritéria zatím nebyla definována.');
+    const [criteriaMarkdown, setCriteriaMarkdown] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    const [isFetchingCriteria, setIsFetchingCriteria] = useState(false);
 
     const chatEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Fetch existing criteria on mount
+    // Fetch existing criteria when scenarioId changes
     useEffect(() => {
+        // Reset chat messages to default when scenario changes
+        setMessages([{
+            role: 'assistant',
+            content: 'Dobrý den, jsem váš AI asistent pro tvorbu hodnotících kritérií. Vložte prosím název modelové situace a svá heslovitá kritéria. Budu se vás následně doptávat na detaily.'
+        }]);
+
+        if (!scenarioId) {
+            setCriteriaMarkdown('Vyberte prosím situaci v levém panelu.');
+            return;
+        }
         fetchCriteria();
-    }, []);
+    }, [scenarioId]);
 
     // Auto-scroll chat
     useEffect(() => {
@@ -34,14 +50,26 @@ export function TabCriteria() {
     }, [messages, isChatLoading]);
 
     const fetchCriteria = async () => {
+        if (!scenarioId) return;
+
+        setIsFetchingCriteria(true);
+        setCriteriaMarkdown('Načítám kritéria...');
+
         try {
-            const res = await fetch('http://localhost:8000/api/v1/criteria/MS2');
+            const res = await fetch(`http://localhost:8000/api/v1/criteria/${scenarioId}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
             if (res.ok) {
                 const data = await res.json();
                 setCriteriaMarkdown(data.markdown_content);
+            } else {
+                setCriteriaMarkdown(''); // Reset if no criteria exist for this scenario
             }
         } catch (error) {
             console.error('Nepodařilo se načíst kritéria:', error);
+            setCriteriaMarkdown('');
+        } finally {
+            setIsFetchingCriteria(false);
         }
     };
 
@@ -64,6 +92,7 @@ export function TabCriteria() {
         try {
             const res = await fetch('http://localhost:8000/api/v1/criteria/extract-context', {
                 method: 'POST',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
                 body: formData
             });
 
@@ -98,9 +127,12 @@ export function TabCriteria() {
         try {
             const res = await fetch('http://localhost:8000/api/v1/criteria/chat', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
                 body: JSON.stringify({
-                    scenario: "MS2",
+                    scenario: scenarioId || "Neznámá situace",
                     messages: chatMessages
                 })
             });
@@ -171,15 +203,19 @@ export function TabCriteria() {
     };
 
     const handleSaveCriteria = async () => {
+        if (!scenarioId) return;
         setIsSaving(true);
         setSaveSuccess(false);
 
         try {
             const res = await fetch('http://localhost:8000/api/v1/criteria/save', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
                 body: JSON.stringify({
-                    scenario: 'MS2',
+                    scenario: scenarioId,
                     markdown_content: criteriaMarkdown // Save the manually edited text directly
                 })
             });
@@ -260,7 +296,7 @@ export function TabCriteria() {
                         />
                         <button
                             onClick={() => fileInputRef.current?.click()}
-                            disabled={isChatLoading || isUploading}
+                            disabled={isChatLoading || isUploading || !scenarioId}
                             className="p-3 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50 border border-transparent shadow-sm"
                             title="Nahrát metodiku (.docx, .rtf, .pdf)"
                         >
@@ -268,16 +304,16 @@ export function TabCriteria() {
                         </button>
                         <input
                             type="text"
-                            placeholder="Napište zprávu asistentovi..."
+                            placeholder={scenarioId ? "Napište zprávu asistentovi..." : "Nejprve vyberte situaci v levém panelu..."}
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            disabled={isChatLoading || isUploading}
+                            disabled={isChatLoading || isUploading || !scenarioId}
                             className="flex-1 border border-slate-300 rounded-lg pl-4 pr-12 py-3 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none disabled:bg-slate-50 disabled:text-slate-500"
                         />
                         <button
                             onClick={handleSendMessage}
-                            disabled={!inputValue.trim() || isChatLoading || isUploading}
+                            disabled={!inputValue.trim() || isChatLoading || isUploading || !scenarioId}
                             className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-[#002855] text-white rounded-md hover:bg-[#002855]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <ChevronRight className="w-4 h-4" />
@@ -289,7 +325,9 @@ export function TabCriteria() {
             {/* Right Column: Criteria Output */}
             <div className="flex-1 flex flex-col gap-4 max-w-[50%]">
                 <div className="flex items-center justify-between bg-[#002855] text-white p-4 rounded-xl shadow-sm">
-                    <h3 className="text-lg font-bold tracking-wide">HODNOTÍCÍ KRITÉRIA: MS2</h3>
+                    <h3 className="text-lg font-bold tracking-wide">
+                        HODNOTÍCÍ KRITÉRIA: {scenarioName ? scenarioName.toUpperCase() : (scenarioId ? scenarioId.toUpperCase() : 'NEVYBRÁNO')}
+                    </h3>
                     <Shield className="w-5 h-5 text-[#D4AF37]" />
                 </div>
 
@@ -300,14 +338,15 @@ export function TabCriteria() {
                     <textarea
                         value={criteriaMarkdown}
                         onChange={(e) => setCriteriaMarkdown(e.target.value)}
-                        className="flex-1 w-full p-4 resize-none outline-none font-sans text-sm text-slate-700 leading-relaxed overflow-y-auto"
-                        placeholder="Zde pište svá kritéria..."
+                        disabled={!scenarioId || isFetchingCriteria}
+                        className={`flex-1 w-full p-4 resize-none outline-none font-sans text-sm text-slate-700 leading-relaxed overflow-y-auto ${(!scenarioId || isFetchingCriteria) ? 'bg-slate-50 opacity-70 cursor-not-allowed' : ''}`}
+                        placeholder={isFetchingCriteria ? "Načítám kritéria..." : "Zde pište svá kritéria..."}
                     />
                 </div>
 
                 <button
                     onClick={handleSaveCriteria}
-                    disabled={isSaving || isChatLoading || isUploading}
+                    disabled={isSaving || isChatLoading || isUploading || isFetchingCriteria || !scenarioId}
                     className={`w-full flex items-center justify-center gap-2 py-3.5 text-white rounded-xl hover:opacity-90 transition-opacity text-base font-bold shadow-md ${saveSuccess ? 'bg-emerald-600' : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028]'
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >

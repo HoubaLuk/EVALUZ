@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2 } from 'lucide-react';
+import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2 } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Student } from '../types';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode; content: string }) => {
@@ -25,9 +26,10 @@ const Tooltip = ({ children, content }: { children: React.ReactNode; content: st
 interface TabEvaluationProps {
     selectedStudent: number | null;
     setSelectedStudent: (id: number | null) => void;
+    scenarioId: string | null;
 }
 
-export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvaluationProps) {
+export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId }: TabEvaluationProps) {
     const [students, setStudents] = useState<Student[]>([]);
     const [selectAll, setSelectAll] = useState(false);
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -43,12 +45,14 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
     useEffect(() => {
         const fetchHistory = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/v1/analytics/class/1');
+                const res = await fetch('http://localhost:8000/api/v1/analytics/class/1', {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                });
                 if (res.ok) {
                     const data = await res.json();
 
                     const historyStudents: Student[] = data.map((evalRecord: any, index: number) => ({
-                        id: 10000 + index,
+                        id: evalRecord.id || (10000 + index),
                         name: evalRecord.jmeno_studenta,
                         status: 'evaluated',
                         score: evalRecord.celkove_skore,
@@ -121,7 +125,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
     };
 
     const handleBatchEvaluate = async () => {
-        if (selectedIds.length === 0 || files.length === 0) return;
+        if (selectedIds.length === 0 || files.length === 0 || !scenarioId) {
+            if (!scenarioId) alert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");
+            return;
+        }
         setIsEvaluating(true);
         setEvaluationProgress(0);
 
@@ -158,9 +165,11 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
 
                 const formData = new FormData();
                 formData.append('files', file);
+                formData.append('scenario_id', scenarioId);
 
                 const response = await fetch('http://localhost:8000/api/v1/evaluate/batch', {
                     method: 'POST',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
                     body: formData,
                 });
 
@@ -190,6 +199,67 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
         } finally {
             setIsEvaluating(false);
             setEvaluationProgress(0);
+        }
+    };
+
+    const handleDeleteStudent = async (studentId: number) => {
+        const student = students.find(s => s.id === studentId);
+        if (!student) return;
+
+        if (window.confirm(`Opravdu chcete smazat záznam studenta "${student.name}"?`)) {
+            try {
+                // If it's a persistent record (ID < 1000000000 based on Date.now() heuristic or similar)
+                // Actually, history IDs are small, Date.now() IDs are large.
+                if (studentId < 1700000000000) { // Heuristic for DB vs newly uploaded
+                    const res = await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${studentId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                    });
+                    if (!res.ok) throw new Error('Backend delete failed');
+                }
+
+                // Remove from students state
+                setStudents(prev => prev.filter(s => s.id !== studentId));
+                // Remove from selectedIds
+                setSelectedIds(prev => prev.filter(id => id !== studentId));
+                // Clear active student if it was the deleted one
+                if (selectedStudent === studentId) {
+                    setSelectedStudent(null);
+                }
+            } catch (error) {
+                console.error("Chyba při mazání studenta:", error);
+                alert("Nepodařilo se smazat záznam.");
+            }
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+
+        if (window.confirm(`Opravdu chcete smazat ${selectedIds.length} vybraných záznamů?`)) {
+            const idsToDelete = [...selectedIds];
+            for (const id of idsToDelete) {
+                const student = students.find(s => s.id === id);
+                if (!student) continue;
+
+                try {
+                    if (id < 1700000000000) {
+                        await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                        });
+                    }
+                } catch (error) {
+                    console.error(`Failed to delete student ${id}:`, error);
+                }
+            }
+
+            setStudents(prev => prev.filter(s => !idsToDelete.includes(s.id)));
+            setSelectedIds([]);
+            setSelectAll(false);
+            if (idsToDelete.includes(selectedStudent as number)) {
+                setSelectedStudent(null);
+            }
         }
     };
 
@@ -229,6 +299,16 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
                         />
                         Vybrat všechny
                     </button>
+
+                    {selectedIds.length > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium border border-red-100 shadow-sm"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Smazat vybrané ({selectedIds.length})
+                        </button>
+                    )}
                 </div>
                 <button
                     onClick={handleBatchEvaluate}
@@ -266,7 +346,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
                         ) : students.map(student => (
                             <div
                                 key={student.id}
-                                className={`w-full text-left px-3 py-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer ${selectedStudent === student.id
+                                className={`w-full text-left px-3 py-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer group ${selectedStudent === student.id
                                     ? 'bg-[#002855]/10 border border-[#002855]/20'
                                     : 'hover:bg-slate-50 border border-transparent'
                                     }`}
@@ -279,23 +359,52 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
                                     onClick={(e) => e.stopPropagation()}
                                     className="w-4 h-4 rounded border-slate-300 text-[#002855] focus:ring-[#002855]"
                                 />
-                                <div className="flex-1 min-w-0 flex items-center justify-between">
-                                    <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855]' : 'text-slate-700'}`}>
-                                        {student.name}
-                                    </p>
-                                    {student.status === 'evaluated' ? (
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                            <CheckCircle2 className="w-3 h-3" /> Zpracováno
-                                        </span>
-                                    ) : student.status === 'evaluating' ? (
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
-                                            <Loader2 className="w-3 h-3 animate-spin" /> Vyhodnocuji
-                                        </span>
-                                    ) : (
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-                                            <AlertCircle className="w-3 h-3" /> Čeká
-                                        </span>
-                                    )}
+                                <div className="flex-1 min-w-0 flex items-center justify-between group-inner">
+                                    <div className="flex-1 min-w-0 pr-2">
+                                        <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855]' : 'text-slate-700'}`}>
+                                            {student.name}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {student.status === 'evaluated' ? (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                <CheckCircle2 className="w-3 h-3" /> Zpracováno
+                                            </span>
+                                        ) : student.status === 'evaluating' ? (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
+                                                <Loader2 className="w-3 h-3 animate-spin" /> Vyhodnocuji
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                                <AlertCircle className="w-3 h-3" /> Čeká
+                                            </span>
+                                        )}
+
+                                        <DropdownMenu.Root>
+                                            <DropdownMenu.Trigger asChild>
+                                                <button
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="p-2 text-slate-400 hover:text-[#002855] hover:bg-slate-200 rounded-md transition-all opacity-30 group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100 outline-none"
+                                                >
+                                                    <MoreVertical className="w-3.5 h-3.5" />
+                                                </button>
+                                            </DropdownMenu.Trigger>
+                                            <DropdownMenu.Portal>
+                                                <DropdownMenu.Content
+                                                    className="w-40 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-[100] animate-in fade-in-80 zoom-in-95"
+                                                    sideOffset={5}
+                                                    align="end"
+                                                >
+                                                    <DropdownMenu.Item
+                                                        onSelect={() => handleDeleteStudent(student.id)}
+                                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" /> Smazat ÚZ
+                                                    </DropdownMenu.Item>
+                                                </DropdownMenu.Content>
+                                            </DropdownMenu.Portal>
+                                        </DropdownMenu.Root>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -401,9 +510,25 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent }: TabEvalua
                                 </div>
                                 <div className="flex justify-end">
                                     <button
-                                        onClick={() => {
+                                        onClick={async () => {
                                             if (activeStudentData) {
-                                                window.open(`http://localhost:8000/api/v1/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf`, '_blank');
+                                                try {
+                                                    const res = await fetch(`http://localhost:8000/api/v1/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf`, {
+                                                        headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                                                    });
+                                                    if (!res.ok) throw new Error('PDF Export selhal');
+                                                    const blob = await res.blob();
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = `hodnoceni_${activeStudentData.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                                                    document.body.appendChild(a);
+                                                    a.click();
+                                                    window.URL.revokeObjectURL(url);
+                                                    document.body.removeChild(a);
+                                                } catch (e: any) {
+                                                    alert(e.message);
+                                                }
                                             }
                                         }}
                                         className="flex items-center gap-2 px-6 py-3 bg-[#002855] text-white rounded-xl hover:bg-[#002855]/90 transition-colors text-sm font-bold shadow-md"
