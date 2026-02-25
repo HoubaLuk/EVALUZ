@@ -1,9 +1,10 @@
 import os
 import io
 import json
+from datetime import datetime
 from fpdf import FPDF
 from sqlalchemy.orm import Session
-from models.db_models import StudentEvaluation
+from models.db_models import StudentEvaluation, Lecturer
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,10 +34,17 @@ class PDFReport(FPDF):
             self.image(LOGO_PATH, x=10, y=8, w=30)
         self.set_font("helvetica", "B", 16)
         self.cell(40) # move right
-        self.cell(0, 10, "HODNOTÍCÍ LIST STUDENTA (ÚPVSP)", border=0, ln=1, align="C")
+        
+        # Helper pro odstranění diakritiky v záhlaví
+        import unicodedata
+        def s(txt):
+            n = unicodedata.normalize('NFD', str(txt))
+            return ''.join(c for c in n if unicodedata.category(c) != 'Mn').encode('ascii', errors='replace').decode('ascii')
+            
+        self.cell(0, 10, s("HODNOTÍCÍ LIST STUDENTA (ÚPVSP)"), border=0, ln=1, align="C")
         self.set_font("helvetica", "I", 10)
         self.cell(40)
-        self.cell(0, 10, "Hodnocení generováno za podpory AI Asistenta", border=0, ln=1, align="C")
+        self.cell(0, 10, s("Hodnoceni generovano za podpory AI Asistenta"), border=0, ln=1, align="C")
         self.ln(10)
 
     def footer(self):
@@ -44,17 +52,29 @@ class PDFReport(FPDF):
         self.set_font("helvetica", "I", 8)
         self.cell(0, 10, f"Strana {self.page_no()}/{{nb}}", 0, 0, "C")
 
-def generate_student_pdf(evaluation: StudentEvaluation) -> bytes:
+def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer) -> bytes:
     """
     Generuje PDF report pro konkrétní evaluaci studenta pomocí fpdf2 s oficiálním formátováním.
+    Využívá dynamická data lektora pro podpisovou doložku.
     """
     def safe_text(txt):
         if not txt: return ""
-        # Základní náhrada nepodporovaných českých znaků bez TTF fontu v FPDF (pro prototyp)
-        # Ideálně by bylo načíst plný unicode font: pdf.add_font("DejaVu", "", "font.ttf", uni=True)
-        return str(txt)
+        import unicodedata
+        # Zajištění, aby text prošel přes FPDF helvetica bez UnicodeEncodeError
+        normalized = unicodedata.normalize('NFD', str(txt))
+        ascii_text = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+        # Pro jistotu nahradit ještě znaky, které zbyly a nejsou ASCII tisknutelné
+        return ascii_text.encode('ascii', errors='replace').decode('ascii')
 
     data = json.loads(evaluation.json_result)
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            pass # Ponecháme to jako string a odchytíme dole
+
+    if not isinstance(data, dict):
+        data = {"celkove_skore": 0, "zpetna_vazba": f"Chyba formátu dat v databázi: {data}", "vysledky": []}
     
     pdf = PDFReport()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -69,14 +89,14 @@ def generate_student_pdf(evaluation: StudentEvaluation) -> bytes:
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(40, 8, "Datum hodnocení:", 0, 0)
     pdf.set_font("helvetica", "", 12)
-    pdf.cell(0, 8, safe_text(evaluation.created_at.strftime("%d. %m. %Y")), 0, 1)
+    pdf.cell(0, 8, safe_text(datetime.now().strftime("%d. %m. %Y")), 0, 1)
     
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(35, 8, "Skóre:", 0, 0)
     pdf.set_font("helvetica", "B", 14)
     # Tmavě modrá barva pro skóre
     pdf.set_text_color(0, 40, 85)
-    pdf.cell(0, 8, f"{data.get('celkove_skore', 0)} bodů", 0, 1)
+    pdf.cell(0, 8, f"{data.get('celkove_skore', 0)} bodu", 0, 1)
     pdf.set_text_color(0, 0, 0) # reset
     
     pdf.ln(5)
@@ -91,10 +111,10 @@ def generate_student_pdf(evaluation: StudentEvaluation) -> bytes:
     col_body = 15
     col_oduv = 110
     
-    pdf.cell(col_kriterium, 10, "Kritérium", border=1, fill=True)
-    pdf.cell(col_splneno, 10, "Splněno", border=1, align="C", fill=True)
+    pdf.cell(col_kriterium, 10, safe_text("Kritérium"), border=1, fill=True)
+    pdf.cell(col_splneno, 10, safe_text("Splněno"), border=1, align="C", fill=True)
     pdf.cell(col_body, 10, "Body", border=1, align="C", fill=True)
-    pdf.cell(col_oduv, 10, "Zdůvodnění AI", border=1, fill=True)
+    pdf.cell(col_oduv, 10, safe_text("Zdůvodnění AI"), border=1, fill=True)
     pdf.ln()
 
     # Table Body
@@ -164,39 +184,59 @@ def generate_student_pdf(evaluation: StudentEvaluation) -> bytes:
     # Zpětná vazba
     pdf.ln(8)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "Celková zpětná vazba a doporučení:", ln=1)
+    pdf.cell(0, 8, safe_text("Celková zpětná vazba a doporučení:"), ln=1)
     pdf.set_font("helvetica", "", 11)
     pdf.multi_cell(0, 6, safe_text(data.get("zpetna_vazba", "")))
     
     # Dialogový rámeček pro studenta
     pdf.ln(8)
     pdf.set_font("helvetica", "B", 11)
-    pdf.cell(0, 8, "Vyjádření studenta k hodnocení:", ln=1)
+    pdf.cell(0, 8, safe_text("Vyjádření studenta k hodnocení:"), ln=1)
     # Nakreslí prázdný box
     pdf.rect(pdf.get_x(), pdf.get_y(), 190, 25)
     pdf.ln(30)
     
     # Podpisová doložka lektora a studenta
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(100, 8, f"vytvořil: {get_rank_abbr(LEKTOR_RANK)} {LEKTOR_NAME}", ln=0)
-    pdf.cell(90, 8, "podpis studenta: _______________________", ln=1, align="R")
     
-    pdf.cell(100, 8, f"dne: {evaluation.created_at.strftime('%d. %m. %Y')}", ln=0)
-    pdf.cell(90, 8, "datum převzetí: _______________________", ln=1, align="R")
+    # Sestavení jména s tituly
+    lektor_name_parts = []
+    if lecturer.title_before: lektor_name_parts.append(lecturer.title_before)
+    lektor_name_parts.append(lecturer.first_name)
+    lektor_name_parts.append(lecturer.last_name)
+    if lecturer.title_after: lektor_name_parts.append(lecturer.title_after)
+    lektor_full_name = " ".join(lektor_name_parts)
+    
+    # Prefix hodnosti
+    rank_prefix = lecturer.rank_shortcut if lecturer.rank_shortcut else "Lektor"
+    
+    pdf.cell(100, 8, safe_text(f"vytvořil: {rank_prefix} {lektor_full_name}"), ln=0)
+    pdf.cell(90, 8, safe_text("podpis studenta: _______________________"), ln=1, align="R")
+    
+    pdf.cell(100, 8, safe_text(f"dne: {datetime.now().strftime('%d. %m. %Y')}"), ln=0)
+    pdf.cell(90, 8, safe_text("datum převzetí: _______________________"), ln=1, align="R")
+    
+    # Školní útvar (pokud je definován)
+    if lecturer.school_location:
+        pdf.cell(100, 8, safe_text(lecturer.school_location), ln=0)
+        pdf.ln(8)
     
     # AI Act Citation Validation Footer
     pdf.set_y(-25)
     pdf.set_text_color(120, 120, 120)
     pdf.set_font("helvetica", "I", 8)
-    pdf.multi_cell(0, 5, "AI Act Compliance: Podklady pro hodnocení na základě úředního záznamu byly uloženy k případnému přezkumu. Analýza textu probíhá v plně vzduchotěsném prostředí (On-Premise) pro zachování soukromí a datové bezpečnosti PČR.")
+    pdf.multi_cell(0, 5, safe_text("AI Act Compliance: Podklady pro hodnocení na základě úředního záznamu byly uloženy k případnému přezkumu. Analýza textu probíhá v plně vzduchotěsném prostředí (On-Premise) pro zachování soukromí a datové bezpečnosti PČR."))
     
     return pdf.output(dest="S")
 
-def generate_class_csv(class_id: int, db: Session) -> str:
+def generate_class_csv(class_id: int, db: Session, lecturer_id: int) -> str:
     """
-    Generuje CSV export pro celou třídu.
+    Generuje CSV export pro celou třídu určitého lektora.
     """
-    evaluations = db.query(StudentEvaluation).filter(StudentEvaluation.class_id == class_id).all()
+    evaluations = db.query(StudentEvaluation).filter(
+        StudentEvaluation.class_id == class_id,
+        StudentEvaluation.lecturer_id == lecturer_id
+    ).all()
     
     if not evaluations:
         return "Jmeno,Skore,Hodnoceni_Hotovo\n"
@@ -204,11 +244,19 @@ def generate_class_csv(class_id: int, db: Session) -> str:
     csv_lines = ["Jmeno_Studenta,Celkove_Skore,Zpetna_Vazba,Cas_Hodnoceni"]
     
     for eval_record in evaluations:
-        data = json.loads(eval_record.json_result)
+        try:
+            data = json.loads(eval_record.json_result)
+            if isinstance(data, str):
+                data = json.loads(data)
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+            
         name = eval_record.student_name.replace(',', '')
         score = data.get('celkove_skore', 0)
         zpetna = str(data.get('zpetna_vazba', '')).replace(',', ';').replace('\n', ' ')
-        time_str = eval_record.created_at.strftime("%Y-%m-%d %H:%M")
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         
         csv_lines.append(f"{name},{score},{zpetna},{time_str}")
         

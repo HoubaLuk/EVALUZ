@@ -34,7 +34,9 @@ export function TabAnalytics() {
         try {
             // Force parameter could be implemented on backend to bypass cache.
             // For now we just re-fetch the latest db evaluations.
-            const res = await fetch('http://localhost:8000/api/v1/analytics/class/1/summary');
+            const res = await fetch('http://localhost:8000/api/v1/analytics/class/1/summary', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
             if (!res.ok) throw new Error("Chyba při stahování analytiky");
 
             const json = await res.json();
@@ -56,6 +58,26 @@ export function TabAnalytics() {
         { name: '81-100 %', value: data.score_distribution["81_100"] }
     ].filter(d => d.value > 0) : []; // filter out empty bands
 
+    const handleExportCSV = async () => {
+        try {
+            const res = await fetch('http://localhost:8000/api/v1/export/class/1/csv', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
+            if (!res.ok) throw new Error('Export selhal');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `vysledky_trida_1.csv`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (e: any) {
+            alert(e.message);
+        }
+    };
+
     return (
         <div className="max-w-6xl mx-auto space-y-6">
             <div className="flex items-center justify-between">
@@ -75,7 +97,7 @@ export function TabAnalytics() {
                         Aktualizovat
                     </button>
                     <button
-                        onClick={() => window.open('http://localhost:8000/api/v1/export/class/1/csv', '_blank')}
+                        onClick={handleExportCSV}
                         className="flex items-center gap-2 px-4 py-2 bg-[#002855] text-white rounded-lg hover:bg-[#002855]/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
                         disabled={loading || !data}
                     >

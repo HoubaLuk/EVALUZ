@@ -1,9 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from typing import List
 import json
 from sqlalchemy.orm import Session
 from core.database import get_db
-from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation
+from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion
+from api.auth import get_current_lecturer
 
 from services.doc_parser import extract_text
 from services.llm_engine import evaluate_report
@@ -15,7 +16,12 @@ router = APIRouter(
 )
 
 @router.post("/batch", response_model=BatchEvaluationResponse)
-async def evaluate_batch(files: List[UploadFile] = File(...), db: Session = Depends(get_db)):
+async def evaluate_batch(
+    files: List[UploadFile] = File(...), 
+    scenario_id: str = Form(...),
+    db: Session = Depends(get_db), 
+    current_user: Lecturer = Depends(get_current_lecturer)
+):
     """
     Endpoint to evaluate a batch of uploaded files.
     Extracts text and forwards it to the local vLLM server using DB configurations.
@@ -27,8 +33,37 @@ async def evaluate_batch(files: List[UploadFile] = File(...), db: Session = Depe
     prompt_record = db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt2").first()
     system_prompt_str = prompt_record.content if prompt_record else "Jsi evaluátor ÚZ."
     
-    criteria_record = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == "MS2").first()
-    criteria_str = criteria_record.markdown_content if criteria_record else "Neznámá kritéria."
+    criteria_record = db.query(EvaluationCriteria).filter(
+        EvaluationCriteria.scenario_name == scenario_id,
+        EvaluationCriteria.lecturer_id == current_user.id
+    ).first()
+    
+    if not criteria_record or not criteria_record.markdown_content.strip():
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Kritéria pro tuto situaci ({scenario_id}) nebyla nalezena."
+        )
+        
+    # 2. VERIFIKACE NAČÍTÁNÍ: Sestavíme je do seznamu namísto jednoho stringu
+    individual_criteria = db.query(Criterion).filter(
+        Criterion.evaluation_criteria_id == criteria_record.id
+    ).all()
+    
+    if not individual_criteria:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Kritéria pro ({scenario_id}) nebyla správně rozparsována. Uložte je prosím znovu v Nastavení kritérií."
+        )
+
+    criteria_lines = []
+    for i, crit in enumerate(individual_criteria, 1):
+        crit_text = f"**{i}. Kritérium: {crit.nazev}**\n{crit.popis}\nBodů za splnění: {crit.body}"
+        criteria_lines.append(crit_text)
+        
+    criteria_str = "\n\n".join(criteria_lines)
+    
+    # 3. LOGOVÁNÍ
+    print(f">>> SUCCESS: Do promptu vloženo {len(individual_criteria)} samostatných kritérií pro scenario_id: {scenario_id}")
     
     for file in files:
         # Determine student name from filename (e.g. "Adámek.pdf" -> "stržm. Adámek")
@@ -57,6 +92,7 @@ async def evaluate_batch(files: List[UploadFile] = File(...), db: Session = Depe
             eval_record = StudentEvaluation(
                 student_name=student_name,
                 class_id=1, # Default class for now
+                lecturer_id=current_user.id,
                 json_result=json.dumps(llm_result_dict, ensure_ascii=False)
             )
             db.add(eval_record)
