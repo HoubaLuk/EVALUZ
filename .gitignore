@@ -7,6 +7,9 @@ coverage/
 .env*
 !.env.example
 *.db
+upvsp_evaluator.db
 .venv/
 backend/__pycache__/
 frontend/node_modules/
+backend/static/pdfs/*
+/Users/lukashribnak/Vyhodnocování ÚZ pomocí AI/Vyhodnocov-n-Z/upvsp_evaluator.db

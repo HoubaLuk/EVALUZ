@@ -1,21 +1,28 @@
-# ÚPVSP AI Evaluátor - Projektový Kontext a Architektura
+# HERMES - AI Evaluátor úředních záznamů ÚPVSP
+
+## 📅 Status Projektu: Stabilní / Beta
+Jádro aplikace (Analýza třídy, PDF/Excel exporty a persisence dat) je kompletně implementováno a otestováno.
 
 ## 1. Vize a Cíl Projektu
 Aplikace slouží Útvaru policejního vzdělávání a služební přípravy (ÚPVSP). Cílem je automatizovat a standardizovat hodnocení "Úředních záznamů" (ÚZ) psaných policejními nováčky (ZOP). 
-Cílem NENÍ nahradit lektora, ale ušetřit mu stovky hodin rutinní kontroly paragrafů a formalit.
+Při stovkách studentů šetří lektorům čas při rutinní kontrole formálních náležitostí a právní věcnosti.
 
 ## 2. Klíčové Principy (Neporušitelné)
-- **Striktní On-Premise a Bezpečnost:** Z důvodu směrnice NIS2 a citlivosti dat se aplikace nesmí připojovat k žádným cloudovým LLM (žádné OpenAI, Claude, Google API). 
-- **Human-in-the-Loop:** Umělá inteligence je pouze asistent. Lektor má vždy možnost editovat body a zdůvodnění navržená AI, než je finálně uloží.
-- **AI Act Compliance (Vysvětlitelnost):** Každé rozhodnutí AI musí být podloženo zdrojem. Proto má evaluace funkci "Zobrazit zdroj", která ukáže přesnou citaci z textu studenta.
+- **Bezpečnost a Soukromí:** Aplikace je navržena pro lokální běh nebo zabezpečené API. Žádná data studentů nejsou sdílena s veřejnými modely pro trénování.
+- **Human-in-the-Loop:** AI navrhuje body a zdůvodnění, lektor má však vždy finální slovo a možnost editace před uložením.
+- **Vysvětlitelnost (Explainable AI):** AI musí každou chybu zdůvodnit na základě konkrétního znění kritérií.
 
-## 3. Technologická Architektura (Plán)
-- **Frontend (Aktuální stav):** React + Vite + TailwindCSS + shadcn/ui. Rozděleno do komponent.
-- **Backend (Plánováno):** Python + FastAPI. Bude řešit extrakci textu z .docx souborů studentů a orchestraci promptů. RAG (Retrieval-Augmented Generation) záměrně nevyužíváme, je to zbytečný overkill. Vše se řeší in-context.
-- **LLM Engine (Plánováno):** vLLM běžící lokálně na GPU NVIDIA L40S. Použitý model: řada Qwen3 (32B+), případně doplněno o modely rodiny Gemma.
+## 3. Technologická Architektura (Stav k únoru 2026)
+- **Frontend (Implementováno):** React 18 + Vite + TypeScript. Modulární architektura rozdělující aplikaci na 3 hlavní fáze.
+- **Backend (Implementováno):** Python + FastAPI. Zabezpečuje orchestraci LLM, zpracování dokumentů, generování PDF reportů a správu SQLite databáze.
+- **Persistence (Implementováno):** SQLite umožňuje kompletní uložení výsledků analýzy třídy, takže lektor může k datům přistupovat i po restartu aplikace.
+- **LLM Engine:** Kompatibilní s OpenRouter API nebo lokálním vLLM rozhraním.
 
-## 4. Logika a Flow Aplikace (3 Fáze)
-1. **Záložka 1 - Precizace kritérií:** Lektor vede Sokratovský dialog s AI. AI z něj vytáhne detaily (přesná znění paragrafů) a vygeneruje strukturovaný JSON/Markdown s hodnotícími kritérii.
-2. **Záložka 2 - Evaluace ÚZ:** "Srdce aplikace". Lektor nahraje dávku .docx souborů. Backend je zpracuje přes vLLM na základě kritérií z Fáze 1 a vrátí JSON s obodováním. Frontend to zobrazí v interaktivní side-by-side tabulce.
-3. **Záložka 3 - Analýza třídy:** Z JSON výstupů všech studentů provede AI agregaci chyb a navrhne pedagogická doporučení a myšlenkovou mapu pro další výuku.
-4. **Administrace (Modal):** Skryté centrum pro správu systémových "Super-Promptů" a konfiguraci připojení na lokální vLLM API (Endpoint, API klíč, Model ID).
+## 4. Implementované Fáze Flow
+1. **Fáze 1 - Precizace kritérií:** Sokratovský dialog pro vydefinování hodnotícího klíče.
+2. **Fáze 2 - Evaluace ÚZ:** Hromadné nahrávání a paralelní vyhodnocování dokumentů studentů.
+3. **Fáze 3 - Analýza třídy (Dashboard):** Vizualizace úspěšnosti (heatmapa K1-K25), AI pedagogické shrnutí a exporty (Excel, HERMES PDF Report).
+
+## 5. Budoucí Rozvoj
+- Implementace hromadné administrace skupin studentů.
+- Pokročilé statistiky v čase (porovnání různých běhů kurzů).
