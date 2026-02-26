@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2 } from 'lucide-react';
+import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Student } from '../types';
 
@@ -27,9 +27,12 @@ interface TabEvaluationProps {
     selectedStudent: number | null;
     setSelectedStudent: (id: number | null) => void;
     scenarioId: string | null;
+    className?: string;
+    scenarioName?: string;
+    onEvaluatedChange?: (hasEvaluated: boolean) => void;
 }
 
-export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId }: TabEvaluationProps) {
+export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange }: TabEvaluationProps) {
     const [students, setStudents] = useState<Student[]>([]);
     const [selectAll, setSelectAll] = useState(false);
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -44,10 +47,15 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
     const abortControllerRef = useRef<AbortController | null>(null);
     const [isCancelling, setIsCancelling] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     const fetchEvaluations = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/v1/analytics/class/1', {
+            const url = scenarioId
+                ? `http://localhost:8000/api/v1/analytics/class/1?scenario_id=${scenarioId}`
+                : `http://localhost:8000/api/v1/analytics/class/1`;
+
+            const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
             if (res.ok) {
@@ -65,14 +73,20 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
 
                 setStudents(current => {
                     const pendingStudents = current.filter(s => s.status !== 'evaluated');
-                    const filteredPending = pendingStudents.filter(p => !historyStudents.some(h =>
-                        h.name.includes(p.name) || p.name.includes(h.name.replace('stržm. ', ''))
-                    ));
+                    const filteredPending = pendingStudents.filter(p => !historyStudents.some(h => {
+                        const hNFC = h.name.normalize('NFC');
+                        const pNFC = p.name.normalize('NFC');
+                        return hNFC.includes(pNFC) || pNFC.includes(hNFC.replace('stržm. ', ''));
+                    }));
                     return [...historyStudents, ...filteredPending];
                 });
 
                 if (historyStudents.length > 0 && !selectedStudent) {
                     setSelectedStudent(historyStudents[0].id);
+                }
+
+                if (onEvaluatedChange) {
+                    onEvaluatedChange(historyStudents.length > 0);
                 }
             }
         } catch (e) {
@@ -81,8 +95,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
     };
 
     useEffect(() => {
+        setStudents([]);
+        if (onEvaluatedChange) onEvaluatedChange(false);
         fetchEvaluations();
-    }, []);
+    }, [scenarioId]);
 
     const toggleStudent = (id: number) => {
         setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -299,6 +315,84 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
         }
     };
 
+    // --- MAN-IN-THE-LOOP (Ruční oprava výsledků AI a optimistický UI update) ---
+    const handleScoreChange = (index: number, newScore: number) => {
+        setStudents(current => current.map(s => {
+            if (s.id === selectedStudent && s.evaluationDetails) {
+                const newDetails = [...s.evaluationDetails];
+                newDetails[index] = {
+                    ...newDetails[index],
+                    body: newScore,
+                    upraveno_lektorem: true // Flag pro vizuální odlišení
+                };
+
+                // Přepočítáme celkové skóre
+                const newTotal = newDetails.reduce((sum, d) => sum + (Number(d.body) || 0), 0);
+
+                return {
+                    ...s,
+                    score: newTotal,
+                    evaluationDetails: newDetails,
+                    isDirty: true
+                };
+            }
+            return s;
+        }));
+    };
+
+    const handleFeedbackChange = (newFeedback: string) => {
+        setStudents(current => current.map(s => {
+            if (s.id === selectedStudent) {
+                return {
+                    ...s,
+                    zpetna_vazba: newFeedback,
+                    isDirty: true
+                };
+            }
+            return s;
+        }));
+    };
+
+    const handleSaveChanges = async () => {
+        const student = students.find(s => s.id === selectedStudent);
+        if (!student || !student.isDirty) return;
+
+        setIsSaving(true);
+        try {
+            const payload = {
+                json_result: {
+                    jmeno_studenta: student.name,
+                    celkove_skore: student.score,
+                    zpetna_vazba: student.zpetna_vazba,
+                    vysledky: student.evaluationDetails
+                }
+            };
+            const response = await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${student.id}/score`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                setToastMessage("Změny úspěšně uloženy. Analytika bude automaticky přepočítána.");
+                setTimeout(() => setToastMessage(null), 4000);
+                setStudents(current => current.map(s => s.id === student.id ? { ...s, isDirty: false } : s));
+            } else {
+                throw new Error("Chyba ze serveru");
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Uložení úprav se nezdařilo.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    //---------------------------------------------------------
+
     const activeStudentData = students.find(s => s.id === selectedStudent);
 
     return (
@@ -514,20 +608,30 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {activeStudentData.evaluationDetails?.map((detail, idx) => (
-                                                <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                                <tr key={idx} className={`hover:bg-slate-50/50 transition-colors ${detail.upraveno_lektorem ? 'bg-blue-50/30' : ''}`}>
                                                     <td className="px-6 py-5 text-sm font-medium text-[#002855] align-top">
-                                                        {detail.nazev}
+                                                        <div className="flex items-center gap-2">
+                                                            {detail.nazev}
+                                                        </div>
                                                     </td>
-                                                    <td className="px-6 py-5 text-center align-top">
-                                                        {detail.splneno ? (
-                                                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 shadow-sm">
-                                                                <CheckCircle2 className="w-5 h-5" />
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-100 text-rose-700 shadow-sm">
-                                                                <XCircle className="w-5 h-5" />
-                                                            </span>
-                                                        )}
+                                                    <td className="px-6 py-5 text-center align-top relative">
+                                                        <div className="flex items-center justify-center gap-1.5">
+                                                            {detail.body > 0 ? (
+                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 shadow-sm">
+                                                                    <CheckCircle2 className="w-5 h-5" />
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-100 text-rose-700 shadow-sm">
+                                                                    <XCircle className="w-5 h-5" />
+                                                                </span>
+                                                            )}
+                                                            {detail.upraveno_lektorem && (
+                                                                <span title="Lektorský zásah" className="inline-flex items-center justify-center relative">
+                                                                    <User className="w-5 h-5 text-blue-500 opacity-80" />
+                                                                    <GraduationCap className="w-3.5 h-3.5 text-blue-700 absolute -bottom-1 -right-1 drop-shadow-sm" />
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                     <td className="px-6 py-5 text-sm text-slate-600 align-top">
                                                         <div className="flex items-start gap-3">
@@ -547,8 +651,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
                                                         <div className="flex flex-col items-center gap-1">
                                                             <input
                                                                 type="number"
-                                                                defaultValue={detail.body}
-                                                                className="w-14 text-center border border-slate-300 rounded-md py-1 text-sm font-medium focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37] outline-none"
+                                                                value={detail.body}
+                                                                onChange={(e) => handleScoreChange(idx, parseInt(e.target.value, 10) || 0)}
+                                                                className={`w-14 text-center border rounded-md py-1 text-sm font-medium focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37] outline-none ${detail.upraveno_lektorem ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-300'}`}
                                                             />
                                                         </div>
                                                     </td>
@@ -567,15 +672,27 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
                                     </label>
                                     <textarea
                                         className="w-full border border-slate-300 rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-24 bg-slate-50 leading-relaxed"
-                                        defaultValue={activeStudentData.zpetna_vazba || ""}
+                                        value={activeStudentData.zpetna_vazba || ""}
+                                        onChange={(e) => handleFeedbackChange(e.target.value)}
                                     />
                                 </div>
-                                <div className="flex justify-end">
+                                <div className="flex justify-end gap-3">
+                                    {activeStudentData.isDirty && (
+                                        <button
+                                            onClick={handleSaveChanges}
+                                            disabled={isSaving}
+                                            className="flex items-center gap-2 px-6 py-3 bg-white border border-[#D4AF37] text-[#D4AF37] rounded-xl hover:bg-[#D4AF37]/5 transition-colors text-sm font-bold shadow-sm"
+                                        >
+                                            {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                                            Uložit úpravy {activeStudentData.score} / {activeStudentData.maxScore} b.
+                                        </button>
+                                    )}
                                     <button
                                         onClick={async () => {
                                             if (activeStudentData) {
                                                 try {
-                                                    const res = await fetch(`http://localhost:8000/api/v1/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf`, {
+                                                    const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
+                                                    const res = await fetch(`http://localhost:8000/api/v1/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
                                                         headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
                                                     });
                                                     if (!res.ok) throw new Error('PDF Export selhal');
@@ -588,6 +705,20 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId 
                                                     a.click();
                                                     window.URL.revokeObjectURL(url);
                                                     document.body.removeChild(a);
+
+                                                    // Uložení záznamu do historie
+                                                    await fetch('http://localhost:8000/api/v1/export/history', {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                            'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                                                        },
+                                                        body: JSON.stringify({
+                                                            scenario_name: scenarioId || 'Neznámý scénář',
+                                                            type: `PDF Hodnocení (${activeStudentData.name})`,
+                                                            download_url: `/api/v1/export/evaluation/${activeStudentData.id}/pdf`
+                                                        })
+                                                    });
                                                 } catch (e: any) {
                                                     alert(e.message);
                                                 }

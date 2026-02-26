@@ -1,14 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, X, SlidersHorizontal, AlertCircle, Save, Loader2, CheckCircle2, UserPen } from 'lucide-react';
+import { Settings, X, SlidersHorizontal, AlertCircle, Save, Loader2, CheckCircle2, UserPen, Download, History } from 'lucide-react';
 
+/**
+ * Vlastnosti komponenty AdminModal
+ */
 interface AdminModalProps {
+    /** Příznak, zda je modální okno otevřené */
     isOpen: boolean;
+    /** Funkce pro zavření modálního okna */
     onClose: () => void;
+    /** Příznak pro režim prvního spuštění (vynucené nastavení profilu) */
     isSetupMode?: boolean;
+    /** Callback po úspěšném dokončení úvodního nastavení */
     onSetupComplete?: (token: string) => void;
 }
 
+/**
+ * Centrální administrace systému EVALUZ.
+ * Umožňuje konfiguraci promptů, nastavení vLLM engine, správu uživatelského profilu 
+ * a sledování historie exportů.
+ */
 export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: AdminModalProps) {
+    /** 
+     * Aktuálně aktivní záložka v administraci.
+     * V režimu setup se začíná na profilu.
+     */
     const [adminTab, setAdminTab] = useState<'prompt1' | 'prompt2' | 'prompt3' | 'vllm' | 'profile'>(isSetupMode ? 'profile' : 'prompt1');
 
     // States for Prompts
@@ -34,9 +50,19 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
         rank_shortcut: '',
         rank_full: '',
         school_location: '',
+        funkcni_zarazeni: '',
         email: '',
         password: ''
     });
+
+    // History data
+    const [exportsHistory, setExportsHistory] = useState<any[]>([]);
+
+    useEffect(() => {
+        const handleOpenProfileTab = () => setAdminTab('profile');
+        window.addEventListener('openProfileTab', handleOpenProfileTab);
+        return () => window.removeEventListener('openProfileTab', handleOpenProfileTab);
+    }, []);
 
     // UI states
     const [isLoading, setIsLoading] = useState(false);
@@ -50,10 +76,17 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
         }
     }, [isOpen, isSetupMode]);
 
+    /**
+     * Načte všechna administrační data ze serveru:
+     * - Systémové prompty pro všechny fáze
+     * - Nastavení vLLM (URL, Model, API Klíč)
+     * - Aktuální profil přihlášeného lektora
+     * - Historii exportů provedených uživatelem
+     */
     const fetchAdminData = async () => {
         setIsLoading(true);
         try {
-            // Fetch Prompts
+            // Načtení promptů z DB
             const promptRes = await fetch('http://localhost:8000/api/v1/admin/prompts', {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
@@ -66,7 +99,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 });
             }
 
-            // Fetch Settings
+            // Načtení globálního nastavení (vLLM konektivita)
             const settingsRes = await fetch('http://localhost:8000/api/v1/admin/settings', {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
@@ -79,7 +112,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 });
             }
 
-            // Fetch Profile
+            // Načtení detailů o aktuálním uživateli (pro doložku)
             const meRes = await fetch('http://localhost:8000/api/v1/auth/me', {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
@@ -93,17 +126,32 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     rank_shortcut: meData.rank_shortcut || '',
                     rank_full: meData.rank_full || '',
                     school_location: meData.school_location || '',
-                    email: meData.email || ''
+                    funkcni_zarazeni: meData.funkcni_zarazeni || '',
+                    email: meData.email || '',
+                    password: ''
                 });
             }
 
+            // Načtení historie exportů
+            const historyRes = await fetch('http://localhost:8000/api/v1/export/history', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
+            if (historyRes.ok) {
+                const historyData = await historyRes.json();
+                setExportsHistory(historyData);
+            }
+
         } catch (error) {
-            console.error('Failed to fetch admin data:', error);
+            console.error('Chyba při inicializaci administrace:', error);
         } finally {
             setIsLoading(false);
         }
     };
 
+    /**
+     * Provede zkušební dotaz na nakonfigurované vLLM rozhraní.
+     * Ověřuje, zda je server dostupný a zda model odpovídá.
+     */
     const handleTestConnection = async () => {
         setIsTestingConnection(true);
         try {
@@ -126,18 +174,23 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 alert(`Chyba připojení: ${data.detail || 'Neznámá chyba'}`);
             }
         } catch (error) {
-            console.error('Test connection failed:', error);
+            console.error('Test spojení selhal:', error);
             alert("Nepodařilo se kontaktovat server pro testování spojení.");
         } finally {
             setIsTestingConnection(false);
         }
     };
 
+    /**
+     * Uloží aktuálně upravovaná data na základě zvolené záložky.
+     * Podporuje vytváření účtu (setup), ukládání promptů, profilu nebo vLLM nastavení.
+     */
     const handleSave = async () => {
         setIsSaving(true);
         setSaveSuccess(false);
         try {
             if (isSetupMode) {
+                // Speciální případ: Vytvoření prvního uživatele
                 const res = await fetch('http://localhost:8000/api/v1/auth/setup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -150,7 +203,8 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                         title_after: profile.title_after,
                         rank_shortcut: profile.rank_shortcut,
                         rank_full: profile.rank_full,
-                        school_location: profile.school_location
+                        school_location: profile.school_location,
+                        funkcni_zarazeni: profile.funkcni_zarazeni
                     })
                 });
                 if (!res.ok) {
@@ -162,8 +216,8 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 return;
             }
 
+            // Ukládání běží podle toho, který tab je aktivní
             if (adminTab === 'vllm') {
-                // Save Settings
                 await fetch('http://localhost:8000/api/v1/admin/settings', {
                     method: 'PUT',
                     headers: {
@@ -177,7 +231,6 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     ])
                 });
             } else if (adminTab === 'profile') {
-                // Save Profile
                 await fetch('http://localhost:8000/api/v1/auth/me', {
                     method: 'PUT',
                     headers: {
@@ -187,7 +240,6 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     body: JSON.stringify(profile)
                 });
             } else {
-                // Save Prompts
                 await fetch('http://localhost:8000/api/v1/admin/prompts', {
                     method: 'PUT',
                     headers: {
@@ -202,9 +254,15 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 });
             }
             setSaveSuccess(true);
-            setTimeout(() => setSaveSuccess(false), 3000);
+            // Má-li se změna (vč. role v hlavičce) projevit ihned, vynutíme reload nebo re-fetch.
+            // Pro jednoduchost a jistotu čistého stavu volíme reload po krátké prodlevě.
+            if (adminTab === 'profile') {
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                setTimeout(() => setSaveSuccess(false), 3000);
+            }
         } catch (error) {
-            console.error('Failed to save data:', error);
+            console.error('Ukládání selhalo:', error);
             alert("Chyba při ukládání na server.");
         } finally {
             setIsSaving(false);
@@ -227,7 +285,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     <div className="flex items-center gap-2">
                         <Settings className="w-5 h-5 text-[#D4AF37]" />
                         <h2 className="text-lg font-semibold tracking-wide">
-                            {isSetupMode ? "První spuštění: Vytvoření hlavního lektorského účtu" : "Administrace systému & Prompt Engineering"}
+                            {isSetupMode ? "První spuštění: Vytvoření hlavního lektorského účtu" : "Administrace systému EVALUZ & Prompt Engineering"}
                         </h2>
                     </div>
                     {!isSetupMode && (
@@ -317,7 +375,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
 
                                 <div className="space-y-6 max-w-2xl">
                                     <div>
-                                        <label className="block text-sm font-semibold text-slate-700 mb-2">E-mail (Login API)</label>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">Služební e-mail uživatele</label>
                                         <input type="email" required value={profile.email} disabled={!isSetupMode} onChange={e => setProfile({ ...profile, email: e.target.value })} className={`w-full border ${isSetupMode ? 'border-slate-300 focus:ring-2 focus:ring-[#002855]' : 'border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed'} rounded-lg px-4 py-2 text-sm outline-none`} />
                                     </div>
 
@@ -366,11 +424,125 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                         </div>
                                     </div>
 
-                                    <div>
-                                        <label className="block text-sm font-semibold text-slate-700 mb-2">Školní útvar / Pracoviště</label>
-                                        <input type="text" placeholder="Útvar policejního vzdělávání a služební přípravy" value={profile.school_location} onChange={e => setProfile({ ...profile, school_location: e.target.value })} className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Funkční zařazení</label>
+                                            <select
+                                                value={profile.funkcni_zarazeni}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    let newRankShortcut = profile.rank_shortcut;
+                                                    let newRankFull = profile.rank_full;
+
+                                                    if (val === 'Lektor') {
+                                                        newRankShortcut = 'kpt.';
+                                                        newRankFull = 'vrchní komisař';
+                                                    } else if (val === 'Metodik') {
+                                                        newRankShortcut = 'pplk.';
+                                                        newRankFull = 'rada';
+                                                    }
+
+                                                    setProfile({
+                                                        ...profile,
+                                                        funkcni_zarazeni: val,
+                                                        rank_shortcut: newRankShortcut,
+                                                        rank_full: newRankFull
+                                                    });
+                                                }}
+                                                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white"
+                                            >
+                                                <option value="">Vyberte zařazení</option>
+                                                <option value="Lektor">Lektor</option>
+                                                <option value="Metodik">Metodik</option>
+                                                <option value="Administrátor">Administrátor</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">Školní útvar / Pracoviště</label>
+                                            <select
+                                                value={profile.school_location}
+                                                onChange={e => setProfile({ ...profile, school_location: e.target.value })}
+                                                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white"
+                                            >
+                                                <option value="">Vyberte útvar...</option>
+                                                <option value="ÚPVSP">ÚPVSP</option>
+                                                <option value="VZ Holešov">VZ Holešov</option>
+                                                <option value="VZ Brno">VZ Brno</option>
+                                                <option value="VZ Hrdlořezy">VZ Hrdlořezy</option>
+                                                <option value="VZ Pardubice">VZ Pardubice</option>
+                                                <option value="VZ Jihlava">VZ Jihlava</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* Živý náhled doložky */}
+                                    <div className="mt-8 p-5 bg-slate-50 border border-slate-200 rounded-xl relative overflow-hidden">
+                                        <div className="absolute top-0 left-0 w-1 h-full bg-[#D4AF37]"></div>
+                                        <h4 className="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider flex items-center gap-1.5">
+                                            <UserPen className="w-3.5 h-3.5" />
+                                            Živý náhled podpisové doložky
+                                        </h4>
+                                        <div className="text-[15px] text-slate-800 leading-relaxed font-medium">
+                                            {profile.rank_shortcut} {profile.title_before} {profile.first_name} {profile.last_name}{profile.title_after ? `, ${profile.title_after}` : ''}
+                                            <br />
+                                            {profile.rank_full}
+                                            <br />
+                                            Útvar policejního vzdělávání a služební přípravy
+                                            {profile.school_location && profile.school_location !== 'ÚPVSP' && (
+                                                <>
+                                                    <br />
+                                                    <span className="text-[#002855] font-semibold">{profile.school_location}</span>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
+
+                                {/* Historie Exportů */}
+                                {!isSetupMode && exportsHistory.length > 0 && (
+                                    <div className="mt-8">
+                                        <h3 className="text-lg font-bold text-[#002855] mb-4 flex items-center gap-2 border-b border-slate-200 pb-2">
+                                            <History className="w-5 h-5 text-slate-500" />
+                                            Moje poslední exporty
+                                        </h3>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-sm text-left">
+                                                <thead className="bg-[#002855]/5 text-[#002855] text-xs uppercase font-semibold">
+                                                    <tr>
+                                                        <th className="px-4 py-3 rounded-tl-lg">Datum exportu</th>
+                                                        <th className="px-4 py-3">Scénář / Třída</th>
+                                                        <th className="px-4 py-3">Typ</th>
+                                                        <th className="px-4 py-3 text-right rounded-tr-lg">Akce</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {exportsHistory.map((item, idx) => (
+                                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                                            <td className="px-4 py-3 font-medium text-slate-600">{item.created_at}</td>
+                                                            <td className="px-4 py-3 font-semibold text-slate-800">{item.scenario_name}</td>
+                                                            <td className="px-4 py-3">
+                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#D4AF37]/10 text-[#C5A028]">
+                                                                    {item.type}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3 text-right">
+                                                                <a
+                                                                    href={`http://localhost:8000${item.download_url}`}
+                                                                    download
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#002855] hover:bg-[#002855] hover:text-white border border-[#002855]/20 rounded transition-colors"
+                                                                >
+                                                                    <Download className="w-3.5 h-3.5" />
+                                                                    Stáhnout znovu
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ) : adminTab !== 'vllm' ? (
                             <>

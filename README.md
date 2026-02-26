@@ -1,13 +1,15 @@
-# Vyhodnocování ÚZ pomocí AI (Evaluátor ÚZ)
+# EVALUZ: Asistent pro vyhodnocování úředních záznamů v ZOP
 
-Specializovaný nástroj pro lektory ÚPVSP určený k automatizovanému vyhodnocování úředních záznamů podle § 40 zákona o policii.
+Specializovaný nástroj pro lektory určený k automatizovanému vyhodnocování úředních záznamů podle § 40 zákona o policii.
 
 ## 🚀 Klíčové funkce
 
 *   **Inteligentní extrakce hodnotících kritérií:** Automatické získání kritérií z PDF zadání pomocí AI.
-*   **AI hodnocení studentských prací:** Objektivní posouzení záznamů s individuální pedagogickou zpětnou vazbou pro každého studenta.
-*   **Globální analýza třídy:** Dashboard s heatmapou úspěšnosti (K1-K25) a přehledem nejčastějších chyb.
-*   **Export výsledků:** Generování přehledů v Excelu a profesionálních PDF reportů v designu systému HERMES.
+*   **AI hodnocení studentských prací:** Objektivní posouzení záznamů s individuální pedagogickou zpětnou vazbou.
+*   **Man-in-the-Loop (Lektorské korekce):** Možnost ručního zásahu lektora do bodového hodnocení a zpětné vazby s okamžitou aktualizací statistik.
+*   **Deterministická Analytika:** Statistické výpočty (K1-K25) probíhají exaktně v Pythonu, nikoliv v LLM, což zaručuje 100% matematickou správnost.
+*   **Globální analýza třídy:** Dashboard s heatmapou úspěšnosti, distribučními grafy a AI doporučeními.
+*   **Export výsledků:** Generování profesionálních PDF reportů a Excelových přehledů.
 
 ## 🛠 Tech Stack
 
