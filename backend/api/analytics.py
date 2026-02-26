@@ -7,7 +7,13 @@ from core.database import get_db
 from models.db_models import StudentEvaluation, Lecturer, ClassAnalysis
 from models.evaluation import EvaluationResponse
 from services.analytics import generate_class_summary
+from services.analytics import generate_class_summary
 from api.auth import get_current_lecturer
+from pydantic import BaseModel
+
+class EvaluationPatchRequest(BaseModel):
+    json_result: dict
+
 
 router = APIRouter(
     prefix="/analytics",
@@ -15,15 +21,20 @@ router = APIRouter(
 )
 
 @router.get("/class/{class_id}", response_model=List[EvaluationResponse])
-def get_class_evaluations(class_id: int, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """
     Retrieves all stored evaluations for a specific class ID.
     Parses the JSON strings from the DB and returns them as structured Pydantic models.
     """
-    evaluations = db.query(StudentEvaluation).filter(
+    query = db.query(StudentEvaluation).filter(
         StudentEvaluation.class_id == class_id,
         StudentEvaluation.lecturer_id == current_user.id
-    ).all()
+    )
+    
+    if scenario_id:
+        query = query.filter(StudentEvaluation.scenario_name == scenario_id)
+        
+    evaluations = query.all()
     
     results = []
     for eval_record in evaluations:
@@ -65,6 +76,31 @@ def delete_evaluation(evaluation_id: int, db: Session = Depends(get_db), current
     db.delete(eval_record)
     db.commit()
     return {"status": "success", "message": "Záznam byl smazán."}
+
+@router.patch("/evaluation/{evaluation_id}/score")
+def patch_evaluation_score(evaluation_id: int, request: EvaluationPatchRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+    """
+    Overwrites the JSON result of an existing evaluation with manually corrected scores from the UI.
+    Invalidates the analytics cache for the affected scenario.
+    """
+    eval_record = db.query(StudentEvaluation).filter(
+        StudentEvaluation.id == evaluation_id,
+        StudentEvaluation.lecturer_id == current_user.id
+    ).first()
+    
+    if not eval_record:
+        raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
+        
+    # Uložení nového JSON z frontendu
+    eval_record.json_result = json.dumps(request.json_result, ensure_ascii=False)
+    
+    # Invalidation of cache
+    if eval_record.scenario_name:
+        db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == eval_record.scenario_name).delete()
+        
+    db.commit()
+    return {"status": "success", "message": "Hodnocení manuálně upraveno. Analytika bude při příštím zobrazení přepočítána."}
+
 
 @router.get("/class/{class_id}/status")
 def get_class_analysis_status(class_id: int, db: Session = Depends(get_db)):

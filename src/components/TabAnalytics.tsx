@@ -15,6 +15,9 @@ import {
     Legend
 } from 'recharts';
 
+/**
+ * Formát dat pro analytiku třídy z backendu
+ */
 interface AnalyticsData {
     stats: { name: string, full_name: string, success_rate: number, avg_score: number }[];
     top_errors: string[];
@@ -26,15 +29,24 @@ interface AnalyticsData {
     scenario_id?: string;
 }
 
-const PIE_COLORS = ['#ef4444', '#f59e0b', '#10b981']; // Red, Amber, Emerald
+// Barevná paleta pro grafy (Semafor: Červená, Jantarová, Zelená)
+const PIE_COLORS = ['#ef4444', '#f59e0b', '#10b981'];
 
 interface TabAnalyticsProps {
+    /** ID aktuálně vybrané modelové situace (scénáře) */
     scenarioId: string | null;
+    /** Případná nacachovaná data pro okamžité zobrazení */
     cachedData?: any | null;
+    /** Callback pro uložení dat do cache rodiče */
     onCacheData?: (data: any) => void;
+    /** Callback pro navigaci na detail konkrétního studenta */
     onNavigateToStudent?: (studentId: number) => void;
 }
 
+/**
+ * Komponenta pro zobrazení globální analýzy výsledků celé třídy.
+ * Obsahuje interaktivní grafy (Recharts), AI doporučení a seznam studentů vyžadujících pomoc.
+ */
 export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -44,6 +56,10 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
     const [previewStudentData, setPreviewStudentData] = useState<any>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
 
+    /**
+     * Načte analytická data z API.
+     * @param force - Pokud je true, vynutí přepočet na straně AI (ignoruje cache v DB)
+     */
     const fetchAnalytics = async (force: boolean = false) => {
         setLoading(true);
         setError(null);
@@ -63,10 +79,9 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
 
             const json = await res.json();
             setData(json);
-            if (onCacheData && !force) {
-                // Not force because forcing just updates the data directly. Actually even if force, we want to update the cache so the checkmark stays or we don't care. Yes, we want to update the cache.
-                onCacheData(json);
-            } else if (onCacheData && force) {
+
+            // Uložení do cache pro plynulejší UX při přepínání tabů
+            if (onCacheData) {
                 onCacheData(json);
             }
         } catch (e: any) {
@@ -80,12 +95,17 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
         fetchAnalytics();
     }, []);
 
+    // Transformace dat pro koláčový graf rozložení skóre
     const pieData = data ? [
         { name: '0-50 %', value: data.score_distribution["0_50"] },
         { name: '51-80 %', value: data.score_distribution["51_80"] },
         { name: '81-100 %', value: data.score_distribution["81_100"] }
-    ].filter(d => d.value > 0) : []; // filter out empty bands
+    ].filter(d => d.value > 0) : [];
 
+    /**
+     * Stáhne výsledky celé třídy v XLSX formátu (Excel).
+     * Po stažení automaticky zaloguje akci do historie exportů.
+     */
     const handleExportExcel = async () => {
         try {
             const url = scenarioId
@@ -105,17 +125,55 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
             a.click();
             window.URL.revokeObjectURL(blobUrl);
             document.body.removeChild(a);
+
+            // Zápis úspěšného exportu do databáze historie
+            await fetch('http://localhost:8000/api/v1/export/history', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
+                body: JSON.stringify({
+                    scenario_name: data?.scenario_id || scenarioId || 'Neznámý scénář',
+                    type: 'Excel export (třída)',
+                    download_url: `/api/v1/export/class/1/excel${scenarioId ? `?scenario_id=${scenarioId}` : ''}`
+                })
+            });
         } catch (e: any) {
             alert(e.message);
         }
     };
 
-    const handleExportPDF = () => {
+    /**
+     * Otevře komplexní PDF report analýzy třídy v novém okně.
+     * Zahrnuje grafy a AI texty vygenerované na backendu přes pyfpdf.
+     */
+    const handleExportPDF = async () => {
         const token = localStorage.getItem('upvsp_token');
-        const url = `http://localhost:8000/api/v1/export/class-report/${scenarioId}?token=${token}`;
+        const finalScenarioId = data?.scenario_id || scenarioId || 'Neznámý_scénář';
+        const url = `http://localhost:8000/api/v1/export/class-report/${finalScenarioId}?token=${token}`;
         window.open(url, '_blank');
+
+        // Zápis exportu do historie
+        try {
+            await fetch('http://localhost:8000/api/v1/export/history', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    scenario_name: finalScenarioId,
+                    type: 'PDF analýza (třída)',
+                    download_url: `/api/v1/export/class-report/${finalScenarioId}?token=${token}`
+                })
+            });
+        } catch (e) { console.error("History log failed", e) }
     };
 
+    /**
+     * Načte a zobrazí rychlý detail výsledků studenta v modálním okně přímo v analytice.
+     */
     const handlePreviewStudent = async (studentId: number) => {
         setPreviewStudentId(studentId);
         setPreviewLoading(true);
@@ -150,6 +208,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
 
     return (
         <div className="max-w-6xl mx-auto space-y-6">
+            {/* HLAVIČKA A EXPORTNÍ TLAČÍTKA */}
             <div className="flex items-center justify-between">
                 <div>
                     <h3 className="text-xl font-semibold text-[#002855]">Globální analýza třídy</h3>
@@ -166,15 +225,14 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         Aktualizovat
                     </button>
-                    <a
-                        href={`http://localhost:8000/api/v1/export/class-report/${data?.scenario_id || scenarioId}?token=${localStorage.getItem('upvsp_token')}`}
-                        download
-                        target="_blank"
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium shadow-sm"
+                    <button
+                        onClick={handleExportPDF}
+                        disabled={loading || !data}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
                     >
                         <FileText className="w-4 h-4" />
                         Exportovat PDF report
-                    </a>
+                    </button>
                     <button
                         onClick={handleExportExcel}
                         className="flex items-center gap-2 px-4 py-2 bg-[#002855] text-white rounded-lg hover:bg-[#002855]/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
@@ -203,8 +261,9 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                 </div>
             ) : data ? (
                 <>
-                    {/* Top Stats Cards */}
+                    {/* STATISTICKÉ KARTY (KPI) */}
                     <div className="grid grid-cols-3 gap-6">
+                        {/* Průměrné skóre */}
                         <div className="col-span-1 bg-gradient-to-br from-[#002855] to-[#001a38] p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center text-white relative overflow-hidden">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4AF37] rounded-full mix-blend-multiply filter blur-2xl opacity-20 translate-x-1/2 -translate-y-1/2"></div>
                             <h4 className="font-semibold text-lg text-slate-100 mb-2 z-10">Průměrné Skóre Třídy</h4>
@@ -213,7 +272,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                             </div>
                         </div>
 
-                        {/* Needs Help Roster */}
+                        {/* Roster studentů vyžadujících pomoc */}
                         <div className="col-span-1 bg-red-50 p-6 rounded-xl border border-red-100 shadow-sm flex flex-col">
                             <div className="flex items-center gap-2 mb-4">
                                 <AlertTriangle className="w-5 h-5 text-red-600" />
@@ -239,7 +298,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                             </div>
                         </div>
 
-                        {/* Pie Chart - Score distribution */}
+                        {/* Koláčový graf rozložení ziskovosti */}
                         <div className="col-span-1 bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
                             <div className="flex items-center gap-2 mb-4">
                                 <PieChartIcon className="w-5 h-5 text-[#002855]" />
@@ -274,7 +333,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                     </div>
 
                     <div className="grid grid-cols-1 gap-6">
-                        {/* Bar Chart - Success rates */}
+                        {/* SLOUPCOVÝ GRAF ÚSPĚŠNOSTI DLOUHÝCH KRITÉRIÍ */}
                         <div className="col-span-1 bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                             <div className="flex items-center gap-2 mb-6">
                                 <BarChart3 className="w-5 h-5 text-[#002855]" />
@@ -306,8 +365,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                                             radius={[0, 4, 4, 0]}
                                             barSize={20}
                                             onClick={(barData) => {
-                                                // barData contains the payload for this specific bar.
-                                                // we must use original un-truncated name 'full_name' for dict lookup
+                                                // Filtrace "Rychlého náhledu" neúspěšných podle kliknutí na sloupec grafu
                                                 const identifier = (barData as any).full_name;
                                                 setSelectedCriterion(identifier === selectedCriterion ? null : identifier);
                                             }}
@@ -325,7 +383,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                             </div>
                         </div>
 
-                        {/* Dynamic Roster section */}
+                        {/* SEZNAM NEÚSPĚŠNÝCH VE FILTROVANÉM KRITÉRIU */}
                         {selectedCriterion && (
                             <div className="col-span-1 bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col mt-2">
                                 <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
@@ -367,7 +425,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                         )}
                     </div>
 
-                    {/* AI Recommendations */}
+                    {/* AI PEDAGOGICKÁ DOPORUČENÍ (Analyzováno přes LLM) */}
                     <div className="bg-gradient-to-br from-[#002855] to-[#001a38] rounded-xl p-6 text-white shadow-md relative overflow-hidden mb-6">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-[#D4AF37] rounded-full mix-blend-multiply filter blur-3xl opacity-20 translate-x-1/2 -translate-y-1/2"></div>
                         <div className="relative z-10 flex items-center gap-2 mb-2 text-[#D4AF37]">
@@ -379,7 +437,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         {data.ai_insight.split('### ').filter(s => s.trim().length > 0).map((section, idx) => {
                             const lines = section.split('\n');
-                            const title = lines[0].trim().replace(/\*\*/g, ''); // Ensure title is not double-bolded
+                            const title = lines[0].trim().replace(/\*\*/g, '');
                             const content = lines.slice(1).join('\n').trim();
                             return (
                                 <div key={idx} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col hover:shadow-md transition-shadow">
@@ -404,7 +462,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                 </>
             ) : null}
 
-            {/* Quick Preview Modal */}
+            {/* RYCHLÝ NÁHLED MODÁL (Student v analytice) */}
             {previewStudentId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
                     <div className="bg-white max-w-2xl w-full max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -454,8 +512,8 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                                             Nesplněná kritéria
                                         </h4>
                                         <div className="space-y-2">
-                                            {previewStudentData.vysledky.filter((v: any) => !v.splneno).length > 0 ? (
-                                                previewStudentData.vysledky.filter((v: any) => !v.splneno).map((v: any, i: number) => (
+                                            {previewStudentData.vysledky.filter((v: any) => v.body === 0).length > 0 ? (
+                                                previewStudentData.vysledky.filter((v: any) => v.body === 0).map((v: any, i: number) => (
                                                     <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm">
                                                         <p className="font-semibold text-red-800 mb-1">{v.nazev}</p>
                                                         <p className="text-red-600">{v.oduvodneni}</p>

@@ -22,6 +22,7 @@ class Lecturer(Base):
     rank_shortcut = Column(String, default="")
     rank_full = Column(String, default="")
     school_location = Column(String, default="")
+    funkcni_zarazeni = Column(String, default="")
 
 class EvaluationCriteria(Base):
     __tablename__ = "evaluation_criteria"
@@ -50,6 +51,7 @@ class StudentEvaluation(Base):
     lecturer_id = Column(Integer, ForeignKey("lecturers.id"))
     student_name = Column(String, index=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
+    scenario_name = Column(String, index=True, default="scen-1")
     json_result = Column(Text) # Store output as JSON string
     
 class AppSettings(Base):
@@ -64,3 +66,13 @@ class ClassAnalysis(Base):
     scenario_id = Column(String, index=True, unique=True)
     content_json = Column(Text)
     created_at = Column(String)
+
+class ExportHistory(Base):
+    __tablename__ = "export_history"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("lecturers.id"), index=True)
+    scenario_name = Column(String)
+    type = Column(String)
+    download_url = Column(String)
+    created_at = Column(String, index=True)
+

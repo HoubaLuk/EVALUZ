@@ -34,6 +34,7 @@ export interface CriterionResult {
   body: number;
   oduvodneni: string;
   citace: string;
+  upraveno_lektorem?: boolean;
 }
 
 export interface Student {
@@ -44,6 +45,7 @@ export interface Student {
   maxScore: number;
   evaluationDetails?: CriterionResult[]; // Added to store individual results
   zpetna_vazba?: string;
+  isDirty?: boolean;
 }
 
 export interface AnalyticsData {

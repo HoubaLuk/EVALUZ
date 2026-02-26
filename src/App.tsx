@@ -12,7 +12,11 @@ import { TabAnalytics } from './components/TabAnalytics';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
-export default function App() {
+/**
+ * Hlavní vstupní bod aplikace EVALUZ.
+ * Spravuje globální stav (autentizace, výběr scénářů) a základní layout.
+ */
+export default function EvaluzDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('evaluation');
   const [selectedStudent, setSelectedStudent] = useState<number | null>(1); // Default to first student for demo
   const [isAdminOpen, setIsAdminOpen] = useState(false);
@@ -40,6 +44,7 @@ export default function App() {
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [cachedAnalytics, setCachedAnalytics] = useState<Record<string, any>>({});
   const [scenariosWithAnalysis, setScenariosWithAnalysis] = useState<string[]>([]);
+  const [hasEvaluations, setHasEvaluations] = useState(false);
 
   useEffect(() => {
     // Načíst z DB jaké scénáře už mají hotovou analýzu
@@ -58,6 +63,8 @@ export default function App() {
   const handleSelectScenario = (classId: string, scenarioId: string) => {
     setActiveClassId(classId);
     setActiveScenarioId(scenarioId);
+    setCachedAnalytics({});
+    setHasEvaluations(false);
   };
 
   useEffect(() => {
@@ -102,7 +109,8 @@ export default function App() {
           } else {
             const meData = await meRes.json();
             const fullName = `${meData.rank_shortcut || ''} ${meData.title_before || ''} ${meData.first_name || ''} ${meData.last_name || ''}`;
-            setLecturerName(fullName.replace(/\s+/g, ' ').trim() + " - Lektor");
+            const displayRole = meData.funkcni_zarazeni ? ` - ${meData.funkcni_zarazeni}` : ' - Lektor';
+            setLecturerName(fullName.replace(/\s+/g, ' ').trim() + displayRole);
             setAuthState('AUTHENTICATED');
           }
         } else {
@@ -181,7 +189,7 @@ export default function App() {
           <div className="bg-[#002855] px-6 py-6 text-center">
             <Lock className="w-12 h-12 text-white/90 mx-auto mb-3" />
             <h2 className="text-2xl font-bold text-white">Přihlášení do systému</h2>
-            <p className="text-blue-200 text-sm mt-1">ÚPVSP AI Evaluátor</p>
+            <p className="text-blue-200 text-sm mt-1">EVALUZ</p>
           </div>
           <form onSubmit={handleLogin} className="p-6">
             {authError && <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">{authError}</div>}
@@ -232,7 +240,7 @@ export default function App() {
               <ChevronRight className="w-4 h-4" />
               <span className="text-[#002855] font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
             </div>
-            <h2 className="text-3xl font-bold text-[#002855]">{activeScenario?.name || 'ÚPVSP | AI Evaluátor'}</h2>
+            <h2 className="text-3xl font-bold text-[#002855]">{activeScenario?.name || 'EVALUZ'}</h2>
             <p className="text-slate-500 mt-1">Hodnocení úředních záznamů dle § 40 zákona o policii.</p>
           </div>
 
@@ -254,21 +262,21 @@ export default function App() {
               ].map((step, index) => {
                 const isActive = activeTab === step.id;
                 let isCompleted = false;
+                const _hasAnalytics = !!(activeScenarioId && cachedAnalytics[activeScenarioId]);
+
                 if (index === 0) {
-                  isCompleted = activeTab === 'evaluation' || activeTab === 'analytics';
+                  isCompleted = activeTab === 'evaluation' || activeTab === 'analytics' || hasEvaluations;
                 } else if (index === 1) {
-                  isCompleted = activeTab === 'analytics';
+                  isCompleted = hasEvaluations || activeTab === 'analytics' || _hasAnalytics;
                 } else if (index === 2) {
-                  isCompleted = !!(activeScenarioId && cachedAnalytics[activeScenarioId]);
+                  isCompleted = _hasAnalytics;
                 }
 
-                const circleColorClass = isActive && isCompleted && index === 2
-                  ? 'bg-[#D4AF37] text-white ring-4 ring-[#D4AF37]/20 shadow-md'
+                const circleColorClass = isCompleted
+                  ? `bg-[#D4AF37] text-white overflow-hidden transition-all duration-300 ${isActive ? 'ring-4 ring-[#D4AF37]/20 shadow-md' : ''}`
                   : isActive
-                    ? 'bg-[#002855] text-white ring-4 ring-[#002855]/20 shadow-md'
-                    : isCompleted
-                      ? 'bg-[#D4AF37] text-white'
-                      : 'bg-white text-slate-400 border-2 border-slate-200 hover:border-slate-300';
+                    ? 'bg-[#002855] text-white ring-4 ring-[#002855]/20 shadow-md transition-all duration-300'
+                    : 'bg-white text-slate-400 border-2 border-slate-200 hover:border-slate-300 transition-all duration-300';
 
                 return (
                   <button
@@ -302,6 +310,9 @@ export default function App() {
                 selectedStudent={selectedStudent}
                 setSelectedStudent={setSelectedStudent}
                 scenarioId={activeScenarioId}
+                className={activeClass?.name}
+                scenarioName={activeScenario?.name}
+                onEvaluatedChange={setHasEvaluations}
               />
             )}
             {activeTab === 'analytics' && (

@@ -33,6 +33,7 @@ class SetupData(BaseModel):
     rank_shortcut: str = ""
     rank_full: str = ""
     school_location: str = ""
+    funkcni_zarazeni: str = ""
 
 class ProfileUpdate(BaseModel):
     title_before: str = ""
@@ -42,6 +43,7 @@ class ProfileUpdate(BaseModel):
     rank_shortcut: str = ""
     rank_full: str = ""
     school_location: str = ""
+    funkcni_zarazeni: str = ""
 
 # --- Dependency ---
 def decode_lecturer_token(token: str, db: Session):
@@ -119,7 +121,8 @@ def setup_main_account(data: SetupData, db: Session = Depends(get_db)):
         title_after=data.title_after,
         rank_shortcut=data.rank_shortcut,
         rank_full=data.rank_full,
-        school_location=data.school_location
+        school_location=data.school_location,
+        funkcni_zarazeni=data.funkcni_zarazeni
     )
     
     db.add(new_lecturer)
@@ -177,7 +180,8 @@ def read_users_me(current_user: Lecturer = Depends(get_current_lecturer)):
         "title_after": current_user.title_after,
         "rank_shortcut": current_user.rank_shortcut,
         "rank_full": current_user.rank_full,
-        "school_location": current_user.school_location
+        "school_location": current_user.school_location,
+        "funkcni_zarazeni": current_user.funkcni_zarazeni
     }
 
 
@@ -193,6 +197,7 @@ def update_profile(profile: ProfileUpdate, db: Session = Depends(get_db), curren
     current_user.rank_shortcut = profile.rank_shortcut
     current_user.rank_full = profile.rank_full
     current_user.school_location = profile.school_location
+    current_user.funkcni_zarazeni = profile.funkcni_zarazeni
     
     db.commit()
     return {"status": "success", "message": "Profil byl úspěšně aktualizován."}

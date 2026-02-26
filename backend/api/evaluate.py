@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from typing import List
 import json
 import asyncio
+import unicodedata
 from sqlalchemy.orm import Session
 from core.database import get_db
 from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion
@@ -43,6 +44,7 @@ async def evaluate_batch(
     ).first()
     
     if not criteria_record or not criteria_record.markdown_content.strip():
+        print(f">>> BATCH ERROR: Nebyla nalezena kritéria v tabulce 'EvaluationCriteria' pro scenario: '{scenario_id}', lecturer_id: {current_user.id}")
         raise HTTPException(
             status_code=404, 
             detail=f"Kritéria pro tuto situaci ({scenario_id}) nebyla nalezena."
@@ -54,6 +56,7 @@ async def evaluate_batch(
     ).all()
     
     if not individual_criteria:
+        print(f">>> BATCH ERROR: Nebyla nalezena jednotlivá rozparsovaná kritéria v tabulce 'Criterion' pro evaluation_criteria_id: {criteria_record.id}")
         raise HTTPException(
             status_code=404, 
             detail=f"Kritéria pro ({scenario_id}) nebyla správně rozparsována. Uložte je prosím znovu v Nastavení kritérií."
@@ -73,10 +76,11 @@ async def evaluate_batch(
     semaphore = asyncio.Semaphore(5)
     db_lock = asyncio.Lock()
 
-    async def process_single_file(file: UploadFile, system_prompt: str, criteria_markdown: str, db_session: Session, current_user_obj: Lecturer) -> EvaluationResponse:
+    async def process_single_file(file: UploadFile, system_prompt: str, criteria_markdown: str, db_session: Session, current_user_obj: Lecturer, scenario_id: str) -> EvaluationResponse:
         import os
         base_name = os.path.splitext(file.filename)[0]
-        student_name = f"stržm. {base_name}" if '.' in file.filename else file.filename
+        student_name_raw = f"stržm. {base_name}" if '.' in file.filename else file.filename
+        student_name = unicodedata.normalize('NFC', student_name_raw)
         
         try:
             # 1. Extract text
@@ -103,7 +107,8 @@ async def evaluate_batch(
                 print(f"[LOG - {student_name}] Ukládám transakci do databáze...")
                 eval_record = StudentEvaluation(
                     student_name=student_name,
-                    class_id=1, 
+                    class_id=1,
+                    scenario_name=scenario_id,
                     lecturer_id=current_user_obj.id,
                     json_result=json.dumps(llm_result_dict, ensure_ascii=False)
                 )
@@ -137,7 +142,7 @@ async def evaluate_batch(
                 zpetna_vazba=f"Chyba při zpracování: {ve}"
             )
         except Exception as e:
-            print(f"[LOG - {student_name}] LLM Server Error: {e}")
+            print(f"[LOG - {student_name}] KRITICKÁ CHYBA: {e}")
             # Nikdy neraisujeme výjimku přímo v gather smyčce, jinak padne celý batch
             return EvaluationResponse(
                 jmeno_studenta=student_name,
@@ -147,7 +152,7 @@ async def evaluate_batch(
             )
 
     # Vytvoření seznamu korutin pro asynchronní vyhodnocení všech dokumentů paralelně
-    tasks = [process_single_file(file, system_prompt_str, criteria_str, db, current_user) for file in files]
+    tasks = [process_single_file(file, system_prompt_str, criteria_str, db, current_user, scenario_id) for file in files]
     
     # Vyčkání na dokončení všech tasků (exceptions bubbling up directly to fastapi exception handlers)
     results = await asyncio.gather(*tasks)
