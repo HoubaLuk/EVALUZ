@@ -44,9 +44,16 @@ export interface Student {
   score: number;
   maxScore: number;
   evaluationDetails?: CriterionResult[]; // Added to store individual results
+  cleanedName?: string;
+  identita?: {
+    hodnost?: string;
+    jmeno?: string;
+    prijmeni?: string;
+  };
   zpetna_vazba?: string;
   isDirty?: boolean;
 }
+
 
 export interface AnalyticsData {
   name: string;

@@ -8,11 +8,16 @@ from models.db_models import StudentEvaluation, Lecturer, ClassAnalysis
 from models.evaluation import EvaluationResponse
 from services.analytics import generate_class_summary
 from services.analytics import generate_class_summary
+from utils.sorting import sort_evaluations_by_surname
 from api.auth import get_current_lecturer
 from pydantic import BaseModel
 
+
 class EvaluationPatchRequest(BaseModel):
     json_result: dict
+
+class NamePatchRequest(BaseModel):
+    name: str
 
 
 router = APIRouter(
@@ -35,15 +40,34 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
         query = query.filter(StudentEvaluation.scenario_name == scenario_id)
         
     evaluations = query.all()
+    evaluations = sort_evaluations_by_surname(evaluations)
     
     results = []
+
     for eval_record in evaluations:
         try:
             # Reconstruct the dict from stored JSON so it matches EvaluationResponse
-            data = json.loads(eval_record.json_result)
+            data = json.loads(eval_record.json_result) if eval_record.json_result else {}
             # Make sure we inject the student_name and ID into the payload just like the frontend expects it
             data["jmeno_studenta"] = eval_record.student_name
             data["id"] = eval_record.id
+            data["cleaned_name"] = eval_record.cleaned_name
+            
+            if eval_record.student_identity and eval_record.student_identity != "None":
+                try:
+                    data["identita"] = json.loads(eval_record.student_identity)
+                except:
+                    data["identita"] = None
+            else:
+                data["identita"] = None
+                
+            if "vysledky" not in data:
+                data["vysledky"] = []
+            if "celkove_skore" not in data:
+                data["celkove_skore"] = 0
+            if "zpetna_vazba" not in data:
+                data["zpetna_vazba"] = ""
+
             results.append(EvaluationResponse(**data))
         except Exception as e:
             print(f"Error parsing json for evaluation {eval_record.id}: {e}")
@@ -100,6 +124,24 @@ def patch_evaluation_score(evaluation_id: int, request: EvaluationPatchRequest, 
         
     db.commit()
     return {"status": "success", "message": "Hodnocení manuálně upraveno. Analytika bude při příštím zobrazení přepočítána."}
+
+@router.patch("/evaluation/{evaluation_id}/name")
+def patch_evaluation_name(evaluation_id: int, request: NamePatchRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+    """
+    Ručně upraví extrahovanou identitu/jméno studenta.
+    """
+    eval_record = db.query(StudentEvaluation).filter(
+        StudentEvaluation.id == evaluation_id,
+        StudentEvaluation.lecturer_id == current_user.id
+    ).first()
+    
+    if not eval_record:
+        raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
+        
+    eval_record.cleaned_name = request.name
+    eval_record.student_identity = None # Zamezí zobrazení původního JSON jména
+    db.commit()
+    return {"status": "success", "message": "Jméno studenta bylo ručně upraveno."}
 
 
 @router.get("/class/{class_id}/status")

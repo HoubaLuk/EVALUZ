@@ -19,10 +19,19 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             except Exception:
                 pass
                 
-    evaluations = db.query(StudentEvaluation).filter(
+    raw_evals = db.query(StudentEvaluation).filter(
         StudentEvaluation.class_id == class_id,
         StudentEvaluation.scenario_name == scenario_id
     ).all()
+    
+    evaluations = []
+    for e in raw_evals:
+        try:
+            data = json.loads(e.json_result) if e.json_result else {}
+            if data and data.get("vysledky"):
+                evaluations.append(e)
+        except:
+            pass
     
     # Získání definic kritérií z DB pro zjištění max počtu a přesných názvů
     criteria_record = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id).first()
@@ -57,13 +66,14 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             db_criteria.append(PseudoCriterion(name, max_pts))
 
     if not evaluations or not db_criteria:
+        max_possible_sc = sum([c.body for c in db_criteria]) if db_criteria else 0
         return {
             "stats": [],
             "top_errors": [],
             "ai_insight": "Není dostatek dat pro analýzu. Zatím nebyla vyhodnocena žádná modelová situace nebo chybí kritéria.",
             "score_distribution": {"0_50": 0, "51_80": 0, "81_100": 0},
             "average_score": 0,
-            "max_score": 25,
+            "max_score": max_possible_sc,
             "needs_help": [],
             "criterion_failures": {}
         }
@@ -113,7 +123,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
                     else:
                         criterion_failures[matched_key].append({
                             "id": eval_record.id,
-                            "name": eval_record.student_name.replace(',', ''),
+                            "name": eval_record.cleaned_name if eval_record.cleaned_name else eval_record.student_name.replace(',', ''),
                             "oduvodneni": criteria.get("oduvodneni", "")
                         })
                     criteria_totals[matched_key]["total_pts"] += bod_award
@@ -163,7 +173,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             data = json.loads(eval_record.json_result)
             percent = (data.get("celkove_skore", 0) / max_possible_sc) * 100
             if percent < 50:
-                needs_help.append(eval_record.student_name.replace(',', ''))
+                needs_help.append((eval_record.cleaned_name if eval_record.cleaned_name else eval_record.student_name).replace(',', ''))
         except Exception:
             pass
 

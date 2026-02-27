@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap } from 'lucide-react';
+import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Student } from '../types';
 
@@ -39,6 +39,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
     const [activeSourceQuote, setActiveSourceQuote] = useState<string | null>(null);
 
+    // Name editing state
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [editNameValue, setEditNameValue] = useState("");
+
     // Real API State
     const [isEvaluating, setIsEvaluating] = useState(false);
     const [evaluationProgress, setEvaluationProgress] = useState(0);
@@ -64,29 +68,24 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 const historyStudents: Student[] = data.map((evalRecord: any, index: number) => ({
                     id: evalRecord.id || (10000 + index),
                     name: evalRecord.jmeno_studenta,
-                    status: 'evaluated',
+                    cleanedName: evalRecord.cleaned_name,
+                    identita: evalRecord.identita,
+                    status: (evalRecord.vysledky && evalRecord.vysledky.length > 0) ? 'evaluated' : 'pending',
                     score: evalRecord.celkove_skore,
                     maxScore: 25,
                     evaluationDetails: evalRecord.vysledky,
                     zpetna_vazba: evalRecord.zpetna_vazba
                 }));
 
-                setStudents(current => {
-                    const pendingStudents = current.filter(s => s.status !== 'evaluated');
-                    const filteredPending = pendingStudents.filter(p => !historyStudents.some(h => {
-                        const hNFC = h.name.normalize('NFC');
-                        const pNFC = p.name.normalize('NFC');
-                        return hNFC.includes(pNFC) || pNFC.includes(hNFC.replace('stržm. ', ''));
-                    }));
-                    return [...historyStudents, ...filteredPending];
-                });
+
+                setStudents(historyStudents);
 
                 if (historyStudents.length > 0 && !selectedStudent) {
                     setSelectedStudent(historyStudents[0].id);
                 }
 
                 if (onEvaluatedChange) {
-                    onEvaluatedChange(historyStudents.length > 0);
+                    onEvaluatedChange(historyStudents.some(s => s.status === 'evaluated'));
                 }
             }
         } catch (e) {
@@ -119,41 +118,69 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         setIsSourceModalOpen(true);
     };
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
             const selectedFiles = Array.from(e.target.files) as File[];
-            setFiles(prev => [...prev, ...selectedFiles]);
-
-            const newStudents: Student[] = selectedFiles.map((f, i) => {
-                const cleanName = f.name.replace(/\.(docx|rtf|pdf)$/i, '');
-
-                // Advanced parsing: Prijmeni_Jmeno_... -> Jmeno Prijmeni
-                const parts = cleanName.split('_');
-                let displayName = cleanName;
-                if (parts.length >= 2) {
-                    const surname = parts[0];
-                    const firstName = parts[1];
-                    // Basic heuristic: if both look like names (capitalize them)
-                    displayName = `${firstName.charAt(0).toUpperCase() + firstName.slice(1)} ${surname.charAt(0).toUpperCase() + surname.slice(1)}`;
+            setFiles(prev => {
+                const map = new Map();
+                for (const f of [...prev, ...selectedFiles]) {
+                    map.set(f.name, f);
                 }
+                return Array.from(map.values());
+            });
 
+            // Optimistic pre-render
+            const optimisticStudents: Student[] = selectedFiles.map((f, i) => {
+                let displayName = f.name.replace(/\.(docx|rtf|pdf)$/i, '');
                 return {
-                    id: Date.now() + i,
-                    name: displayName,
+                    id: Date.now() + i, // docasne
+                    name: f.name,
+                    cleanedName: displayName,
                     status: 'pending',
                     score: 0,
                     maxScore: 25,
                 };
             });
-            setStudents(prev => [...newStudents, ...prev]);
-            setSelectedIds(newStudents.map(s => s.id));
-            if (newStudents.length > 0) setSelectedStudent(newStudents[0].id);
+            setStudents(prev => [...optimisticStudents, ...prev]);
+
+            // Posíláme na Fast-Scan
+            const formData = new FormData();
+            selectedFiles.forEach(f => formData.append('files', f));
+            formData.append('scenario_id', scenarioId || 'default');
+
+            try {
+                setToastMessage("Identifikuji autory úředních záznamů...");
+                const res = await fetch('http://localhost:8000/api/v1/evaluate/fast-scan', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+                    body: formData
+                });
+
+                if (res.ok) {
+                    // Refetch k syncu ID + jmen
+                    await fetchEvaluations();
+                    setToastMessage("Data o studentech nahrána.");
+                    setTimeout(() => setToastMessage(null), 3000);
+                }
+            } catch (err) {
+                console.error("Fast scan neprosel", err);
+            }
         }
     };
 
     const handleBatchEvaluate = async () => {
-        if (selectedIds.length === 0 || files.length === 0 || !scenarioId) {
-            if (!scenarioId) alert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");
+        if (!scenarioId) {
+            alert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");
+            return;
+        }
+
+        if (students.length > 0 && selectedIds.length === 0) {
+            alert("Prosím zaškrtněte v Seznamu studentů ty, které chcete vyhodnotit (nebo klikněte na 'Vybrat všechny').");
+            return;
+        }
+
+        if (files.length === 0) {
+            alert("Nebyly nalezeny žádné zdrojové soubory v paměti prohlížeče.\n\nPokud jste stránku od nahrání obnovili nebo zavřeli, paměť se (z bezpečnostních důvodů) vymazala. Klikněte znovu na tlačítko 'Nahrát ÚZ' a soubory znovu vyberte. Následně hned klikněte na 'Hromadně vyhodnotit'.");
             return;
         }
 
@@ -173,10 +200,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             if (!student || student.status === 'evaluated') continue;
 
             const file = files.find(f => {
-                const cleanFileName = f.name.replace(/\.(docx|rtf|pdf)$/i, '').toLowerCase();
-                const studentNameLower = student.name.toLowerCase();
-                return cleanFileName.includes(studentNameLower) || studentNameLower.includes(cleanFileName) ||
-                    (cleanFileName.split('_').length >= 2 && studentNameLower.includes(cleanFileName.split('_')[0].toLowerCase()));
+                const fNFC = f.name.normalize('NFC');
+                const sNFC = student.name.normalize('NFC');
+                return fNFC === sNFC || f.name === student.name;
             });
 
             if (file) {
@@ -186,7 +212,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         }
 
         if (filesToUpload.length === 0) {
-            console.error(">>> Žádné soubory nebyly spárovány se zvolenými studenty!");
+            alert("Nebyly nalezeny žádné zdrojové soubory pro zvolené studenty.\n\nPokud jste stránku od nahrání obnovili nebo zavřeli, paměť prohlížeče se (z bezpečnostních důvodů) vymazala. Klikněte znovu na tlačítko 'Nahrát ÚZ' a soubory znovu vyberte. Následně hned klikněte na 'Hromadně vyhodnotit'.");
             setIsEvaluating(false);
             return;
         }
@@ -391,6 +417,56 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         }
     };
 
+    const handleRenameClick = async (student: Student) => {
+        const defaultName = student.identita?.prijmeni ? `${student.identita.prijmeni.toUpperCase()} ${student.identita.jmeno}, ${student.identita.hodnost}` : student.cleanedName || student.name;
+        const newName = window.prompt("Upravte jméno studenta formátem: PŘÍJMENÍ Jméno, hodnost", defaultName);
+        if (!newName || newName.trim() === defaultName) return;
+
+        let finalName = newName.trim();
+        const spaceIndex = finalName.indexOf(' ');
+        if (spaceIndex !== -1) {
+            const surname = finalName.substring(0, spaceIndex).toUpperCase();
+            finalName = surname + finalName.substring(spaceIndex);
+        } else {
+            finalName = finalName.toUpperCase();
+        }
+
+        try {
+            const res = await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${student.id}/name`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
+                body: JSON.stringify({ name: finalName })
+            });
+
+            if (res.ok) {
+                setStudents(current => {
+                    const updated = current.map(s => s.id === student.id ? {
+                        ...s,
+                        cleanedName: finalName,
+                        identita: undefined // odstraníme původní AI identitu, aby se použilo cleanedName
+                    } : s);
+
+                    // Okamžité přeseřazení v lokálním stavu po úpravě
+                    return updated.sort((a, b) => {
+                        const nameA = a.cleanedName || a.name;
+                        const nameB = b.cleanedName || b.name;
+                        return nameA.localeCompare(nameB, 'cs');
+                    });
+                });
+                setToastMessage("Jméno studenta bylo ručně upraveno.");
+                setTimeout(() => setToastMessage(null), 3000);
+            } else {
+                throw new Error("Failed to save name");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Nepodařilo se uložit nové jméno.");
+        }
+    };
+
     //---------------------------------------------------------
 
     const activeStudentData = students.find(s => s.id === selectedStudent);
@@ -407,6 +483,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     </button>
                 </div>
             )}
+
 
             {/* Top Action Bar */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between mt-2">
@@ -454,8 +531,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 <div className="flex items-center gap-3">
                     <button
                         onClick={handleBatchEvaluate}
-                        disabled={isEvaluating || selectedIds.length === 0}
-                        className={`flex flex-col items-center justify-center px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md relative overflow-hidden min-w-[200px] ${isEvaluating || selectedIds.length === 0
+                        disabled={isEvaluating || students.length === 0}
+                        className={`flex flex-col items-center justify-center px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md relative overflow-hidden min-w-[200px] ${isEvaluating || students.length === 0
                             ? 'bg-slate-300 cursor-not-allowed'
                             : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028] hover:opacity-90'
                             }`}
@@ -488,8 +565,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
             {/* Two-Column Layout */}
             <div className="flex-1 flex gap-6 min-h-[500px]">
-                {/* Left Column: Student Roster (25%) */}
-                <div className="w-1/4 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                {/* Left Column: Student Roster (35%) */}
+                <div className="w-[35%] bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
                     <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                         <h3 className="font-semibold text-[#002855]">Seznam studentů</h3>
                         <span className="text-xs font-medium text-slate-400">{selectedIds.length}/{students.length}</span>
@@ -516,10 +593,15 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     className="w-4 h-4 rounded border-slate-300 text-[#002855] focus:ring-[#002855]"
                                 />
                                 <div className="flex-1 min-w-0 flex items-center justify-between group-inner">
-                                    <div className="flex-1 min-w-0 pr-2">
+                                    <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
                                         <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855]' : 'text-slate-700'}`}>
-                                            {student.name}
+                                            {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '')}
                                         </p>
+                                        {!student.identita && student.status === 'evaluated' && (
+                                            <Tooltip content="Identita studenta byla manuálně ověřena lektorem.">
+                                                <UserCheck className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                                            </Tooltip>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                         {student.status === 'evaluated' ? (
@@ -530,11 +612,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
                                                 <Loader2 className="w-3 h-3 animate-spin" /> Vyhodnocuji
                                             </span>
-                                        ) : (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-                                                <AlertCircle className="w-3 h-3" /> Čeká
-                                            </span>
-                                        )}
+                                        ) : null}
 
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger asChild>
@@ -547,10 +625,16 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             </DropdownMenu.Trigger>
                                             <DropdownMenu.Portal>
                                                 <DropdownMenu.Content
-                                                    className="w-40 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-[100] animate-in fade-in-80 zoom-in-95"
+                                                    className="w-44 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-[100] animate-in fade-in-80 zoom-in-95"
                                                     sideOffset={5}
                                                     align="end"
                                                 >
+                                                    <DropdownMenu.Item
+                                                        onSelect={() => handleRenameClick(student)}
+                                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-slate-50 border-b border-slate-50"
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" /> Upravit jméno
+                                                    </DropdownMenu.Item>
                                                     <DropdownMenu.Item
                                                         onSelect={() => handleDeleteStudent(student.id)}
                                                         className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
@@ -567,8 +651,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     </div>
                 </div>
 
-                {/* Right Column: The Full-Width Evaluation Canvas (75%) */}
-                <div className="w-3/4 flex flex-col gap-4">
+                {/* Right Column: The Full-Width Evaluation Canvas (65%) */}
+                <div className="w-[65%] flex flex-col gap-4">
                     {activeStudentData && activeStudentData.status === 'evaluated' ? (
                         <>
                             {/* Header */}
@@ -578,9 +662,17 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         <User className="w-5 h-5 text-slate-500" />
                                     </div>
                                     <div>
-                                        <h2 className="text-xl font-bold text-[#002855]">Hodnocení: {activeStudentData.name}</h2>
-                                        <p className="text-sm text-slate-500">MS2: Vstup do obydlí • Evaluováno dynamicky</p>
+                                        <h2 className="text-xl font-bold text-[#002855] flex items-center gap-2">
+                                            Hodnocení: {activeStudentData.identita?.prijmeni ? `${activeStudentData.identita.prijmeni.toUpperCase()} ${activeStudentData.identita.jmeno}, ${activeStudentData.identita.hodnost}` : activeStudentData.cleanedName || activeStudentData.name}
+                                            {(!activeStudentData.identita && activeStudentData.status === 'evaluated') && (
+                                                <Tooltip content="Identita studenta byla manuálně ověřena lektorem.">
+                                                    <UserCheck className="w-5 h-5 text-blue-500" />
+                                                </Tooltip>
+                                            )}
+                                        </h2>
+                                        <p className="text-sm text-slate-500">{scenarioName || 'Evaluováno dynamicky'}</p>
                                     </div>
+
                                 </div>
                                 <div className="flex flex-col items-end">
                                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Celkové skóre</span>
@@ -734,11 +826,18 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                         </>
                     ) : (
                         <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-slate-400">
-                            <AlertCircle className="w-12 h-12 mb-4 text-slate-300" />
                             {activeStudentData && activeStudentData.status === 'pending' ? (
-                                <p className="text-lg font-medium text-slate-500">Čeká na zahájení evaluace...</p>
+                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
+                                    <Hourglass className="w-16 h-16 text-slate-200" />
+                                    <h3 className="text-xl font-medium text-slate-600">Čeká se na zahájení evaluace...</h3>
+                                    <p className="text-sm">Vyberte studenty a klikněte na "Hromadně vyhodnotit (AI)".</p>
+                                </div>
                             ) : (
-                                <p className="text-lg font-medium text-slate-500">Nahrajte a vyberte .docx soubory k vyhodnocení</p>
+                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
+                                    <UploadCloud className="w-16 h-16 text-slate-300" />
+                                    <h3 className="text-xl font-medium text-slate-600">Nahrajte úřední záznamy a vyberte ty, které chcete vyhodnotit</h3>
+                                    <p className="text-sm">Klikněte na tlačítko "Nahrát práce (.docx, .pdf)" a vyberte dokumenty.</p>
+                                </div>
                             )}
                         </div>
                     )}
