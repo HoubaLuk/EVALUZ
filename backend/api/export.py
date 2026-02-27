@@ -164,12 +164,12 @@ def export_evaluation_pdf(
         raise HTTPException(status_code=500, detail="Chyba při generování PDF.")
 
 @router.get("/class/{class_id}/excel", response_class=Response)
-def export_class_excel(class_id: int, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+def export_class_excel(class_id: int, scenario_id: str = None, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """
     Vygeneruje a vrátí XLSX sešit výsledků celé třídy.
     """
     try:
-        excel_bytes = generate_class_excel(class_id, db, current_user.id)
+        excel_bytes = generate_class_excel(class_id, db, current_user.id, scenario_id)
         
         headers = {
             'Content-Disposition': f'attachment; filename="vysledky_trida_{class_id}.xlsx"'

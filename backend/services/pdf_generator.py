@@ -4,7 +4,9 @@ import json
 from datetime import datetime
 from fpdf import FPDF
 from sqlalchemy.orm import Session
-from models.db_models import StudentEvaluation, Lecturer, EvaluationCriteria, Criterion
+from models.db_models import StudentEvaluation, Lecturer, EvaluationCriteria, Criterion, ClassRoom, ClassAnalysis
+from utils.sorting import sort_evaluations_by_surname
+
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -147,8 +149,8 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     max_points = 25
     if db:
         crit_record = db.query(EvaluationCriteria).filter(
-            EvaluationCriteria.scenario_name == "MS2",
-            EvaluationCriteria.lecturer_id == lecturer.id
+            EvaluationCriteria.scenario_name == scenario_id,
+            
         ).first()
         if crit_record:
             criteria = db.query(Criterion).filter(Criterion.evaluation_criteria_id == crit_record.id).all()
@@ -256,16 +258,13 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     pdf.ln(12)
     pdf.set_font("DejaVu", "", 11)
     
-    # Sestavení celého jména lektora
-    lektor_name_parts = []
-    if lecturer.title_before: lektor_name_parts.append(lecturer.title_before)
-    lektor_name_parts.append(lecturer.first_name)
-    lektor_name_parts.append(lecturer.last_name)
-    if lecturer.title_after: lektor_name_parts.append(lecturer.title_after)
-    lektor_full_name = " ".join(lektor_name_parts)
+    # Sestavení celého jména lektora dle požadavku
+    name_str = f"{lecturer.title_before + ' ' if lecturer.title_before else ''}{lecturer.first_name} {lecturer.last_name}{' ' + lecturer.title_after if lecturer.title_after else ''}".strip()
+    rank_str = f"{lecturer.funkcni_zarazeni + ' ' if lecturer.funkcni_zarazeni else ''}{lecturer.rank_full or lecturer.rank_shortcut}".strip()
+    if not rank_str:
+        rank_str = "Lektor"
     
-    rank_prefix = lecturer.rank_shortcut if lecturer.rank_shortcut else "Lektor"
-    pdf.cell(0, 8, safe_text(f"vytvořil: {rank_prefix} {lektor_full_name}"), ln=1)
+    pdf.cell(0, 8, safe_text(f"vytvořil: {name_str}, {rank_str}"), ln=1)
     
     if lecturer.school_location:
         pdf.cell(0, 8, safe_text(lecturer.school_location), ln=1)
@@ -278,75 +277,142 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     
     return pdf.output(dest="S")
 
-def generate_class_excel(class_id: int, db: Session, lecturer_id: int) -> bytes:
-    """
-    Generuje komplexní Excel (XLSX) soubor s výsledky celé třídy.
-    Obsahuje dva listy: Tabulku bodů se zkratkami a Legendu s plným zněním kritérií.
-    
-    Args:
-        class_id: ID třídy k exportu.
-        db: Session databáze.
-        lecturer_id: ID lektora vlastnícího data.
-        
-    Returns:
-        bytes: Binární data XLSX souboru.
-    """
+
+def generate_class_excel(class_id: int, db: Session, lecturer_id: int, scenario_id: str = None) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.chart import BarChart, Reference
+    from openpyxl.utils import get_column_letter
+
+    cached_analysis = None
+    if scenario_id:
+        cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == scenario_id).first()
+
     evaluations = db.query(StudentEvaluation).filter(
         StudentEvaluation.class_id == class_id,
         StudentEvaluation.lecturer_id == lecturer_id
     ).all()
-    
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
 
-    # --- LIST 1: Výsledky studentů ---
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Výsledky Třídy"
+    valid_evaluations = []
+    for e in evaluations:
+        if scenario_id and e.scenario_name != scenario_id:
+            continue
+        try:
+            data = json.loads(e.json_result) if e.json_result else {}
+            if data and data.get("vysledky"):
+                valid_evaluations.append(e)
+        except:
+            pass
+            
+    evaluations = sort_evaluations_by_surname(valid_evaluations)
+
+    # Získání definic kritérií z DB
+
+    db_criteria = []
+    if scenario_id:
+        criteria_record = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id).first()
+        if criteria_record:
+            from models.db_models import Criterion
+            db_criteria = db.query(Criterion).filter(Criterion.evaluation_criteria_id == criteria_record.id).all()
+            
+    criteria_names = [c.nazev for c in db_criteria]
+    max_pts = sum([c.body for c in db_criteria]) if db_criteria else 0
     
-    # Sběr unikátních názvů kritérií z první platné evaluace
-    criteria_names = []
+    if not criteria_names:
+        for eval_record in evaluations:
+            try:
+                data = json.loads(eval_record.json_result)
+                if "vysledky" in data and isinstance(data["vysledky"], list):
+                    for item in data["vysledky"]:
+                        if "nazev" in item and item["nazev"] not in criteria_names:
+                            criteria_names.append(item["nazev"])
+            except Exception:
+                pass
+
+    wb = Workbook()
+    
+    header_fill = PatternFill(start_color="002855", end_color="002855", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    footer_text = "Generováno systémem EVALUZ - Vyvinuto na ÚPVSP"
+
+    # --- LIST 1: Souhrn ---
+    ws_summary = wb.active
+    ws_summary.title = "Souhrn"
+    
+    # Stylizované Záhlaví
+    ws_summary.merge_cells('A1:B1')
+    ws_summary['A1'] = "PROTOKOL O HODNOCENÍ TŘÍDY - EVALUZ"
+    ws_summary['A1'].font = Font(size=14, bold=True, color="002855")
+    ws_summary['A1'].alignment = Alignment(horizontal="center")
+    
+    ws_summary.append(["Třída:", db.query(ClassRoom).filter(ClassRoom.id == class_id).first().name if db.query(ClassRoom).filter(ClassRoom.id == class_id).first() else "Neznámá"])
+    ws_summary.append(["Modelová situace:", scenario_id if scenario_id else "Neznámá"])
+    ws_summary.append(["Datum exportu:", datetime.now().strftime("%d. %m. %Y %H:%M")])
+    ws_summary.append([]) # Mezera
+    
+    start_row = ws_summary.max_row + 1
+    ws_summary.append(["Statistika", "Hodnota"])
+    for cell in ws_summary[start_row]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+
+    total_students = len(evaluations)
+    total_score_sum = 0
+    dist = {"0-50%": 0, "51-80%": 0, "81-100%": 0}
+
     for eval_record in evaluations:
         try:
             data = json.loads(eval_record.json_result)
-            if "vysledky" in data and isinstance(data["vysledky"], list):
-                for item in data["vysledky"]:
-                    if "nazev" in item and item["nazev"] not in criteria_names:
-                        criteria_names.append(item["nazev"])
-                break
+            score = data.get('celkove_skore', 0)
+            total_score_sum += score
+            if max_pts > 0:
+                percent = (score / max_pts) * 100
+                if percent < 50: dist["0-50%"] += 1
+                elif percent <= 80: dist["51-80%"] += 1
+                else: dist["81-100%"] += 1
         except Exception:
             pass
-            
-    if not criteria_names:
-        criteria_names = [f"Kritérium {i}" for i in range(1, 26)]
-        
-    # Hlavička tabulky (Zkratky K1, K2...)
-    headers = ["Jméno Studenta"] + [f"K{i+1}" for i in range(len(criteria_names))] + ["Celkové Skóre"]
-    ws.append(headers)
+
+    avg_score = round(total_score_sum / total_students, 1) if total_students > 0 else 0
+    ws_summary.append(["Celkový počet hodnocených studentů", total_students])
+    ws_summary.append(["Max. možný počet bodů", max_pts])
+    ws_summary.append(["Průměrné skóre", f"{avg_score} b."])
+    ws_summary.append(["Úspěšnost (pod 50 %)", dist["0-50%"]])
+    ws_summary.append(["Úspěšnost (51-80 %)", dist["51-80%"]])
+    ws_summary.append(["Úspěšnost (81-100 %)", dist["81-100%"]])
     
-    # Stylování hlavičky (EVALUZ modrá)
-    header_fill = PatternFill(start_color="002855", end_color="002855", fill_type="solid")
-    header_font = Font(color="FFFFFF", bold=True)
-    for cell in ws[1]:
+    ws_summary.column_dimensions['A'].width = 35
+    ws_summary.column_dimensions['B'].width = 15
+    ws_summary.append([])
+    ws_summary.append([footer_text])
+
+    # --- LIST 2: Výsledky ---
+    ws_results = wb.create_sheet(title="Výsledky")
+    headers = ["Jméno Studenta"] + [f"K{i+1}" for i in range(len(criteria_names))] + ["Celkové Skóre"]
+    ws_results.append(headers)
+    for cell in ws_results[1]:
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-    ws.freeze_panes = "B2"
-        
-    # Plnění daty studentů
+    ws_results.freeze_panes = "B2"
+
+    red_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
+    green_fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
+    
+    crit_totals = {name: {"passes": 0, "pts": 0} for name in criteria_names}
+    
     for eval_record in evaluations:
         try:
             data = json.loads(eval_record.json_result)
-            if isinstance(data, str): data = json.loads(data)
-            if not isinstance(data, dict): data = {}
         except Exception:
             data = {}
-            
-        student_name = eval_record.student_name.replace(',', '')
-        total_score = data.get('celkove_skore', 0)
         
-        # Přiřazení bodů k odpovídajícím sloupcům
+        # Priorita: cleaned_name -> student_name
+        student_display_name = eval_record.cleaned_name if eval_record.cleaned_name else eval_record.student_name
+        total_score = data.get('celkove_skore', 0)
+
+        
         points = []
         parsed_results = data.get("vysledky", [])
         for critique_name in criteria_names:
@@ -354,14 +420,24 @@ def generate_class_excel(class_id: int, db: Session, lecturer_id: int) -> bytes:
             for item in parsed_results:
                 if item.get("nazev") == critique_name:
                     point_value = item.get("body", 0)
+                    if item.get("splneno"):
+                        crit_totals[critique_name]["passes"] += 1
                     break
             points.append(point_value)
             
-        row_data = [student_name] + points + [total_score]
-        ws.append(row_data)
+        row_data = [student_display_name] + points + [total_score]
+        ws_results.append(row_data)
+
         
-    # Automatické přizpůsobení šířky sloupců
-    for col in ws.columns:
+        last_row = ws_results.max_row
+        for col_idx in range(2, len(points) + 2):
+            val = ws_results.cell(row=last_row, column=col_idx).value
+            if val == 0:
+                ws_results.cell(row=last_row, column=col_idx).fill = red_fill
+            else:
+                ws_results.cell(row=last_row, column=col_idx).fill = green_fill
+
+    for col in ws_results.columns:
         max_length = 0
         column = col[0].column_letter
         for cell in col:
@@ -369,29 +445,86 @@ def generate_class_excel(class_id: int, db: Session, lecturer_id: int) -> bytes:
                 if len(str(cell.value)) > max_length:
                     max_length = len(str(cell.value))
             except: pass
-        adjusted_width = (max_length + 2) * 1.2
-        ws.column_dimensions[column].width = adjusted_width
+        ws_results.column_dimensions[column].width = (max_length + 2) * 1.2
+    
+    ws_results.append([])
+    ws_results.append([footer_text])
 
-    # --- LIST 2: Legenda Kritérií ---
-    ws_legend = wb.create_sheet(title="Legenda Kritérií")
-    ws_legend.append(["Značka v Tabulce", "Plné znění kritéria"])
-    for cell in ws_legend[1]:
+    # --- LIST 3: Analýza ---
+    ws_analysis = wb.create_sheet(title="Analýza")
+    ws_analysis.append(["Kód", "Znění Kritéria", "Úspěšnost (%)"])
+    for cell in ws_analysis[1]:
         cell.fill = header_fill
         cell.font = header_font
-    
+        
     for idx, crit_name in enumerate(criteria_names):
-        ws_legend.append([f"K{idx+1}", crit_name])
+        passes = crit_totals[crit_name]["passes"]
+        pct = round((passes / total_students) * 100) if total_students > 0 else 0
+        ws_analysis.append([f"K{idx+1}", crit_name, pct])
+
+    ws_analysis.column_dimensions['A'].width = 10
+    ws_analysis.column_dimensions['B'].width = 80
+    ws_analysis.column_dimensions['C'].width = 15
+    
+    # Pridani Grafu
+    if total_students > 0 and criteria_names:
+        chart = BarChart()
+        chart.type = "col"
+        chart.style = 10
+        chart.title = "Úspěšnost kritérií"
+        chart.y_axis.title = "Úspěšnost (%)"
+        chart.x_axis.title = "Kritéria"
         
-    ws_legend.column_dimensions['A'].width = 20
-    ws_legend.column_dimensions['B'].width = 100
+        data_ref = Reference(ws_analysis, min_col=3, min_row=1, max_row=len(criteria_names)+1)
+        cats = Reference(ws_analysis, min_col=1, min_row=2, max_row=len(criteria_names)+1)
+        chart.add_data(data_ref, titles_from_data=True)
+        chart.set_categories(cats)
+        chart.shape = 4
+        ws_analysis.add_chart(chart, "E2")
+    
+    ws_analysis.append([])
+    ws_analysis.append([footer_text])
+
+    # --- LIST 4: Metodika (Odstraníme nebo ponecháme jen pokud je obsah) ---
+    if cached_analysis and cached_analysis.content_json:
+        ws_methodology = wb.create_sheet(title="Metodika")
+        ws_methodology.append(["Pedagogické shrnutí od AI Asistenta"])
+        for cell in ws_methodology[1]:
+            cell.fill = header_fill
+            cell.font = header_font
         
-    # Převedení na binární stream
+        try:
+            analysis_data = json.loads(cached_analysis.content_json)
+            ai_insight = analysis_data.get("ai_insight", "")
+            blocks = ai_insight.split("###")
+            for block in blocks:
+                block = block.strip()
+                if not block: continue
+                lines = block.split("\n")
+                if lines:
+                    ws_methodology.append([lines[0].replace("**", "").strip()])
+                    ws_methodology.cell(row=ws_methodology.max_row, column=1).font = Font(bold=True)
+                    content = "\n".join(lines[1:]).strip()
+                    ws_methodology.append([content])
+                    ws_methodology.append([])
+        except Exception:
+            ws_methodology.append(["Nepodařilo se načíst zprávu."])
+            
+        ws_methodology.column_dimensions['A'].width = 100
+        for cell in ws_methodology['A']:
+            cell.alignment = Alignment(wrap_text=True)
+            
+        ws_methodology.append([])
+        ws_methodology.append([footer_text])
+
+
     from io import BytesIO
     output = BytesIO()
     wb.save(output)
     output.seek(0)
     
     return output.getvalue()
+
 
 def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: Lecturer) -> bytes:
     """
@@ -436,21 +569,25 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         # Hlavička informací
         pdf.set_fill_color(240, 245, 250)
         # Sestavení celého jména lektora bez "None" řetězců
-        parts = []
-        if lecturer.title_before: parts.append(lecturer.title_before)
-        if lecturer.first_name: parts.append(lecturer.first_name)
-        if lecturer.last_name: parts.append(lecturer.last_name)
-        if lecturer.title_after: parts.append(lecturer.title_after)
+        name_str = f"{lecturer.title_before + ' ' if lecturer.title_before else ''}{lecturer.first_name} {lecturer.last_name}{' ' + lecturer.title_after if lecturer.title_after else ''}".strip()
+        rank_str = f"{lecturer.funkcni_zarazeni + ' ' if lecturer.funkcni_zarazeni else ''}{lecturer.rank_full or lecturer.rank_shortcut}".strip()
+        if not rank_str:
+            rank_str = "Lektor"
         
         pdf.cell(40, 8, "Lektor:", border=1, fill=True)
-        pdf.cell(0, 8, " ".join(parts), border=1, ln=1)
+        pdf.cell(0, 8, f"{name_str}, {rank_str}", border=1, ln=1)
+        
+        if lecturer.school_location:
+             pdf.cell(40, 8, "Školní útvar:", border=1, fill=True)
+             pdf.cell(0, 8, lecturer.school_location, border=1, ln=1)
+             
         pdf.cell(40, 8, "Modelová situace:", border=1, fill=True)
         pdf.cell(0, 8, scenario_name, border=1, ln=1)
     
         # KPI Card
         pdf.ln(6)
         avg_score = analysis_data.get("average_score", 0)
-        max_score = analysis_data.get("max_score", 25)
+        max_score = analysis_data.get("max_score", 0)
         pdf.set_font("DejaVu", "B", 16)
         pdf.set_fill_color(241, 245, 249) # slate-100
         pdf.set_text_color(15, 23, 42)    # slate-900
@@ -475,7 +612,7 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         pdf.set_draw_color(203, 213, 225) # slate-300 for rows
         stats = analysis_data.get("stats", [])
         # Limit to 25 strictly
-        for i, stat in enumerate(stats[:25]):
+        for i, stat in enumerate(stats):
             success_rate = stat.get('success_rate', 0)
             
             # Color coding success block

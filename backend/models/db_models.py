@@ -53,6 +53,8 @@ class StudentEvaluation(Base):
     class_id = Column(Integer, ForeignKey("classes.id"))
     scenario_name = Column(String, index=True, default="scen-1")
     json_result = Column(Text) # Store output as JSON string
+    cleaned_name = Column(String, index=True) # "Příjmení Jméno, hodnost"
+    student_identity = Column(Text) # JSON structure from LLM
     
 class AppSettings(Base):
     __tablename__ = "app_settings"

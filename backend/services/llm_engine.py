@@ -46,8 +46,14 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     ### TEXT ÚŘEDNÍHO ZÁZNAMU (ÚZ) K VYHODNOCENÍ:
     {report_text}
     
-    Požadovaná struktura JSON odpovědi (musí striktně odpovídat schématu Pydantic EvaluationResponse bez klíče jmeno_studenta, ten dodá backend):
+    Požadovaná struktura JSON odpovědi (identita je POVINNÁ):
+    Vždy přesně identifikuj PŘÍJMENÍ (to bude sloužit jako hlavní řadící klíč). Očekávaný formát identity v JSONu musí striktně odlišit jméno a příjmení.
     {{
+        "identita": {{
+            "hodnost": "prap.", 
+            "jmeno": "Jan", 
+            "prijmeni": "Novák"
+        }},
         "vysledky": [
             {{
                 "nazev": "název kritéria",
@@ -105,6 +111,78 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     except Exception as e:
         print(f"{prefix}Error communicating with vLLM at {api_url}: {e}")
         raise
+
+async def extract_identity(report_text: str, db: Session, student_log_prefix: str = "") -> dict:
+    """
+    Rychlá extrakce identity studenta (jméno, příjmení a hodnost) pomocí LLM.
+    Neprovádí žádnou evaluaci kritérií (šetrné na tokeny a čas).
+    """
+    db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
+    db_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
+    db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
+    
+    api_url = db_url.value if db_url and db_url.value else ""
+    model_name = db_model.value if db_model and db_model.value else ""
+    api_key = db_key.value if db_key and db_key.value else ""
+    
+    if not api_url or not model_name:
+        print("Fast-scan: LLM konfigurace chybí.")
+        return {}
+
+    if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
+        api_url = "https://openrouter.ai/api/v1"
+
+    client = AsyncOpenAI(
+        base_url=api_url,
+        api_key=api_key or "sk-no-key-required",
+        default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
+        http_client=httpx.AsyncClient(timeout=60.0)
+    )
+    
+    system_prompt = "Jsi asistent pro vytěžování dat z textu. Tvým úkolem je najít jméno, příjmení a hodnost studenta."
+    user_prompt = f"""
+    Z následujícího úředního záznamu (podpis a identifikace autora bývá většinou na konci) extrahuj hodnost, jméno a příjmení autora/studenta.
+    
+    TEXT ÚŘEDNÍHO ZÁZNAMU:
+    {report_text}
+    
+    Musíš vrátit POUZE striktní JSON objekt v tomto formátu (žádný jiný text okolo!):
+    {{
+        "identita": {{
+            "hodnost": "prap.", 
+            "jmeno": "Jan", 
+            "prijmeni": "Novák"
+        }}
+    }}
+    """
+    
+    try:
+        response = await client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.0,
+            max_tokens=200,
+            response_format={"type": "json_object"} 
+        )
+        
+        raw_response = response.choices[0].message.content.strip()
+        import re
+        clean_text = re.sub(r"<(think|thought)>.*?</\1>", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
+        
+        start_idx = clean_text.find('{')
+        end_idx = clean_text.rfind('}')
+        if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
+            return {}
+            
+        clean_response = clean_text[start_idx:end_idx+1]
+        data = json.loads(clean_response)
+        return data.get("identita", {})
+    except Exception as e:
+        print(f"Fast-scan identity exception: {e}")
+        return {}
 
 async def chat_completion(messages: list, system_prompt: str, temperature: float, db: Session) -> str:
     """

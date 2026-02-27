@@ -24,6 +24,7 @@ interface AnalyticsData {
     ai_insight: string;
     score_distribution: { "0_50": number, "51_80": number, "81_100": number };
     average_score: number;
+    max_score?: number;
     needs_help: string[];
     criterion_failures: Record<string, { id: number, name: string, oduvodneni: string }[]>;
     scenario_id?: string;
@@ -341,7 +342,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                             </div>
                             <div className="h-[500px] w-full relative -left-4">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={data.stats.slice(0, 25).map((s, i) => ({ ...s, shortLabel: `K${i + 1}`, fullLabel: `K${i + 1}: ${s.name}` }))} layout="vertical" margin={{ top: 5, right: 30, left: 30, bottom: 5 }}>
+                                    <BarChart data={data.stats.map((s, i) => ({ ...s, shortLabel: `K${i + 1}`, fullLabel: `K${i + 1}: ${s.name}` }))} layout="vertical" margin={{ top: 5, right: 30, left: 30, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#E2E8F0" />
                                         <XAxis type="number" domain={[0, 100]} unit=" %" />
                                         <YAxis dataKey="shortLabel" type="category" width={40} interval={0} tick={{ fontSize: 11, fill: '#1e293b', fontWeight: 600 }} />
@@ -371,7 +372,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                                             }}
                                             cursor="pointer"
                                         >
-                                            {data.stats.slice(0, 25).map((entry, index) => {
+                                            {data.stats.map((entry, index) => {
                                                 const isActive = selectedCriterion === null || selectedCriterion === entry.full_name;
                                                 const baseColor = entry.success_rate < 50 ? '#ef4444' : entry.success_rate < 80 ? '#f59e0b' : '#10b981';
 
@@ -473,7 +474,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                                 </h3>
                                 {previewStudentData && (
                                     <p className="text-sm text-slate-500">
-                                        Skóre: <span className="font-semibold text-slate-700">{previewStudentData.score} / 25 bodů</span>
+                                        Skóre: <span className="font-semibold text-slate-700">{previewStudentData.score} / {data.max_score || '?'} bodů</span>
                                     </p>
                                 )}
                             </div>
@@ -512,16 +513,19 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                                             Nesplněná kritéria
                                         </h4>
                                         <div className="space-y-2">
-                                            {previewStudentData.vysledky.filter((v: any) => v.body === 0).length > 0 ? (
-                                                previewStudentData.vysledky.filter((v: any) => v.body === 0).map((v: any, i: number) => (
-                                                    <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm">
-                                                        <p className="font-semibold text-red-800 mb-1">{v.nazev}</p>
-                                                        <p className="text-red-600">{v.oduvodneni}</p>
-                                                    </div>
-                                                ))
-                                            ) : (
+                                            {(previewStudentData.score >= (data.max_score || 0) && previewStudentData.vysledky.filter((v: any) => v.body === 0).length === 0) ? (
                                                 <p className="text-emerald-600 font-medium">Student splnil všechna kritéria.</p>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    {previewStudentData.vysledky.filter((v: any) => v.body === 0).map((v: any, i: number) => (
+                                                        <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm">
+                                                            <p className="font-semibold text-red-800 mb-1">{v.nazev}</p>
+                                                            <p className="text-red-600">{v.oduvodneni}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             )}
+
                                         </div>
                                     </div>
                                 </div>

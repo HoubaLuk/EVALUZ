@@ -9,13 +9,114 @@ from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation
 from api.auth import get_current_lecturer
 
 from services.doc_parser import extract_text
-from services.llm_engine import evaluate_report
+from services.llm_engine import evaluate_report, extract_identity
 from models.evaluation import EvaluationResponse, CriterionResult, BatchEvaluationResponse
+from pydantic import BaseModel
 
 router = APIRouter(
     prefix="/evaluate",
     tags=["evaluation"]
 )
+
+class FastScanResponseItem(BaseModel):
+    filename: str
+    id: int
+    cleaned_name: str
+    identita: dict
+
+class FastScanResponse(BaseModel):
+    results: List[FastScanResponseItem]
+
+@router.post("/fast-scan", response_model=FastScanResponse)
+async def fast_scan_batch(
+    files: List[UploadFile] = File(...), 
+    scenario_id: str = Form(...),
+    db: Session = Depends(get_db), 
+    current_user: Lecturer = Depends(get_current_lecturer)
+):
+    """
+    Rychle vytěží z dokumentů pouze identitu a založí záznam 'pending' v databázi.
+    """
+    semaphore = asyncio.Semaphore(10)
+    db_lock = asyncio.Lock()
+    results = []
+    
+    async def process_scan(file: UploadFile):
+        student_name = unicodedata.normalize('NFC', file.filename)
+        try:
+            content_bytes = await file.read()
+            extracted_text = extract_text(content_bytes, file.filename)
+            
+            identita = {}
+            if extracted_text.strip():
+                async with semaphore:
+                    identita = await extract_identity(
+                        report_text=extracted_text,
+                        db=db,
+                        student_log_prefix=student_name
+                    )
+                    
+            hodnost = identita.get('hodnost', '').strip()
+            jmeno = identita.get('jmeno', '').strip()
+            prijmeni = identita.get('prijmeni', '').strip()
+            
+            if not prijmeni or not jmeno:
+                base_name = file.filename.rsplit('.', 1)[0]
+                import re
+                clean_base = re.sub(r'(?i)\b(úz|uz|vtos)\b', '', base_name)
+                clean_base = re.sub(r'\s+', ' ', clean_base).strip()
+                cleaned_display_name = clean_base
+            else:
+                prijmeni_upper = prijmeni.upper()
+                cleaned_display_name = f"{prijmeni_upper} {jmeno}, {hodnost}".strip(", ")
+                
+            async with db_lock:
+                # Check if it already exists to avoid duplicated files on re-upload
+                existing_record = db.query(StudentEvaluation).filter(
+                    StudentEvaluation.student_name == student_name,
+                    StudentEvaluation.scenario_name == scenario_id,
+                    StudentEvaluation.lecturer_id == current_user.id
+                ).order_by(StudentEvaluation.id.desc()).first()
+                
+                if existing_record:
+                    existing_record.cleaned_name = cleaned_display_name
+                    existing_record.student_identity = json.dumps(identita, ensure_ascii=False) if identita else "{}"
+                    db.commit()
+                    db.refresh(existing_record)
+                    record_id = existing_record.id
+                else:
+                    eval_record = StudentEvaluation(
+                        student_name=student_name,
+                        class_id=1,
+                        scenario_name=scenario_id,
+                        lecturer_id=current_user.id,
+                        json_result="{}", # Prázdný výsledek = pending
+                        cleaned_name=cleaned_display_name,
+                        student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
+                    )
+                    db.add(eval_record)
+                    db.commit()
+                    db.refresh(eval_record)
+                    record_id = eval_record.id
+            
+            return FastScanResponseItem(
+                filename=file.filename,
+                id=record_id,
+                cleaned_name=cleaned_display_name,
+                identita=identita
+            )
+        except Exception as e:
+            print(f"Chyba ve fast-scan pro {student_name}: {e}")
+            return None
+            
+    tasks = [process_scan(f) for f in files]
+    completed = await asyncio.gather(*tasks)
+    
+    for c in completed:
+        if c:
+            results.append(c)
+            
+    return FastScanResponse(results=results)
 
 @router.post("/batch", response_model=BatchEvaluationResponse)
 async def evaluate_batch(
@@ -78,9 +179,7 @@ async def evaluate_batch(
 
     async def process_single_file(file: UploadFile, system_prompt: str, criteria_markdown: str, db_session: Session, current_user_obj: Lecturer, scenario_id: str) -> EvaluationResponse:
         import os
-        base_name = os.path.splitext(file.filename)[0]
-        student_name_raw = f"stržm. {base_name}" if '.' in file.filename else file.filename
-        student_name = unicodedata.normalize('NFC', student_name_raw)
+        student_name = unicodedata.normalize('NFC', file.filename)
         
         try:
             # 1. Extract text
@@ -102,18 +201,48 @@ async def evaluate_batch(
                 )
                 print(f"[LOG - {student_name}] Asynchronní vyhodnocení LLM dokončeno.")
             
-            # 3. Save to DB under global lock to prevent race conditions on the shared Session
+            # 3. Process Identity and Save to DB under global lock
             async with db_lock:
                 print(f"[LOG - {student_name}] Ukládám transakci do databáze...")
-                eval_record = StudentEvaluation(
-                    student_name=student_name,
-                    class_id=1,
-                    scenario_name=scenario_id,
-                    lecturer_id=current_user_obj.id,
-                    json_result=json.dumps(llm_result_dict, ensure_ascii=False)
-                )
-                db_session.add(eval_record)
+                
+                identita = llm_result_dict.get('identita', {})
+                # Nepřepisujeme identitu, pokud už byla manuálně upravená a JSON je None (vlastně JSON result se uloží a hotovo)
+                
+                existing_eval = db_session.query(StudentEvaluation).filter(
+                    StudentEvaluation.student_name == student_name,
+                    StudentEvaluation.lecturer_id == current_user_obj.id,
+                    StudentEvaluation.scenario_name == scenario_id
+                ).order_by(StudentEvaluation.id.desc()).first()
+                
+                # Získáme z LLM aktuální jméno (kdyby fast scan selhal ale heavy scan to našel)
+                hodnost = identita.get('hodnost', '').strip()
+                jmeno = identita.get('jmeno', '').strip()
+                prijmeni = identita.get('prijmeni', '').strip()
+                prijmeni_upper = prijmeni.upper() if prijmeni else ""
+                cleaned_eval_name = f"{prijmeni_upper} {jmeno}, {hodnost}".strip(", ") if prijmeni else student_name
+                
+                if existing_eval:
+                    existing_eval.json_result = json.dumps(llm_result_dict, ensure_ascii=False)
+                    # Jestliže heavy engine vytěžil kvalitnější data (nebo fast-scan neměl nic) a nebylo manuálně potvrzeno (identita neni text None)
+                    if existing_eval.student_identity and existing_eval.student_identity != "None" and identita and not "prijmeni" in json.loads(existing_eval.student_identity or "{}"):
+                         existing_eval.student_identity = json.dumps(identita, ensure_ascii=False)
+                         existing_eval.cleaned_name = cleaned_eval_name
+                    cleaned_display_name = existing_eval.cleaned_name
+                else:
+                    eval_record = StudentEvaluation(
+                        student_name=student_name,
+                        class_id=1,
+                        scenario_name=scenario_id,
+                        lecturer_id=current_user_obj.id,
+                        json_result=json.dumps(llm_result_dict, ensure_ascii=False),
+                        cleaned_name=cleaned_eval_name,
+                        student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
+                    )
+                    db_session.add(eval_record)
+                    cleaned_display_name = cleaned_eval_name
+                    
                 db_session.commit()
+
             
             # 4. Construct response
             criterion_results = []
@@ -128,10 +257,13 @@ async def evaluate_batch(
             
             return EvaluationResponse(
                 jmeno_studenta=student_name,
+                cleaned_name=cleaned_display_name,
                 vysledky=criterion_results,
                 celkove_skore=llm_result_dict.get('celkove_skore', 0),
-                zpetna_vazba=llm_result_dict.get('zpetna_vazba', 'Bez zpětné vazby.')
+                zpetna_vazba=llm_result_dict.get('zpetna_vazba', 'Bez zpětné vazby.'),
+                identita=identita
             )
+
             
         except ValueError as ve:
             print(f"[LOG - {student_name}] Validation Error: {ve}")

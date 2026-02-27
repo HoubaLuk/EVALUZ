@@ -124,6 +124,7 @@ export default function EvaluzDashboard() {
     checkAuthStatus();
   }, [token]);
 
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -241,7 +242,8 @@ export default function EvaluzDashboard() {
               <span className="text-[#002855] font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
             </div>
             <h2 className="text-3xl font-bold text-[#002855]">{activeScenario?.name || 'EVALUZ'}</h2>
-            <p className="text-slate-500 mt-1">Hodnocení úředních záznamů dle § 40 zákona o policii.</p>
+
+            <p className="text-slate-500 mt-1">Hodnocení úředních záznamů dle precizovaných kritérií.</p>
           </div>
 
           {/* Workflow Stepper */}
@@ -262,7 +264,7 @@ export default function EvaluzDashboard() {
               ].map((step, index) => {
                 const isActive = activeTab === step.id;
                 let isCompleted = false;
-                const _hasAnalytics = !!(activeScenarioId && cachedAnalytics[activeScenarioId]);
+                const _hasAnalytics = !!(activeScenarioId && cachedAnalytics[activeScenarioId] && cachedAnalytics[activeScenarioId].stats?.length > 0);
 
                 if (index === 0) {
                   isCompleted = activeTab === 'evaluation' || activeTab === 'analytics' || hasEvaluations;
