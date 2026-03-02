@@ -10,7 +10,10 @@ import { TabCriteria } from './components/TabCriteria';
 import { TabEvaluation } from './components/TabEvaluation';
 import { TabAnalytics } from './components/TabAnalytics';
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+// Dynamická detekce API URL (localhost pro vývoj, IP serveru pro produkci v Dockeru)
+const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:8000/api/v1'
+  : `http://${window.location.hostname}:8000/api/v1`;
 
 /**
  * Hlavní vstupní bod aplikace EVALUZ.
