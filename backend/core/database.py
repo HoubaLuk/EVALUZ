@@ -2,14 +2,16 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models.db_models import Base
+from core.config import settings
 
-# DB configuration (SQLite locally for now)
-SQLALCHEMY_DATABASE_URL = "sqlite:///./upvsp_evaluator.db"
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
-# Setting check_same_thread=False for SQLite used in FastAPI
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

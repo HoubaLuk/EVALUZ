@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,15 +14,29 @@ init_db()
 db_session = next(get_db())
 seed_database(db_session)
 
+from services.evaluation_queue import eval_queue
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker_task = asyncio.create_task(eval_queue.worker())
+    yield
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+
 app = FastAPI(
     title="ÚPVSP AI Evaluátor API",
     description="Backend pro vyhodnocování úředních záznamů ÚPVSP pomocí lokálního vLLM",
-    version="1.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 # CORS configuration
 origins = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://localhost:3333",
     "http://127.0.0.1:3333",

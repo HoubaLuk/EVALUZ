@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from models.db_models import AppSettings
 
-async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, student_log_prefix: str = "") -> dict:
+async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "") -> dict:
     """
     Evaluates a police report against criteria using a local vLLM model dynamically configured from DB.
     """
@@ -87,18 +87,20 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
             response_format={"type": "json_object"} 
         )
         
-        # Extract the raw text response
-        raw_response = response.choices[0].message.content.strip()
+        # Extract the raw text response safely, treating None as empty
+        msg_content = response.choices[0].message.content or ""
+        raw_response = msg_content.strip()
 
         
         import re
-        # Odstraníme myšlenkové bloky z uvažujících modelů (qwen, deepseek, mistral)
-        clean_text = re.sub(r"<(think|thought)>.*?</\1>", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
+        # Odstraníme myšlenkové bloky z uvažujících modelů (qwen, deepseek, mistral) vč. neukončených
+        clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
         
         start_idx = clean_text.find('{')
         end_idx = clean_text.rfind('}')
         
         if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
+            print(f"{prefix}V odpovědi LLM nebyl nalezen žádný JSON objekt. Raw Response: {raw_response}")
             raise ValueError("V odpovědi LLM nebyl nalezen žádný JSON objekt.")
             
         clean_response = clean_text[start_idx:end_idx+1]
@@ -191,10 +193,19 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
     db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
     db_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
     db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
+    db_platform = db.query(AppSettings).filter(AppSettings.key == "VLLM_PLATFORM").first()
+    db_thinking = db.query(AppSettings).filter(AppSettings.key == "VLLM_ENABLE_THINKING").first()
+    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
+    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
+    db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
+    db_max_tokens = db.query(AppSettings).filter(AppSettings.key == "VLLM_MAX_TOKENS").first()
     
     api_url = db_url.value if db_url and db_url.value else ""
+    platform = db_platform.value if db_platform and db_platform.value else "vllm"
     model_name = db_model.value if db_model and db_model.value else ""
     api_key = db_key.value if db_key and db_key.value else ""
+    
+    enable_thinking = (db_thinking.value.lower() == 'true') if db_thinking and db_thinking.value else True
     
     if not api_url or not model_name:
         raise ValueError("LLM konfigurace chybí v databázi.")
@@ -202,6 +213,13 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
         api_url = "https://openrouter.ai/api/v1"
 
+    top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
+    presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
+    frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
+    
+    # Razantní navýšení hardlimitu pro gpt-oss-120b a thinking modely
+    max_tokens = int(db_max_tokens.value) if db_max_tokens and db_max_tokens.value else 6000
+    
     print(f">>> LLM volání směřuje na: {api_url} s modelem: {model_name}")
 
     client = AsyncOpenAI(

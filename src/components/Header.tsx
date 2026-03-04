@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User, ChevronDown, Settings, LogOut, UserPen } from 'lucide-react';
+import { API_BASE_URL } from '../utils/api';
+
+import { User, ChevronDown, Settings, LogOut, UserPen, Moon, Sun } from 'lucide-react';
 
 interface HeaderProps {
     setIsAdminOpen: (isOpen: boolean) => void;
@@ -9,6 +11,24 @@ interface HeaderProps {
 export function Header({ setIsAdminOpen, lecturerName }: HeaderProps) {
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
+
+    const [isDarkMode, setIsDarkMode] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('theme') === 'dark' ||
+                (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        }
+        return false;
+    });
+
+    useEffect(() => {
+        if (isDarkMode) {
+            document.documentElement.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+        }
+    }, [isDarkMode]);
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
@@ -29,7 +49,7 @@ export function Header({ setIsAdminOpen, lecturerName }: HeaderProps) {
                 </div>
                 <div className="flex flex-col justify-center hidden md:flex">
                     <h1 className="text-sm font-medium tracking-wide text-blue-100/80 leading-tight">Útvar policejního vzdělávání a služební přípravy</h1>
-                    <h1 className="text-lg font-bold tracking-tight leading-tight">EVALUZ: Asistent pro vyhodnocování úředních záznamů v ZOP</h1>
+                    <h1 className="text-lg font-bold tracking-tight leading-tight">EVALUZ: Vyhodnocování ÚZ účastníků ZOP</h1>
                 </div>
                 <h1 className="text-xl font-bold tracking-widest md:hidden">EVALUZ</h1>
             </div>
@@ -77,13 +97,22 @@ export function Header({ setIsAdminOpen, lecturerName }: HeaderProps) {
                         </div>
                     )}
                 </div>
-                <button
-                    onClick={() => setIsAdminOpen(true)}
-                    className="flex items-center gap-2 text-sm font-medium hover:text-[#D4AF37] transition-colors"
-                >
-                    <Settings className="w-4 h-4" />
-                    Administrace
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setIsDarkMode(!isDarkMode)}
+                        className="p-2 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                        aria-label="Přepnout tmavý režim"
+                    >
+                        {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                    </button>
+                    <button
+                        onClick={() => setIsAdminOpen(true)}
+                        className="flex items-center gap-2 text-sm font-medium hover:text-[#D4AF37] transition-colors bg-white/5 px-3 py-2 rounded-lg"
+                    >
+                        <Settings className="w-4 h-4" />
+                        Administrace
+                    </button>
+                </div>
             </div>
         </header>
     );

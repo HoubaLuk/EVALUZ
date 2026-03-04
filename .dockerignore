@@ -1,0 +1,39 @@
+# Git and docker ignoring
+.git
+.gitignore
+.dockerignore
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build output
+dist/
+dist-ssr/
+build/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Databases
+*.db
+*.sqlite3
+
+# Env
+.env
+
+# MacOS
+.DS_Store

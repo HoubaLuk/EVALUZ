@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Folder, ChevronDown, MoreVertical, FileText, Edit2, Trash2, Copy, ChevronLeft, ChevronRight } from 'lucide-react';
+import { API_BASE_URL } from '../utils/api';
+
+import { Folder, ChevronDown, MoreVertical, FileText, Edit2, Trash2, Copy, ChevronLeft, ChevronRight, HardDrive, Loader2, HelpCircle, CheckCircle2, XCircle } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 import { ClassData } from '../types';
+import { useDialog } from '../contexts/DialogContext';
 
-interface SidebarProps {
+export interface SidebarProps {
     classes: ClassData[];
     setClasses: React.Dispatch<React.SetStateAction<ClassData[]>>;
     activeClassId: string | null;
@@ -12,7 +15,7 @@ interface SidebarProps {
     onSelectScenario: (classId: string, scenarioId: string) => void;
 }
 
-type EditMode =
+export type EditMode =
     | null
     | { type: 'new_class' }
     | { type: 'new_scenario', classId: string }
@@ -20,12 +23,21 @@ type EditMode =
     | { type: 'rename_scenario', classId: string, scenId: string, currentName: string };
 
 export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, onSelectScenario }: SidebarProps) {
-    React.useEffect(() => {
-    }, []);
+    const { showConfirm, showAlert } = useDialog();
 
     const [editMode, setEditMode] = React.useState<EditMode>(null);
     const [editValue, setEditValue] = React.useState('');
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [isCollapsed, setIsCollapsed] = React.useState(() => {
+        const saved = localStorage.getItem('upvsp_sidebar_collapsed');
+        return saved ? JSON.parse(saved) : false;
+    });
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [lastSyncInfo, setLastSyncInfo] = useState<{ name: string; date: string } | null>(() => {
+        const saved = localStorage.getItem('evaluz_last_sync');
+        return saved ? JSON.parse(saved) : null;
+    });
+    const [showSyncHelp, setShowSyncHelp] = useState(false);
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
     const saveClasses = React.useCallback((newClasses: ClassData[]) => {
         setClasses(newClasses);
@@ -93,11 +105,15 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
         saveClasses(newClasses);
     }, [classes, saveClasses]);
 
-    const deleteClass = React.useCallback((id: string, name: string) => {
-        if (window.confirm(`Opravdu chcete smazat třídu "${name}" i se všemi modelovými situacemi?`)) {
+    const deleteClass = React.useCallback(async (id: string, name: string) => {
+        const conf = await showConfirm(`Opravdu chcete smazat třídu "${name}" i se všemi modelovými situacemi?`);
+        if (conf) {
             saveClasses(classes.filter(c => c.id !== id));
+            if (activeClassId === id) {
+                onSelectScenario('', '');
+            }
         }
-    }, [classes, saveClasses]);
+    }, [classes, saveClasses, showConfirm, activeClassId, onSelectScenario]);
 
     const duplicateScenario = React.useCallback((classId: string, scenId: string) => {
         saveClasses(classes.map(c => {
@@ -114,27 +130,191 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
         }));
     }, [classes, saveClasses]);
 
-    const deleteScenario = React.useCallback((classId: string, scenId: string, name: string) => {
-        if (window.confirm(`Opravdu chcete smazat modelovou situaci "${name}"?`)) {
+    const deleteScenario = React.useCallback(async (classId: string, scenId: string, name: string) => {
+        const conf = await showConfirm(`Opravdu chcete smazat modelovou situaci "${name}"?`);
+        if (conf) {
             saveClasses(classes.map(c => c.id === classId ? {
                 ...c,
                 scenarios: c.scenarios.filter(s => s.id !== scenId)
             } : c));
+            if (activeScenarioId === scenId) {
+                onSelectScenario(classId, '');
+            }
         }
-    }, [classes, saveClasses]);
+    }, [classes, saveClasses, showConfirm, activeScenarioId, onSelectScenario]);
 
     return (
-        <aside className={`bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 transition-all duration-300 relative ${isCollapsed ? 'w-[68px]' : 'w-72'}`}>
+        <aside className={`bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shadow-sm z-10 transition-all duration-300 relative ${isCollapsed ? 'w-[68px]' : 'w-72'}`}>
             <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
-                className="absolute -right-3 top-4 bg-white border border-slate-200 rounded-full p-1 text-slate-400 hover:text-[#002855] hover:border-[#002855] transition-colors z-20 shadow-sm"
+                className="absolute -right-3 top-4 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-full p-1 text-slate-400 dark:text-slate-300 hover:text-[#002855] dark:hover:text-blue-300 hover:border-[#002855] dark:hover:border-blue-400 transition-colors z-20 shadow-sm"
             >
                 {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
-            <div className={`p-4 border-b border-slate-100 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
-                {!isCollapsed && <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Pracovní prostor</h2>}
+            <div className={`p-4 border-b border-slate-100 dark:border-slate-700 flex flex-col gap-2 ${isCollapsed ? 'items-center' : ''}`}>
+                {!isCollapsed && <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Pracovní prostor</h2>}
+
+                {!isCollapsed ? (
+                    <>
+                        <div className="flex gap-1.5">
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        setIsSyncing(true);
+                                        const dirHandle = await (window as any).showDirectoryPicker();
+                                        // Oprávnění ke čtení je u showDirectoryPicker pro aktuální relaci automatické.
+                                        // requestPermission se používá primárně při znovupoužití handle z IndexedDB.
+
+                                        let currentClasses = JSON.parse(JSON.stringify(classes)) as ClassData[];
+                                        let totalFiles = 0;
+                                        let newClassesCount = 0;
+                                        let newScenariosCount = 0;
+                                        let skippedFiles: string[] = [];
+                                        let allEntries: string[] = [];
+
+                                        // Nejdříve sesbírat VŠECHNY entries pro diagnostiku
+                                        for await (const [name, handle] of dirHandle.entries()) {
+                                            allEntries.push(`${name} (${handle.kind})`);
+                                        }
+
+                                        for await (const [className, classHandle] of dirHandle.entries()) {
+                                            if (classHandle.kind !== 'directory') continue;
+
+                                            let cls = currentClasses.find(c => c.name === className);
+                                            if (!cls) {
+                                                cls = { id: `class-${Date.now()}-${Math.random()}`, name: className, expanded: true, scenarios: [] };
+                                                currentClasses.push(cls);
+                                                newClassesCount++;
+                                            } else {
+                                                cls.expanded = true;
+                                            }
+
+                                            for await (const [scenName, scenHandle] of classHandle.entries()) {
+                                                if (scenHandle.kind !== 'directory') continue;
+
+                                                let scen = cls.scenarios.find(s => s.name === scenName);
+                                                if (!scen) {
+                                                    scen = { id: `scen-${Date.now()}-${Math.random()}`, name: scenName };
+                                                    cls.scenarios.push(scen);
+                                                    newScenariosCount++;
+                                                }
+
+                                                const validFiles: File[] = [];
+                                                for await (const [fileName, fileHandle] of scenHandle.entries()) {
+                                                    if (fileHandle.kind === 'file') {
+                                                        const file = await fileHandle.getFile();
+                                                        const ext = file.name.split('.').pop()?.toLowerCase();
+                                                        if (ext && ['pdf', 'doc', 'docx', 'rtf', 'odt'].includes(ext) && !fileName.startsWith('~') && !fileName.startsWith('.')) {
+                                                            validFiles.push(file);
+                                                        } else {
+                                                            skippedFiles.push(fileName);
+                                                        }
+                                                    }
+                                                }
+
+                                                if (validFiles.length > 0) {
+                                                    totalFiles += validFiles.length;
+                                                    const formData = new FormData();
+                                                    validFiles.forEach(f => formData.append('files', f));
+                                                    formData.append('scenario_id', scen.id);
+
+                                                    const uploadRes = await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
+                                                        method: 'POST',
+                                                        headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+                                                        body: formData
+                                                    });
+                                                }
+                                            }
+                                        }
+
+                                        saveClasses(currentClasses);
+                                        const msg = totalFiles > 0
+                                            ? `Sync dokončen! ${newClassesCount > 0 ? newClassesCount + ' nových tříd, ' : ''}${newScenariosCount > 0 ? newScenariosCount + ' nových situací, ' : ''}${totalFiles} souborů nahráno.`
+                                            : newClassesCount > 0 || newScenariosCount > 0
+                                                ? `Struktura synchronizována (${newClassesCount} tříd, ${newScenariosCount} situací). Žádné dokumenty k nahrání.`
+                                                : 'Žádné nové položky nalezeny. Zkontrolujte strukturu složek (viz nápověda ❓).';
+                                        setLastSyncInfo({
+                                            name: dirHandle.name,
+                                            date: new Date().toLocaleString('cs-CZ')
+                                        });
+                                        localStorage.setItem('evaluz_last_sync', JSON.stringify({
+                                            name: dirHandle.name,
+                                            date: new Date().toLocaleString('cs-CZ')
+                                        }));
+
+                                        setToast({ message: msg, type: totalFiles > 0 || newClassesCount > 0 || newScenariosCount > 0 ? 'success' : 'error' });
+
+                                        // Trigger refresh in TabEvaluation if files were uploaded
+                                        if (totalFiles > 0) {
+                                            window.dispatchEvent(new CustomEvent('evaluz-sync-complete'));
+                                        }
+
+                                        setTimeout(() => setToast(null), 8000);
+                                    } catch (e: any) {
+                                        if (e.name !== 'AbortError') {
+                                            console.error('HDD Sync Error:', e);
+                                            setToast({ message: 'Nastala chyba při synchronizaci. Zkontrolujte strukturu složek.', type: 'error' });
+                                            setTimeout(() => setToast(null), 6000);
+                                        }
+                                    } finally {
+                                        setIsSyncing(false);
+                                    }
+                                }}
+                                disabled={isSyncing}
+                                className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-sm font-semibold whitespace-nowrap shadow-sm disabled:opacity-50 relative group"
+                                title={lastSyncInfo ? `Poslední synchronizace: ${lastSyncInfo.name} (${lastSyncInfo.date})` : undefined}
+                            >
+                                {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <HardDrive className="w-4 h-4" />}
+                                {isSyncing ? 'Synchronizuji...' : 'Sync ÚZ v PC'}
+                                {lastSyncInfo && !isSyncing && (
+                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white dark:border-slate-800 rounded-full shadow-sm" />
+                                )}
+
+                                {lastSyncInfo && !isSyncing && (
+                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-800 text-white text-[10px] rounded shadow-xl z-50 pointer-events-none">
+                                        <p className="font-bold border-b border-slate-700 pb-1 mb-1">Aktivní synchronizace</p>
+                                        <p className="opacity-80">Složka: {lastSyncInfo.name}</p>
+                                        <p className="opacity-80">Čas: {lastSyncInfo.date}</p>
+                                    </div>
+                                )}
+                            </button>
+                            <button
+                                onClick={() => setShowSyncHelp(!showSyncHelp)}
+                                className="p-2 text-slate-400 hover:text-[#002855] dark:hover:text-blue-300 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                                title="Nápověda ke struktuře složek"
+                            >
+                                <HelpCircle className="w-4 h-4" />
+                            </button>
+                        </div>
+                        {showSyncHelp && (
+                            <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                                <p className="font-bold text-[#002855] dark:text-blue-300 mb-1">📁 Požadovaná struktura složek:</p>
+                                <code className="block bg-white dark:bg-slate-800 p-2 rounded text-[11px] font-mono mb-2">
+                                    Kořenová složka/<br />
+                                    &nbsp;&nbsp;├── ZOP 02-2026/<br />
+                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── MS1 - Téma/<br />
+                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── student1.docx<br />
+                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└── student2.pdf<br />
+                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└── MS2 - Téma/<br />
+                                    &nbsp;&nbsp;└── ZOP 03-2026/<br />
+                                </code>
+                                <p className="text-slate-500 dark:text-slate-400 mb-1">Podporované formáty: <strong>.docx, .doc, .pdf, .rtf</strong></p>
+                                <p className="text-red-500 dark:text-red-400 font-semibold">⚠ Nenazývejte složky s lomítkem „/" (např. ZOP 02/2026). Na macOS jsou pro prohlížeč neviditelné! Použijte pomlčku: ZOP 02-2026</p>
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <button
+                        onClick={() => setIsCollapsed(false)}
+                        className="w-full flex items-center justify-center p-2 text-slate-500 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+                        title="Sync ÚZ v PC"
+                    >
+                        <HardDrive className="w-5 h-5" />
+                    </button>
+                )}
             </div>
-            <div className="p-4 border-b border-slate-100">
+
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700">
                 {!isCollapsed ? (
                     editMode?.type === 'new_class' ? (
                         <input
@@ -171,7 +351,7 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                         <div key={cls.id} className="space-y-1">
                             {/* Class Folder */}
                             <div
-                                className={`relative group/class flex items-center px-2 py-1.5 text-slate-700 hover:bg-slate-50 rounded-md transition-colors ${isCollapsed ? 'justify-center' : 'justify-between'}`}
+                                className={`relative group/class flex items-center px-2 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-md transition-colors ${isCollapsed ? 'justify-center' : 'justify-between'}`}
                                 title={isCollapsed ? cls.name : undefined}
                             >
                                 <div
@@ -355,6 +535,25 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                     ))}
                 </div>
             </div>
-        </aside>
+
+            {/* Toast Notification */}
+            {
+                toast && (
+                    <div className={`absolute bottom-4 left-4 right-4 p-3 rounded-lg shadow-lg border flex items-start gap-2 text-sm animate-in slide-in-from-bottom-4 z-50 ${toast.type === 'success'
+                        ? 'bg-green-50 border-green-200 text-green-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                        }`}>
+                        {toast.type === 'success'
+                            ? <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                            : <XCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                        }
+                        <span className="flex-1">{toast.message}</span>
+                        <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600">
+                            <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                )
+            }
+        </aside >
     );
 }
