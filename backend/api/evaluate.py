@@ -1,22 +1,34 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from typing import List
 import json
 import asyncio
 import unicodedata
 from sqlalchemy.orm import Session
-from core.database import get_db
-from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion
+from core.database import get_db, SessionLocal
+from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion, AppSettings, GoldenExample
 from api.auth import get_current_lecturer
+import datetime
 
 from services.doc_parser import extract_text
 from services.llm_engine import evaluate_report, extract_identity
+from services.security_scanner import scanner, SecurityException
 from models.evaluation import EvaluationResponse, CriterionResult, BatchEvaluationResponse
 from pydantic import BaseModel
+from services.evaluation_queue import eval_queue
 
 router = APIRouter(
     prefix="/evaluate",
     tags=["evaluation"]
 )
+
+@router.websocket("/ws")
+async def websocket_eval_status(websocket: WebSocket):
+    await eval_queue.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text() # Udržujeme spojení živé
+    except WebSocketDisconnect:
+        eval_queue.disconnect(websocket)
 
 class FastScanResponseItem(BaseModel):
     filename: str
@@ -27,6 +39,27 @@ class FastScanResponseItem(BaseModel):
 class FastScanResponse(BaseModel):
     results: List[FastScanResponseItem]
 
+class GoldenExampleRequest(BaseModel):
+    scenario_id: str
+    source_text: str
+    perfect_json: str
+
+@router.post("/golden-example")
+def save_golden_example(request: GoldenExampleRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+    setting = db.query(AppSettings).filter(AppSettings.key == "ENABLE_RAG_MODULE").first()
+    if not setting or setting.value != "true":
+        raise HTTPException(status_code=400, detail="RAG Modul není povolen administrátorem.")
+
+    new_example = GoldenExample(
+        scenario_id=request.scenario_id,
+        source_text=request.source_text,
+        perfect_json=request.perfect_json,
+        created_at=datetime.datetime.now().isoformat()
+    )
+    db.add(new_example)
+    db.commit()
+    return {"status": "success", "message": "Zlatý příklad byl uložen do RAG paměti."}
+
 @router.post("/fast-scan", response_model=FastScanResponse)
 async def fast_scan_batch(
     files: List[UploadFile] = File(...), 
@@ -36,8 +69,9 @@ async def fast_scan_batch(
 ):
     """
     Rychle vytěží z dokumentů pouze identitu a založí záznam 'pending' v databázi.
+    Striktní omezení na 1 souběžný request kvůli prevenci Rate Limitu vLLM/OpenAI!
     """
-    semaphore = asyncio.Semaphore(10)
+    semaphore = asyncio.Semaphore(1)
     db_lock = asyncio.Lock()
     results = []
     
@@ -45,30 +79,42 @@ async def fast_scan_batch(
         student_name = unicodedata.normalize('NFC', file.filename)
         try:
             content_bytes = await file.read()
-            extracted_text = extract_text(content_bytes, file.filename)
+            extracted_text = await extract_text(content_bytes, file.filename)
+            
+            print(f"[FAST-SCAN-DEBUG] Soubor: '{file.filename}' | Velikost nahrání: {len(content_bytes)} bytes | Extrahovaný text: {len(extracted_text)} znaků")
             
             identita = {}
             if extracted_text.strip():
-                async with semaphore:
-                    identita = await extract_identity(
-                        report_text=extracted_text,
-                        db=db,
-                        student_log_prefix=student_name
-                    )
+                try:
+                    scanner.scan_text(extracted_text)
+                    async with semaphore:
+                        identita = await extract_identity(
+                            report_text=extracted_text,
+                            db=db,
+                            student_log_prefix=student_name
+                        )
+                        # Zpomaleni po dotazu k zabraneni 429 Too Many Requests Rate Limit
+                        await asyncio.sleep(1.0)
+                except SecurityException as se:
+                    print(f"[FAST-SCAN] Security Alarm: {se}")
+                    # Necháme identitu prázdnou, evaluace ji zablokuje později. Půjde dál.
                     
-            hodnost = identita.get('hodnost', '').strip()
-            jmeno = identita.get('jmeno', '').strip()
-            prijmeni = identita.get('prijmeni', '').strip()
+            # Zabezpečení proti None hodnotám, pokud LLM vrátí "null" místo prázdného stringu
+            hodnost = (identita.get('hodnost') or '').strip()
+            jmeno = (identita.get('jmeno') or '').strip()
+            prijmeni = (identita.get('prijmeni') or '').strip()
             
             if not prijmeni or not jmeno:
                 base_name = file.filename.rsplit('.', 1)[0]
                 import re
-                clean_base = re.sub(r'(?i)\b(úz|uz|vtos)\b', '', base_name)
+                # Odstraníme "Úz", "UZ", "VTOS", "-" (včetně českých znaků) a necháme jen jméno
+                clean_base = re.sub(r'(?i)\b(?:úz|uz|vtos)\b|-', ' ', base_name)
                 clean_base = re.sub(r'\s+', ' ', clean_base).strip()
-                cleaned_display_name = clean_base
+                cleaned_display_name = clean_base.title()
+                print(f"[FAST-SCAN] REGEX Fallback pro '{file.filename}' -> '{cleaned_display_name}'")
             else:
-                prijmeni_upper = prijmeni.upper()
-                cleaned_display_name = f"{prijmeni_upper} {jmeno}, {hodnost}".strip(", ")
+                cleaned_display_name = f"{prijmeni.capitalize()} {jmeno.capitalize()}"
+                print(f"[FAST-SCAN] LLM Úspěch pro '{file.filename}' -> '{cleaned_display_name}'")
                 
             async with db_lock:
                 # Check if it already exists to avoid duplicated files on re-upload
@@ -81,6 +127,8 @@ async def fast_scan_batch(
                 if existing_record:
                     existing_record.cleaned_name = cleaned_display_name
                     existing_record.student_identity = json.dumps(identita, ensure_ascii=False) if identita else "{}"
+                    existing_record.source_text = extracted_text
+                    existing_record.source_filename = file.filename
                     db.commit()
                     db.refresh(existing_record)
                     record_id = existing_record.id
@@ -92,13 +140,17 @@ async def fast_scan_batch(
                         lecturer_id=current_user.id,
                         json_result="{}", # Prázdný výsledek = pending
                         cleaned_name=cleaned_display_name,
-                        student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
+                        student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}",
+                        source_text=extracted_text,
+                        source_filename=file.filename
                     )
                     db.add(eval_record)
                     db.commit()
                     db.refresh(eval_record)
                     record_id = eval_record.id
             
+            print(f"[FAST-SCAN] Pro soubor {student_name} vytěženo: {identita}")
+
             return FastScanResponseItem(
                 filename=file.filename,
                 id=record_id,
@@ -118,19 +170,18 @@ async def fast_scan_batch(
             
     return FastScanResponse(results=results)
 
-@router.post("/batch", response_model=BatchEvaluationResponse)
+@router.post("/batch")
 async def evaluate_batch(
-    files: List[UploadFile] = File(...), 
+    files: List[UploadFile] = File(None), 
     scenario_id: str = Form(...),
+    student_ids: str = Form(None), # Comma separated IDs
     db: Session = Depends(get_db), 
     current_user: Lecturer = Depends(get_current_lecturer)
 ):
     """
-    Endpoint to evaluate a batch of uploaded files.
-    Extracts text and forwards it to the local vLLM server using DB configurations.
-    Persists the final evaluation into the database.
+    Endpoint na přijetí batchu souborů. Extrahuje obsahy do paměti a předá je do fronty na pozadí.
+    Vrací 202 Accepted.
     """
-    results = []
     
     # 0. Fetch current Super-Prompt and    # Fetch phase 2 prompt
     prompt_record = db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt2").first()
@@ -172,121 +223,181 @@ async def evaluate_batch(
     
     # 3. LOGOVÁNÍ
     print(f">>> SUCCESS: Do promptu vloženo {len(individual_criteria)} samostatných kritérií pro scenario_id: {scenario_id}")
-    print(f">>> [BATCH START] Zahajuji paralelní vyhodnocení pro {len(files)} studentů.")
+    num_files = len(files) if files else 0
+    print(f">>> [BATCH START] Zahajuji paralelní vyhodnocení pro {num_files} souborových studentů.")
     
-    semaphore = asyncio.Semaphore(5)
-    db_lock = asyncio.Lock()
+    # 1. Načíst obsah nahraných souborů do paměti
+    files_data = []
+    if files:
+        for file in files:
+            content_bytes = await file.read()
+            files_data.append({
+                "filename": file.filename,
+                "content": content_bytes,
+                "record_id": None
+            })
 
-    async def process_single_file(file: UploadFile, system_prompt: str, criteria_markdown: str, db_session: Session, current_user_obj: Lecturer, scenario_id: str) -> EvaluationResponse:
-        import os
-        student_name = unicodedata.normalize('NFC', file.filename)
+    # 2. Načíst obsah ze synchronizovaných záznamů (podle student_ids)
+    if student_ids:
+        try:
+            id_list = [int(x.strip()) for x in student_ids.split(",") if x.strip()]
+            records = db.query(StudentEvaluation).filter(
+                StudentEvaluation.id.in_(id_list),
+                StudentEvaluation.lecturer_id == current_user.id
+            ).all()
+            for rec in records:
+                if rec.source_text:
+                    files_data.append({
+                        "filename": rec.student_name,
+                        "content": None, # Signal to use source_text
+                        "source_text": rec.source_text,
+                        "record_id": rec.id
+                    })
+        except Exception as e:
+            print(f">>> BATCH ERROR: Chyba při parsování student_ids: {e}")
+
+    # Celkový počet studentů k vyhodnocení
+    num_files = len(files) if files else 0
+    num_db_records = len(id_list) if (student_ids and 'id_list' in locals()) else 0
+    total_processing = num_files + num_db_records
+    
+    print(f">>> [BATCH START] Zahajuji paralelní vyhodnocení pro {total_processing} studentů.")
+
+    # Zajištění rate limitingu a bezpečného zápisu pro dávkové zpracování na pozadí
+    from asyncio import Semaphore, Lock
+    evaluate_semaphore = Semaphore(1)
+    evaluate_db_lock = Lock()
+
+    # Asynchronní handler pro jeden soubor (bude spuštěn přes eval_queue.worker)
+    async def process_single_file_bg(task_data: dict):
+        file_data = task_data['file_data']
+        system_prompt = task_data['system_prompt']
+        criteria_markdown = task_data['criteria_markdown']
+        current_user_id = task_data['lecturer_id']
+        scen_id = task_data['scenario_id']
+        
+        student_name = unicodedata.normalize('NFC', file_data['filename'])
+        
+        # Otevření VLASTNÍ DB session, protože HTTP request už pravděpodobně skončil
+        db_bg = SessionLocal()
+        
+        # Notifikace start
+        await eval_queue.broadcast({
+            "type": "EVAL_START",
+            "student_name": student_name,
+            "scenario_id": scen_id
+        })
         
         try:
-            # 1. Extract text
-            content_bytes = await file.read()
-            extracted_text = extract_text(content_bytes, file.filename)
-            
+            if file_data.get('content'):
+                extracted_text = await extract_text(file_data['content'], file_data['filename'])
+            else:
+                extracted_text = file_data.get('source_text', '')
+
             if not extracted_text.strip():
-                raise ValueError("Dokument je prázdný nebo se z něj nepodařilo přečíst text.")
+                raise ValueError("Dokument je prázdný nebo se nepodařilo přečíst text.")
                 
-            # 2. Call LLM Service under semaphore to limit concurrent openrouter load
-            async with semaphore:
-                print(f"[LOG - {student_name}] Zahajuji asynchronní inference LLM modelu...")
+            scanner.scan_text(extracted_text)
+                
+            async with evaluate_semaphore:
+                # Upozornění frontendu na zahájení práce (z fronty -> do procesu)
+                await eval_queue.broadcast({
+                    "type": "EVAL_START",
+                    "student_name": student_name,
+                    "scenario_id": scen_id
+                })
+                
                 llm_result_dict = await evaluate_report(
                     report_text=extracted_text,
                     criteria_markdown=criteria_markdown,
                     system_prompt=system_prompt,
-                    db=db_session,
+                    db=db_bg,
+                    scenario_id=scen_id,
                     student_log_prefix=student_name
                 )
-                print(f"[LOG - {student_name}] Asynchronní vyhodnocení LLM dokončeno.")
             
-            # 3. Process Identity and Save to DB under global lock
-            async with db_lock:
-                print(f"[LOG - {student_name}] Ukládám transakci do databáze...")
-                
+            async with evaluate_db_lock:
                 identita = llm_result_dict.get('identita', {})
-                # Nepřepisujeme identitu, pokud už byla manuálně upravená a JSON je None (vlastně JSON result se uloží a hotovo)
                 
-                existing_eval = db_session.query(StudentEvaluation).filter(
+                existing_eval = db_bg.query(StudentEvaluation).filter(
                     StudentEvaluation.student_name == student_name,
-                    StudentEvaluation.lecturer_id == current_user_obj.id,
-                    StudentEvaluation.scenario_name == scenario_id
+                    StudentEvaluation.lecturer_id == current_user_id,
+                    StudentEvaluation.scenario_name == scen_id
                 ).order_by(StudentEvaluation.id.desc()).first()
                 
-                # Získáme z LLM aktuální jméno (kdyby fast scan selhal ale heavy scan to našel)
                 hodnost = identita.get('hodnost', '').strip()
                 jmeno = identita.get('jmeno', '').strip()
                 prijmeni = identita.get('prijmeni', '').strip()
-                prijmeni_upper = prijmeni.upper() if prijmeni else ""
-                cleaned_eval_name = f"{prijmeni_upper} {jmeno}, {hodnost}".strip(", ") if prijmeni else student_name
+                if prijmeni and jmeno:
+                    cleaned_eval_name = f"{prijmeni.capitalize()} {jmeno.capitalize()}"
+                elif prijmeni:
+                    cleaned_eval_name = prijmeni.capitalize()
+                else:
+                    base_name = student_name.rsplit('.', 1)[0]
+                    import re
+                    clean_base = re.sub(r'(?i)\b(?:úz|uz|vtos|-)\b', '', base_name)
+                    cleaned_eval_name = re.sub(r'\s+', ' ', clean_base).strip()
                 
                 if existing_eval:
                     existing_eval.json_result = json.dumps(llm_result_dict, ensure_ascii=False)
-                    # Jestliže heavy engine vytěžil kvalitnější data (nebo fast-scan neměl nic) a nebylo manuálně potvrzeno (identita neni text None)
                     if existing_eval.student_identity and existing_eval.student_identity != "None" and identita and not "prijmeni" in json.loads(existing_eval.student_identity or "{}"):
                          existing_eval.student_identity = json.dumps(identita, ensure_ascii=False)
                          existing_eval.cleaned_name = cleaned_eval_name
-                    cleaned_display_name = existing_eval.cleaned_name
                 else:
                     eval_record = StudentEvaluation(
                         student_name=student_name,
                         class_id=1,
-                        scenario_name=scenario_id,
-                        lecturer_id=current_user_obj.id,
+                        scenario_name=scen_id,
+                        lecturer_id=current_user_id,
                         json_result=json.dumps(llm_result_dict, ensure_ascii=False),
                         cleaned_name=cleaned_eval_name,
                         student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
                     )
-                    db_session.add(eval_record)
-                    cleaned_display_name = cleaned_eval_name
+                    db_bg.add(eval_record)
                     
-                db_session.commit()
+                db_bg.commit()
+            
+            await eval_queue.broadcast({
+                "type": "EVAL_SUCCESS",
+                "student_name": student_name,
+                "scenario_id": scen_id
+            })
 
-            
-            # 4. Construct response
-            criterion_results = []
-            for item in llm_result_dict.get('vysledky', []):
-                criterion_results.append(CriterionResult(
-                    nazev=item.get('nazev', 'Neznámé kritérium'),
-                    splneno=item.get('splneno', False),
-                    body=item.get('body', 0),
-                    oduvodneni=item.get('oduvodneni', 'Bez odůvodnění.'),
-                    citace=item.get('citace', 'Chybí.')
-                ))
-            
-            return EvaluationResponse(
-                jmeno_studenta=student_name,
-                cleaned_name=cleaned_display_name,
-                vysledky=criterion_results,
-                celkove_skore=llm_result_dict.get('celkove_skore', 0),
-                zpetna_vazba=llm_result_dict.get('zpetna_vazba', 'Bez zpětné vazby.'),
-                identita=identita
-            )
-
-            
-        except ValueError as ve:
-            print(f"[LOG - {student_name}] Validation Error: {ve}")
-            return EvaluationResponse(
-                jmeno_studenta=student_name,
-                vysledky=[],
-                celkove_skore=0,
-                zpetna_vazba=f"Chyba při zpracování: {ve}"
-            )
+        except SecurityException as se:
+            await eval_queue.broadcast({
+                "type": "EVAL_ERROR",
+                "student_name": student_name,
+                "error": str(se)
+            })
         except Exception as e:
-            print(f"[LOG - {student_name}] KRITICKÁ CHYBA: {e}")
-            # Nikdy neraisujeme výjimku přímo v gather smyčce, jinak padne celý batch
-            return EvaluationResponse(
-                jmeno_studenta=student_name,
-                vysledky=[],
-                celkove_skore=0,
-                zpetna_vazba=f"LLM Server chyba: {str(e)} - Zkuste vyhodnocení znovu."
-            )
+            await eval_queue.broadcast({
+                "type": "EVAL_ERROR",
+                "student_name": student_name,
+                "error": str(e)
+            })
+        finally:
+            db_bg.close()
 
-    # Vytvoření seznamu korutin pro asynchronní vyhodnocení všech dokumentů paralelně
-    tasks = [process_single_file(file, system_prompt_str, criteria_str, db, current_user, scenario_id) for file in files]
-    
-    # Vyčkání na dokončení všech tasků (exceptions bubbling up directly to fastapi exception handlers)
-    results = await asyncio.gather(*tasks)
+    # Vytvoření úkolů do fronty
+    for file_data in files_data:
+        task = {
+            "handler": process_single_file_bg,
+            "file_data": file_data,
+            "system_prompt": system_prompt_str,
+            "criteria_markdown": criteria_str,
+            "scenario_id": scenario_id,
+            "lecturer_id": current_user.id
+        }
+        await eval_queue.add_task(task)
 
-    return BatchEvaluationResponse(results=list(results))
+    # Vracíme pseudo-odpověď 202 - Accepted
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=202, content={"status": "accepted", "message": "Zpracování přidáno do fronty na pozadí."})
+
+@router.delete("/batch")
+async def cancel_batch_evaluation(current_user: Lecturer = Depends(get_current_lecturer)):
+    """
+    Vyčistí aktuální nevyřízenou frontu úloh v asynchronním workerovi.
+    """
+    await eval_queue.clear_queue()
+    return {"status": "success", "message": "Zpracování zbývajících ÚZ bylo zastaveno."}

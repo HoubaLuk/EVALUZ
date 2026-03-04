@@ -52,6 +52,8 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
             data["jmeno_studenta"] = eval_record.student_name
             data["id"] = eval_record.id
             data["cleaned_name"] = eval_record.cleaned_name
+            # Inject raw json_result so frontend quickview can access original splneno values
+            data["json_result"] = eval_record.json_result
             
             if eval_record.student_identity and eval_record.student_identity != "None":
                 try:

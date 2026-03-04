@@ -28,10 +28,6 @@ def reset_password(email: str, new_password: str):
         db.close()
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python reset_user_password.py <email> <new_password>")
-        sys.exit(1)
-    
-    target_email = sys.argv[1]
-    new_pw = sys.argv[2]
+    target_email = "lukas.hribnak@pcr.cz"
+    new_pw = "Nikolatkopacholatko1985"
     reset_password(target_email, new_pw)

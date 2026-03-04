@@ -34,7 +34,7 @@ Výstup naformátuj jako čtivý a profesionální text rozdělený na (dodržuj
 
 # Default Criteria
 DEFAULT_MS2_CRITERIA = """- **Kritérium 1: Kdo vyslal hlídku.** (5 bodů) Student musí explicitně uvést, zda hlídku vyslal operační důstojník, jak se dozvěděli o incidentu.
-- **Kritérium 2: Označení místa události.** (5 bodů) Musí být přesně popsána adresa události podle § 40.
+- **Kritérium 2: Označení místa události.** (5 bodů) Musí být přesně popsána adresa události podle standardů ÚZ účastníků ZOP.
 - **Kritérium 3: Zákonná výzva před použitím DP.** (10 bodů) Hmaty a chvaty (donucovací prostředky) lze použít jen po předchozí zákonné výzvě.
 - **Kritérium 4: Poučení osoby.** (5 bodů) Osoba musí být poučena."""
 

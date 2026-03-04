@@ -23,6 +23,9 @@ class Lecturer(Base):
     rank_full = Column(String, default="")
     school_location = Column(String, default="")
     funkcni_zarazeni = Column(String, default="")
+    is_superadmin = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    must_change_password = Column(Boolean, default=False)
 
 class EvaluationCriteria(Base):
     __tablename__ = "evaluation_criteria"
@@ -55,6 +58,8 @@ class StudentEvaluation(Base):
     json_result = Column(Text) # Store output as JSON string
     cleaned_name = Column(String, index=True) # "Příjmení Jméno, hodnost"
     student_identity = Column(Text) # JSON structure from LLM
+    source_text = Column(Text) # Extracted text from the original document
+    source_filename = Column(String) # Original filename
     
 class AppSettings(Base):
     __tablename__ = "app_settings"
@@ -77,4 +82,12 @@ class ExportHistory(Base):
     type = Column(String)
     download_url = Column(String)
     created_at = Column(String, index=True)
+
+class GoldenExample(Base):
+    __tablename__ = "golden_examples"
+    id = Column(Integer, primary_key=True, index=True)
+    scenario_id = Column(String, index=True)
+    source_text = Column(Text)
+    perfect_json = Column(Text)
+    created_at = Column(String)
 

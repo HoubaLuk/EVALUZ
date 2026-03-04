@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { ChevronRight, CheckCircle2, Lock, UserPlus, LogIn, Loader2 } from 'lucide-react';
+import { ChevronRight, CheckCircle2, Lock, UserPlus, LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 
 import { Tab, ClassData, DEFAULT_CLASS_DATA } from './types';
 import { Header } from './components/Header';
@@ -10,10 +10,7 @@ import { TabCriteria } from './components/TabCriteria';
 import { TabEvaluation } from './components/TabEvaluation';
 import { TabAnalytics } from './components/TabAnalytics';
 
-// Dynamická detekce API URL (localhost pro vývoj, IP serveru pro produkci v Dockeru)
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:8000/api/v1'
-  : `http://${window.location.hostname}:8000/api/v1`;
+import { API_BASE_URL } from './utils/api';
 
 /**
  * Hlavní vstupní bod aplikace EVALUZ.
@@ -25,7 +22,7 @@ export default function EvaluzDashboard() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
   // Auth State
-  const [authState, setAuthState] = useState<'CHECKING' | 'RECOGNIZED_EMPTY_DB' | 'LOGIN_REQUIRED' | 'AUTHENTICATED'>('CHECKING');
+  const [authState, setAuthState] = useState<'CHECKING' | 'RECOGNIZED_EMPTY_DB' | 'LOGIN_REQUIRED' | 'AUTHENTICATED' | 'FORCE_PASSWORD_CHANGE'>('CHECKING');
   const [token, setToken] = useState<string | null>(localStorage.getItem('upvsp_token'));
   const [lecturerName, setLecturerName] = useState<string>('Načítám profil...');
 
@@ -34,6 +31,9 @@ export default function EvaluzDashboard() {
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   // Lifed State
   const [classes, setClasses] = React.useState<ClassData[]>(() => {
@@ -48,10 +48,47 @@ export default function EvaluzDashboard() {
   const [cachedAnalytics, setCachedAnalytics] = useState<Record<string, any>>({});
   const [scenariosWithAnalysis, setScenariosWithAnalysis] = useState<string[]>([]);
   const [hasEvaluations, setHasEvaluations] = useState(false);
+  const [hasCriteria, setHasCriteria] = useState(false);
+
+  useEffect(() => {
+    // Načíst aktuální stav vložených kritérií pro scénář z DB
+    if (activeScenarioId && token) {
+      fetch(`${API_BASE_URL}/criteria/${activeScenarioId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.markdown_content && data.markdown_content !== "Kritéria zatím nebyla definována.") {
+            setHasCriteria(true);
+          } else {
+            setHasCriteria(false);
+          }
+        })
+        .catch(e => console.error(e));
+    }
+  }, [activeScenarioId, token]);
+
+  useEffect(() => {
+    // Načíst stav evaluací pro stávající scénář - pro správné zezlátnutí stepper ikony
+    if (activeScenarioId && token) {
+      fetch(`${API_BASE_URL}/analytics/class/1?scenario_id=${activeScenarioId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data) && data.some((s: any) => s.vysledky && s.vysledky.length > 0)) {
+            setHasEvaluations(true);
+          } else {
+            setHasEvaluations(false);
+          }
+        })
+        .catch(e => console.error(e));
+    }
+  }, [activeScenarioId, token]);
 
   useEffect(() => {
     // Načíst z DB jaké scénáře už mají hotovou analýzu
-    fetch('http://localhost:8000/api/v1/analytics/class/1/status', {
+    fetch(`${API_BASE_URL}/analytics/class/1/status`, {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
     })
       .then(res => res.json())
@@ -68,6 +105,7 @@ export default function EvaluzDashboard() {
     setActiveScenarioId(scenarioId);
     setCachedAnalytics({});
     setHasEvaluations(false);
+    setHasCriteria(false);
   };
 
   useEffect(() => {
@@ -114,7 +152,12 @@ export default function EvaluzDashboard() {
             const fullName = `${meData.rank_shortcut || ''} ${meData.title_before || ''} ${meData.first_name || ''} ${meData.last_name || ''}`;
             const displayRole = meData.funkcni_zarazeni ? ` - ${meData.funkcni_zarazeni}` : ' - Lektor';
             setLecturerName(fullName.replace(/\s+/g, ' ').trim() + displayRole);
-            setAuthState('AUTHENTICATED');
+
+            if (meData.must_change_password) {
+              setAuthState('FORCE_PASSWORD_CHANGE');
+            } else {
+              setAuthState('AUTHENTICATED');
+            }
           }
         } else {
           setAuthState('LOGIN_REQUIRED');
@@ -206,8 +249,23 @@ export default function EvaluzDashboard() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Heslo</label>
-                <input type="password" required value={authPassword} onChange={e => setAuthPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent" />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={authPassword}
+                    onChange={e => setAuthPassword(e.target.value)}
+                    className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -222,8 +280,76 @@ export default function EvaluzDashboard() {
     );
   }
 
+  if (authState === 'FORCE_PASSWORD_CHANGE') {
+    const handleChangePassword = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setAuthError('');
+      if (newPassword !== newPasswordConfirm) {
+        setAuthError('Hesla se neshodují.');
+        return;
+      }
+      setAuthLoading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/auth/password`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ new_password: newPassword })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Chyba při změně hesla');
+        }
+        setAuthState('AUTHENTICATED');
+      } catch (err: any) {
+        setAuthError(err.message);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden">
+          <div className="bg-[#D4AF37] px-6 py-6 text-center">
+            <Lock className="w-12 h-12 text-white/90 mx-auto mb-3" />
+            <h2 className="text-2xl font-bold text-white">Vynucená změna hesla</h2>
+            <p className="text-[#002855] text-sm mt-1 font-semibold">Z bezpečnostních důvodů (vyzývati si heslo)</p>
+          </div>
+          <form onSubmit={handleChangePassword} className="p-6">
+            {authError && <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">{authError}</div>}
+
+            <p className="text-sm text-slate-600 mb-6">
+              Administrátor resetoval Vaše heslo, případně Vaše heslo expirovalo.
+              Prosím zadejte nové bezpečné heslo (min. 12 znaků, kombinace malých, velkých písmen a číslic).
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nové heslo</label>
+                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Potvrzení nového hesla</label>
+                <input type="password" required value={newPasswordConfirm} onChange={e => setNewPasswordConfirm(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
+              </div>
+            </div>
+
+            <button type="submit" disabled={authLoading || !newPassword || !newPasswordConfirm} className="w-full mt-6 bg-[#002855] text-white py-2.5 rounded-md font-medium hover:bg-[#001f44] transition-colors flex justify-center items-center">
+              {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Změnit heslo a vstoupit'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans flex flex-col">
+    <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans flex flex-col transition-colors duration-200">
       <Header setIsAdminOpen={setIsAdminOpen} lecturerName={lecturerName} />
 
       <div className="flex flex-1 overflow-hidden">
@@ -238,15 +364,15 @@ export default function EvaluzDashboard() {
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Header */}
-          <div className="bg-white px-8 py-6 border-b border-slate-200">
-            <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+          <div className="bg-white dark:bg-slate-800 px-8 py-6 border-b border-slate-200 dark:border-slate-700 transition-colors duration-200">
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-2">
               <span>{activeClass?.name || 'Nevybráno'}</span>
               <ChevronRight className="w-4 h-4" />
-              <span className="text-[#002855] font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
+              <span className="text-[#002855] dark:text-blue-300 font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
             </div>
-            <h2 className="text-3xl font-bold text-[#002855]">{activeScenario?.name || 'EVALUZ'}</h2>
+            <h2 className="text-3xl font-bold text-[#002855] dark:text-blue-100">{activeScenario?.name || 'EVALUZ'}</h2>
 
-            <p className="text-slate-500 mt-1">Hodnocení úředních záznamů dle precizovaných kritérií.</p>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">Hodnocení úředních záznamů dle precizovaných kritérií.</p>
           </div>
 
           {/* Workflow Stepper */}
@@ -270,7 +396,7 @@ export default function EvaluzDashboard() {
                 const _hasAnalytics = !!(activeScenarioId && cachedAnalytics[activeScenarioId] && cachedAnalytics[activeScenarioId].stats?.length > 0);
 
                 if (index === 0) {
-                  isCompleted = activeTab === 'evaluation' || activeTab === 'analytics' || hasEvaluations;
+                  isCompleted = hasCriteria;
                 } else if (index === 1) {
                   isCompleted = hasEvaluations || activeTab === 'analytics' || _hasAnalytics;
                 } else if (index === 2) {
@@ -308,6 +434,7 @@ export default function EvaluzDashboard() {
               <TabCriteria
                 scenarioId={activeScenarioId}
                 scenarioName={activeScenario?.name || null}
+                onCriteriaSaved={() => setHasCriteria(true)}
               />
             )}
             {activeTab === 'evaluation' && (

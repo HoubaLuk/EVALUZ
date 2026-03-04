@@ -1,4 +1,4 @@
-import { Criterion, Student, EvaluationDetail, AnalyticsData } from './types';
+import { Criterion, Student, AnalyticsData } from './types';
 
 export const criteriaData: Criterion[] = [
     { id: 1, name: 'Kdo vyslal hlídku', description: 'Uvedení operačního důstojníka nebo jiného zdroje vyslání.' },
@@ -12,7 +12,7 @@ export const studentsData: Student[] = [
     { id: 3, name: 'stržm. Jan Svoboda', status: 'pending', score: 0, maxScore: 25 },
 ];
 
-export const evaluationDetails: EvaluationDetail[] = [
+export const evaluationDetails: any[] = [
     {
         id: 1,
         criterion: 'Kdo vyslal hlídku',

@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE_URL } from '../utils/api';
+
 import { Wand2, UploadCloud, User, CheckCircle2, ChevronRight, Shield, Save, Loader2, Paperclip } from 'lucide-react';
+import { useDialog } from '../contexts/DialogContext';
 
 interface ChatMessage {
     role: 'user' | 'assistant';
@@ -10,9 +13,11 @@ interface ChatMessage {
 interface TabCriteriaProps {
     scenarioId: string | null;
     scenarioName: string | null;
+    onCriteriaSaved?: () => void;
 }
 
-export function TabCriteria({ scenarioId, scenarioName }: TabCriteriaProps) {
+export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCriteriaProps) {
+    const { showAlert } = useDialog();
     const [messages, setMessages] = useState<ChatMessage[]>([{
         role: 'assistant',
         content: 'Dobrý den, jsem váš AI asistent pro tvorbu hodnotících kritérií. Vložte prosím název modelové situace a svá heslovitá kritéria. Budu se vás následně doptávat na detaily.'
@@ -56,7 +61,7 @@ export function TabCriteria({ scenarioId, scenarioName }: TabCriteriaProps) {
         setCriteriaMarkdown('Načítám kritéria...');
 
         try {
-            const res = await fetch(`http://localhost:8000/api/v1/criteria/${scenarioId}`, {
+            const res = await fetch(`${API_BASE_URL}/criteria/${scenarioId}`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
             if (res.ok) {
@@ -90,7 +95,7 @@ export function TabCriteria({ scenarioId, scenarioName }: TabCriteriaProps) {
         formData.append('file', file);
 
         try {
-            const res = await fetch('http://localhost:8000/api/v1/criteria/extract-context', {
+            const res = await fetch(`${API_BASE_URL}/criteria/extract-context`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
                 body: formData
@@ -125,7 +130,7 @@ export function TabCriteria({ scenarioId, scenarioName }: TabCriteriaProps) {
         setIsChatLoading(true);
 
         try {
-            const res = await fetch('http://localhost:8000/api/v1/criteria/chat', {
+            const res = await fetch(`${API_BASE_URL}/criteria/chat`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -208,7 +213,7 @@ export function TabCriteria({ scenarioId, scenarioName }: TabCriteriaProps) {
         setSaveSuccess(false);
 
         try {
-            const res = await fetch('http://localhost:8000/api/v1/criteria/save', {
+            const res = await fetch(`${API_BASE_URL}/criteria/save`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -222,12 +227,13 @@ export function TabCriteria({ scenarioId, scenarioName }: TabCriteriaProps) {
 
             if (res.ok) {
                 setSaveSuccess(true);
+                if (onCriteriaSaved) onCriteriaSaved();
                 fetchCriteria(); // Refresh the right column
                 setTimeout(() => setSaveSuccess(false), 3000);
             }
         } catch (error) {
-            console.error('Chyba při ukládání kritérií:', error);
-            alert("Nepodařilo se uložit kritéria.");
+            console.error(error);
+            showAlert("Nepodařilo se uložit kritéria.");
         } finally {
             setIsSaving(false);
         }

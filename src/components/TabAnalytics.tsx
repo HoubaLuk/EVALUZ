@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { API_BASE_URL } from '../utils/api';
+
 import { Download, BarChart3, PieChart as PieChartIcon, Wand2, RefreshCw, AlertCircle, AlertTriangle, ExternalLink, X, CheckCircle2, FileText } from 'lucide-react';
+import { useDialog } from '../contexts/DialogContext';
 import {
     BarChart,
     Bar,
@@ -49,6 +52,7 @@ interface TabAnalyticsProps {
  * Obsahuje interaktivní grafy (Recharts), AI doporučení a seznam studentů vyžadujících pomoc.
  */
 export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
+    const { showAlert } = useDialog();
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -66,8 +70,8 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
         setError(null);
         try {
             let url = scenarioId
-                ? `http://localhost:8000/api/v1/analytics/class/1/summary?scenario_id=${scenarioId}`
-                : `http://localhost:8000/api/v1/analytics/class/1/summary`;
+                ? `${API_BASE_URL}/analytics/class/1/summary?scenario_id=${scenarioId}`
+                : `${API_BASE_URL}/analytics/class/1/summary`;
 
             if (force) {
                 url += scenarioId ? '&force=true' : '?force=true';
@@ -110,8 +114,8 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
     const handleExportExcel = async () => {
         try {
             const url = scenarioId
-                ? `http://localhost:8000/api/v1/export/class/1/excel?scenario_id=${scenarioId}`
-                : `http://localhost:8000/api/v1/export/class/1/excel`;
+                ? `${API_BASE_URL}/export/class/1/excel?scenario_id=${scenarioId}`
+                : `${API_BASE_URL}/export/class/1/excel`;
 
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
@@ -128,7 +132,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
             document.body.removeChild(a);
 
             // Zápis úspěšného exportu do databáze historie
-            await fetch('http://localhost:8000/api/v1/export/history', {
+            await fetch(`${API_BASE_URL}/export/history`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -141,7 +145,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                 })
             });
         } catch (e: any) {
-            alert(e.message);
+            showAlert(e.message);
         }
     };
 
@@ -152,12 +156,12 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
     const handleExportPDF = async () => {
         const token = localStorage.getItem('upvsp_token');
         const finalScenarioId = data?.scenario_id || scenarioId || 'Neznámý_scénář';
-        const url = `http://localhost:8000/api/v1/export/class-report/${finalScenarioId}?token=${token}`;
+        const url = `${API_BASE_URL}/export/class-report/${finalScenarioId}?token=${token}`;
         window.open(url, '_blank');
 
         // Zápis exportu do historie
         try {
-            await fetch('http://localhost:8000/api/v1/export/history', {
+            await fetch(`${API_BASE_URL}/export/history`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -179,21 +183,33 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
         setPreviewStudentId(studentId);
         setPreviewLoading(true);
         try {
-            const res = await fetch('http://localhost:8000/api/v1/analytics/class/1', {
+            const res = await fetch(`${API_BASE_URL}/analytics/class/1`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
             if (res.ok) {
                 const students = await res.json();
                 const targetStudent = students.find((s: any) => s.id === studentId);
                 if (targetStudent) {
+                    // Přímo parsáci surového json_result pro zachování všech hodnot 'splneno'.
+                    // Pydantic model može některé hodnoty změnit, proto jdeme přímo ke zdroji.
                     let parsedResults = [];
                     try {
-                        const parsed = typeof targetStudent.json_result === 'string' ? JSON.parse(targetStudent.json_result) : targetStudent.json_result;
-                        parsedResults = parsed.vysledky || [];
-                    } catch (e) { }
+                        const rawStr = targetStudent.json_result; // surovy string z DB
+                        if (rawStr) {
+                            const parsed = JSON.parse(rawStr);
+                            parsedResults = parsed.vysledky || [];
+                        }
+                    } catch (e) {
+                        // Fallback na Pydantic model pri chybě
+                        parsedResults = targetStudent.vysledky || [];
+                    }
+
+                    const jmeno = targetStudent.identita?.prijmeni
+                        ? `${targetStudent.identita.prijmeni} ${targetStudent.identita.jmeno || ''}`.trim()
+                        : targetStudent.cleaned_name || targetStudent.jmeno_studenta;
 
                     setPreviewStudentData({
-                        name: targetStudent.jmeno_studenta,
+                        name: jmeno,
                         score: targetStudent.celkove_skore,
                         vysledky: parsedResults,
                         zpetna_vazba: targetStudent.zpetna_vazba
@@ -513,19 +529,24 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                                             Nesplněná kritéria
                                         </h4>
                                         <div className="space-y-2">
-                                            {(previewStudentData.score >= (data.max_score || 0) && previewStudentData.vysledky.filter((v: any) => v.body === 0).length === 0) ? (
-                                                <p className="text-emerald-600 font-medium">Student splnil všechna kritéria.</p>
-                                            ) : (
-                                                <div className="space-y-2">
-                                                    {previewStudentData.vysledky.filter((v: any) => v.body === 0).map((v: any, i: number) => (
-                                                        <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm">
-                                                            <p className="font-semibold text-red-800 mb-1">{v.nazev}</p>
-                                                            <p className="text-red-600">{v.oduvodneni}</p>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-
+                                            {(() => {
+                                                const failed = previewStudentData.vysledky.filter(
+                                                    (v: any) => v.splneno === false || (v.splneno == null && Number(v.body) === 0)
+                                                );
+                                                if (failed.length === 0) {
+                                                    return <p className="text-emerald-600 font-medium">Student splníl všechna kritéria.</p>;
+                                                }
+                                                return (
+                                                    <div className="space-y-2">
+                                                        {failed.map((v: any, i: number) => (
+                                                            <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm">
+                                                                <p className="font-semibold text-red-800 mb-1">{v.nazev}</p>
+                                                                <p className="text-red-600">{v.oduvodneni || 'Bez zdůvodnění'}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                 </div>

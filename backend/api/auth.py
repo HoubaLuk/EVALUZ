@@ -45,6 +45,9 @@ class ProfileUpdate(BaseModel):
     school_location: str = ""
     funkcni_zarazeni: str = ""
 
+class PasswordUpdate(BaseModel):
+    new_password: str
+
 # --- Dependency ---
 def decode_lecturer_token(token: str, db: Session):
     credentials_exception = HTTPException(
@@ -122,7 +125,8 @@ def setup_main_account(data: SetupData, db: Session = Depends(get_db)):
         rank_shortcut=data.rank_shortcut,
         rank_full=data.rank_full,
         school_location=data.school_location,
-        funkcni_zarazeni=data.funkcni_zarazeni
+        funkcni_zarazeni=data.funkcni_zarazeni,
+        is_superadmin=True
     )
     
     db.add(new_lecturer)
@@ -147,18 +151,29 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     """
     Standard OAuth2 Login endpoint.
     """
+    print(f">>> [LOGIN DEBUG] Pokus o přihlášení: user={form_data.username}")
     user = db.query(Lecturer).filter(Lecturer.email == form_data.username).first()
     
-    # --- TEMPORARY BYPASS ---
     if not user:
-        user = db.query(Lecturer).first()
-    
-    if not user:
+        print(f">>> [LOGIN DEBUG] Uživatel {form_data.username} nebyl nalezen v DB.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+        
+    is_valid = verify_password(form_data.password, user.password_hash)
+    print(f">>> [LOGIN DEBUG] Uživatel nalezen. Heslo validní: {is_valid}")
+    
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Tento účet byl deaktivován administrátorem.")
         
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -173,6 +188,7 @@ def read_users_me(current_user: Lecturer = Depends(get_current_lecturer)):
     Returns the profile data of the currently logged-in lecturer.
     """
     return {
+        "id": current_user.id,
         "email": current_user.email,
         "title_before": current_user.title_before,
         "first_name": current_user.first_name,
@@ -181,7 +197,9 @@ def read_users_me(current_user: Lecturer = Depends(get_current_lecturer)):
         "rank_shortcut": current_user.rank_shortcut,
         "rank_full": current_user.rank_full,
         "school_location": current_user.school_location,
-        "funkcni_zarazeni": current_user.funkcni_zarazeni
+        "funkcni_zarazeni": current_user.funkcni_zarazeni,
+        "is_superadmin": current_user.is_superadmin,
+        "must_change_password": current_user.must_change_password
     }
 
 
@@ -201,3 +219,19 @@ def update_profile(profile: ProfileUpdate, db: Session = Depends(get_db), curren
     
     db.commit()
     return {"status": "success", "message": "Profil byl úspěšně aktualizován."}
+
+@router.put("/password")
+def update_password(data: PasswordUpdate, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+    """
+    Updates the password for the current lecturer and clears the must_change_password flag.
+    """
+    password = str(data.new_password).strip()
+    import re
+    if len(password) < 12 or not re.search(r"[a-z]", password) or not re.search(r"[A-Z]", password) or not re.search(r"\d", password):
+        raise HTTPException(status_code=400, detail="Heslo musí mít min. 12 znaků a obsahovat velká, malá písmena a číslice.")
+    
+    current_user.password_hash = get_password_hash(password)
+    current_user.must_change_password = False
+    db.commit()
+    return {"status": "success", "message": "Heslo bylo úspěšně změněno."}
+

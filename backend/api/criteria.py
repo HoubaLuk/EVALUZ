@@ -35,7 +35,7 @@ class SaveCriteriaRequest(BaseModel):
 # --- Endpoints ---
 
 @router.post("/chat", response_model=ChatResponse)
-def handle_chat(request: ChatRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+async def handle_chat(request: ChatRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """
     Handles a chat turn for Phase 1 Criteria generation.
     Retrieves the Phase 1 Super Prompt from DB and forwards the conversation to vLLM.
@@ -53,11 +53,12 @@ def handle_chat(request: ChatRequest, db: Session = Depends(get_db), current_use
         messages_dict_list = [{"role": msg.role, "content": msg.content} for msg in request.messages]
         
         # Get Completion from LLM Engine
-        response_text = chat_completion(
+        response_text = await chat_completion(
             messages=messages_dict_list,
             system_prompt=system_prompt,
             temperature=temperature,
-            db=db
+            db=db,
+            phase="phase1"
         )
         
         return {"response": response_text}
@@ -76,7 +77,7 @@ async def extract_context(file: UploadFile = File(...), current_user: Lecturer =
     """
     try:
         content_bytes = await file.read()
-        extracted_text = extract_text(content_bytes, file.filename)
+        extracted_text = await extract_text(content_bytes, file.filename)
         return {"filename": file.filename, "text": extracted_text}
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

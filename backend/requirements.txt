@@ -2,9 +2,10 @@ fastapi
 uvicorn
 python-multipart
 python-docx
-pydantic
 openai
 sqlalchemy
+pydantic-settings
 striprtf
 pymupdf
 fpdf2
+psycopg2-binary>=2.9.9

@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass } from 'lucide-react';
+import { API_BASE_URL } from '../utils/api';
+
+import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass, FileText, Upload } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Student } from '../types';
+import { useDialog } from '../contexts/DialogContext';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode; content: string }) => {
     const [isVisible, setIsVisible] = useState(false);
@@ -33,11 +36,13 @@ interface TabEvaluationProps {
 }
 
 export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange }: TabEvaluationProps) {
+    const { showAlert, showConfirm, showPrompt } = useDialog();
     const [students, setStudents] = useState<Student[]>([]);
     const [selectAll, setSelectAll] = useState(false);
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
     const [activeSourceQuote, setActiveSourceQuote] = useState<string | null>(null);
+    const [isDragging, setIsDragging] = useState(false);
 
     // Name editing state
     const [isEditingName, setIsEditingName] = useState(false);
@@ -46,18 +51,78 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     // Real API State
     const [isEvaluating, setIsEvaluating] = useState(false);
     const [evaluationProgress, setEvaluationProgress] = useState(0);
+    const [totalToEvaluate, setTotalToEvaluate] = useState(0);
+    const [evaluatedCount, setEvaluatedCount] = useState(0);
     const [files, setFiles] = useState<File[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
     const [isCancelling, setIsCancelling] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+    // MLOps/RAG State
+    const [isRagEnabled, setIsRagEnabled] = useState(false);
+    const [isSavingGolden, setIsSavingGolden] = useState(false);
+
+    useEffect(() => {
+        const fetchSettings = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/admin/settings`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const rag = data.find((s: any) => s.key === 'ENABLE_RAG_MODULE');
+                    setIsRagEnabled(rag?.value === 'true');
+                }
+            } catch (e) {
+                console.error("Failed to load settings", e);
+            }
+        };
+        fetchSettings();
+    }, []);
+
+    useEffect(() => {
+        let ws: WebSocket;
+        const connectWs = () => {
+            const wsUrl = API_BASE_URL.replace('http', 'ws') + '/evaluate/ws';
+            ws = new WebSocket(wsUrl);
+            ws.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'EVAL_START') {
+                    setStudents(prev => prev.map(s => s.name === data.student_name ? { ...s, status: 'evaluating' } : s));
+                } else if (data.type === 'EVAL_SUCCESS') {
+                    setEvaluatedCount(prev => prev + 1);
+                    await fetchEvaluations();
+                } else if (data.type === 'EVAL_ERROR') {
+                    setEvaluatedCount(prev => prev + 1);
+                    setToastMessage(`Chyba u studenta: ${data.error}`);
+                    setTimeout(() => setToastMessage(null), 5000);
+                    setStudents(prev => prev.map(s => s.name === data.student_name ? { ...s, status: 'pending' } : s));
+                }
+            };
+            ws.onclose = () => {
+                setTimeout(connectWs, 3000);
+            };
+        };
+        connectWs();
+        return () => ws?.close();
+    }, [scenarioId]);
+    useEffect(() => {
+        const handleSyncComplete = () => {
+            fetchEvaluations();
+        };
+
+        window.addEventListener('evaluz-sync-complete', handleSyncComplete);
+        return () => window.removeEventListener('evaluz-sync-complete', handleSyncComplete);
+    }, [scenarioId]);
+
     const [isSaving, setIsSaving] = useState(false);
 
     const fetchEvaluations = async () => {
         try {
             const url = scenarioId
-                ? `http://localhost:8000/api/v1/analytics/class/1?scenario_id=${scenarioId}`
-                : `http://localhost:8000/api/v1/analytics/class/1`;
+                ? `${API_BASE_URL}/analytics/class/1?scenario_id=${scenarioId}`
+                : `${API_BASE_URL}/analytics/class/1`;
 
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
@@ -65,27 +130,47 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             if (res.ok) {
                 const data = await res.json();
 
-                const historyStudents: Student[] = data.map((evalRecord: any, index: number) => ({
-                    id: evalRecord.id || (10000 + index),
-                    name: evalRecord.jmeno_studenta,
-                    cleanedName: evalRecord.cleaned_name,
-                    identita: evalRecord.identita,
-                    status: (evalRecord.vysledky && evalRecord.vysledky.length > 0) ? 'evaluated' : 'pending',
-                    score: evalRecord.celkove_skore,
-                    maxScore: 25,
-                    evaluationDetails: evalRecord.vysledky,
-                    zpetna_vazba: evalRecord.zpetna_vazba
-                }));
+                setStudents(currentList => {
+                    const historyStudents: Student[] = data.map((evalRecord: any, index: number) => {
+                        const existing = currentList.find(s => s.id === evalRecord.id || s.name === evalRecord.jmeno_studenta);
+                        let finalStatus: 'evaluated' | 'pending' | 'evaluating' = (evalRecord.vysledky && evalRecord.vysledky.length > 0) ? 'evaluated' : 'pending';
 
+                        // Zachovat lokálně běžící status vyhodnocování, i když server ještě hlásí 'pending'
+                        if (existing?.status === 'evaluating' && finalStatus === 'pending') {
+                            finalStatus = 'evaluating';
+                        }
 
-                setStudents(historyStudents);
+                        return {
+                            id: evalRecord.id || (10000 + index),
+                            name: evalRecord.jmeno_studenta,
+                            cleanedName: evalRecord.cleaned_name,
+                            identita: evalRecord.identita,
+                            status: finalStatus,
+                            score: evalRecord.celkove_skore,
+                            maxScore: 25,
+                            evaluationDetails: evalRecord.vysledky,
+                            zpetna_vazba: evalRecord.zpetna_vazba
+                        };
+                    });
 
-                if (historyStudents.length > 0 && !selectedStudent) {
-                    setSelectedStudent(historyStudents[0].id);
+                    // Najít ty, co visí jen čistě lokálně a server o nich neví
+                    const offline = currentList.filter(curr => !historyStudents.some(hs => hs.name === curr.name));
+
+                    const merged = [...historyStudents, ...offline];
+
+                    return merged.sort((a, b) => {
+                        const nameA = a.cleanedName || a.name;
+                        const nameB = b.cleanedName || b.name;
+                        return nameA.localeCompare(nameB, 'cs');
+                    });
+                });
+
+                if (data.length > 0 && !selectedStudent) {
+                    setSelectedStudent(data[0].id || 10000);
                 }
 
                 if (onEvaluatedChange) {
-                    onEvaluatedChange(historyStudents.some(s => s.status === 'evaluated'));
+                    onEvaluatedChange(data.some((s: any) => s.vysledky && s.vysledky.length > 0));
                 }
             }
         } catch (e) {
@@ -118,87 +203,124 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         setIsSourceModalOpen(true);
     };
 
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files) {
-            const selectedFiles = Array.from(e.target.files) as File[];
-            setFiles(prev => {
-                const map = new Map();
-                for (const f of [...prev, ...selectedFiles]) {
-                    map.set(f.name, f);
-                }
-                return Array.from(map.values());
-            });
+    const processFiles = async (selectedFiles: File[]) => {
+        if (!selectedFiles || selectedFiles.length === 0) return;
 
-            // Optimistic pre-render
-            const optimisticStudents: Student[] = selectedFiles.map((f, i) => {
-                let displayName = f.name.replace(/\.(docx|rtf|pdf)$/i, '');
-                return {
-                    id: Date.now() + i, // docasne
-                    name: f.name,
-                    cleanedName: displayName,
-                    status: 'pending',
-                    score: 0,
-                    maxScore: 25,
-                };
-            });
-            setStudents(prev => [...optimisticStudents, ...prev]);
+        // Filter only allowed extensions
+        const validFiles = selectedFiles.filter(f => {
+            const ext = f.name.split('.').pop()?.toLowerCase();
+            return ext === 'pdf' || ext === 'docx' || ext === 'rtf';
+        });
 
-            // Posíláme na Fast-Scan
-            const formData = new FormData();
-            selectedFiles.forEach(f => formData.append('files', f));
-            formData.append('scenario_id', scenarioId || 'default');
+        if (validFiles.length === 0) return;
 
-            try {
-                setToastMessage("Identifikuji autory úředních záznamů...");
-                const res = await fetch('http://localhost:8000/api/v1/evaluate/fast-scan', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
-                    body: formData
-                });
-
-                if (res.ok) {
-                    // Refetch k syncu ID + jmen
-                    await fetchEvaluations();
-                    setToastMessage("Data o studentech nahrána.");
-                    setTimeout(() => setToastMessage(null), 3000);
-                }
-            } catch (err) {
-                console.error("Fast scan neprosel", err);
+        setFiles(prev => {
+            const map = new Map();
+            for (const f of [...prev, ...validFiles]) {
+                map.set(f.name, f);
             }
+            return Array.from(map.values());
+        });
+
+        // Optimistic pre-render
+        const optimisticStudents: Student[] = validFiles.map((f, i) => {
+            let displayName = f.name.replace(/\.(docx|rtf|pdf)$/i, '');
+            return {
+                id: Date.now() + i, // docasne
+                name: f.name,
+                cleanedName: displayName,
+                status: 'pending',
+                score: 0,
+                maxScore: 25,
+            };
+        });
+        setStudents(prev => [...optimisticStudents, ...prev]);
+
+        // Posíláme na Fast-Scan
+        const formData = new FormData();
+        validFiles.forEach(f => formData.append('files', f));
+        formData.append('scenario_id', scenarioId || 'default');
+
+        try {
+            setToastMessage("Identifikuji autory úředních záznamů...");
+            const res = await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+                body: formData
+            });
+
+            if (res.ok) {
+                // Refetch k syncu ID + jmen
+                await fetchEvaluations();
+                setToastMessage("Data o studentech nahrána.");
+                setTimeout(() => setToastMessage(null), 3000);
+            }
+        } catch (err) {
+            console.error("Fast scan neprosel", err);
+        }
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            await processFiles(Array.from(e.target.files));
+            // Resetování hodnoty inputu, aby šlo znovu nahrát stejný soubor
+            e.target.value = '';
+        }
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    };
+
+    const handleDrop = async (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        if (e.dataTransfer.files) {
+            await processFiles(Array.from(e.dataTransfer.files));
         }
     };
 
     const handleBatchEvaluate = async () => {
         if (!scenarioId) {
-            alert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");
+            showAlert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");
             return;
         }
 
         if (students.length > 0 && selectedIds.length === 0) {
-            alert("Prosím zaškrtněte v Seznamu studentů ty, které chcete vyhodnotit (nebo klikněte na 'Vybrat všechny').");
+            showAlert("Prosím zaškrtněte v Seznamu studentů ty, které chcete vyhodnotit (nebo klikněte na 'Vybrat všechny').");
             return;
         }
 
-        if (files.length === 0) {
-            alert("Nebyly nalezeny žádné zdrojové soubory v paměti prohlížeče.\n\nPokud jste stránku od nahrání obnovili nebo zavřeli, paměť se (z bezpečnostních důvodů) vymazala. Klikněte znovu na tlačítko 'Nahrát ÚZ' a soubory znovu vyberte. Následně hned klikněte na 'Hromadně vyhodnotit'.");
+        if (students.length === 0) {
+            showAlert("Nejdříve nahrajte soubory nebo synchronizujte složku.");
             return;
         }
 
-        // Setup AbortController
-        abortControllerRef.current = new AbortController();
+        // Setup UI for Evaluation
         setIsEvaluating(true);
         setIsCancelling(false);
         setEvaluationProgress(0);
+        setEvaluatedCount(0);
 
         const idsToProcess = [...selectedIds];
         const filesToUpload: File[] = [];
+        const studentIdsFromDB: number[] = [];
         const studentIdsBeingProcessed: number[] = [];
 
-        // Najdeme pouze ty studenty, kteří ještě nejsou vyhodnoceni
         for (const id of idsToProcess) {
             const student = students.find(s => s.id === id);
             if (!student || student.status === 'evaluated') continue;
 
+            // 1. Check if we have the file in local memory
             const file = files.find(f => {
                 const fNFC = f.name.normalize('NFC');
                 const sNFC = student.name.normalize('NFC');
@@ -208,16 +330,23 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             if (file) {
                 filesToUpload.push(file);
                 studentIdsBeingProcessed.push(id);
+            } else if (id < 1700000000000) {
+                // 2. If not in memory but it's a persistent record (ID from DB), 
+                // send its ID so backend can use stored source_text
+                studentIdsFromDB.push(id);
+                studentIdsBeingProcessed.push(id);
             }
         }
 
-        if (filesToUpload.length === 0) {
-            alert("Nebyly nalezeny žádné zdrojové soubory pro zvolené studenty.\n\nPokud jste stránku od nahrání obnovili nebo zavřeli, paměť prohlížeče se (z bezpečnostních důvodů) vymazala. Klikněte znovu na tlačítko 'Nahrát ÚZ' a soubory znovu vyberte. Následně hned klikněte na 'Hromadně vyhodnotit'.");
+        if (filesToUpload.length === 0 && studentIdsFromDB.length === 0) {
+            showAlert("Nebyly nalezeny žádné zdrojové soubory pro zvolené studenty.\n\nPokud se jedná o nově nahrané soubory a obnovili jste stránku, musíte je nahrát znovu. Pokud se jedná o synchronizované soubory, ujistěte se, že synchronizace proběhla úspěšně.");
             setIsEvaluating(false);
             return;
         }
 
-        // Hromadná aktualizace stavů na evaluating (aby React nespustil 20 překreslení zároveň)
+        setTotalToEvaluate(prev => prev + studentIdsBeingProcessed.length);
+        setIsEvaluating(true);
+
         setStudents(current => current.map(s =>
             studentIdsBeingProcessed.includes(s.id) ? { ...s, status: 'evaluating' } : s
         ));
@@ -225,71 +354,97 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
         const formData = new FormData();
         filesToUpload.forEach(f => formData.append('files', f));
+        if (studentIdsFromDB.length > 0) {
+            formData.append('student_ids', studentIdsFromDB.join(','));
+        }
         formData.append('scenario_id', scenarioId);
 
 
 
         try {
-            // Skutečná paralelizace - posíláme všechny soubory do backendu v jednom masivním batch dotazu
-            const response = await fetch('http://localhost:8000/api/v1/evaluate/batch', {
+            // Frontend nečeká na zpracování AI, jen odešle do fronty s 202 Accepted
+            const response = await fetch(`${API_BASE_URL}/evaluate/batch`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
-                body: formData,
-                signal: abortControllerRef.current.signal
+                body: formData
             });
 
-            if (response.ok) {
-                // Po spěšném zápisu na backendu stačí jen překreslit tabulku čerstvými daty z DB
-                await fetchEvaluations();
-
-                setToastMessage(`Vyhodnocení ${filesToUpload.length} studentů bylo úspěšně dokončeno a uloženo.`);
+            if (response.status === 202 || response.ok) {
+                const totalStudentsSent = filesToUpload.length + studentIdsFromDB.length;
+                setToastMessage(`Dávka odeslána. Vyhodnocování ${totalStudentsSent} studentů probíhá na pozadí.`);
                 setTimeout(() => setToastMessage(null), 5000);
-                setEvaluationProgress(100);
             } else {
-                console.error(`Batch evaluation failed with status: ${response.status}`);
-                throw new Error("Server error");
+                const errorData = await response.json();
+                throw new Error(errorData.detail || "Server error - Failed to enqueue tasks.");
             }
-
         } catch (error: any) {
-            if (error.name === 'AbortError') {
-
-            } else {
-                console.error("Batch evaluation failed", error);
-                alert("Došlo k chybě při paralelním vyhodnocování. Server možná neodpovídá.");
-            }
-            // Vracíme na pending ty, které se nepodařilo zpracovat nebo byly zrušeny
+            console.error('Batch evaluation error:', error);
+            showAlert(error.message || "Došlo k chybě při odesílání dávky na server.");
+            // On hard error during queueing, rollback the state immediately
             setStudents(current => current.map(s => studentIdsBeingProcessed.includes(s.id) && s.status !== 'evaluated' ? { ...s, status: 'pending' } : s));
-        } finally {
-            // Robustní obnova dat z backendu na závěr - pro jistotu
-            try {
-                await fetchEvaluations();
-            } catch (e) {
-                console.error("Failed to recover evaluation state from backend", e);
-            }
             setIsEvaluating(false);
-            setIsCancelling(false);
-            abortControllerRef.current = null;
-            setTimeout(() => setEvaluationProgress(0), 2000); // Ukážeme 100% chvíli než to zmizne
+            setTotalToEvaluate(prev => prev - studentIdsBeingProcessed.length);
         }
     };
 
-    const handleCancelEvaluation = () => {
+    // Effect pro aktualizaci progress baru podle Websocket událostí
+    useEffect(() => {
+        if (isEvaluating && totalToEvaluate > 0) {
+            const prog = Math.round((evaluatedCount / totalToEvaluate) * 100);
+            setEvaluationProgress(prog);
+            if (evaluatedCount >= totalToEvaluate) {
+                setTimeout(() => {
+                    setIsEvaluating(false);
+                    setEvaluationProgress(0);
+                    setToastMessage("Vyhodnocování celé dávky bylo úspěšně dokončeno.");
+                    setTimeout(() => setToastMessage(null), 4000);
+                }, 1000);
+            }
+        }
+    }, [evaluatedCount, totalToEvaluate, isEvaluating]);
+
+    const handleCancelEvaluation = async () => {
         if (abortControllerRef.current) {
-            setIsCancelling(true);
             abortControllerRef.current.abort();
         }
+        setIsCancelling(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/evaluate/batch`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
+            if (res.ok) {
+                setToastMessage("Zpracování dalších ÚZ bylo zastaveno.");
+                // Note: The UI logic (isEvaluating=false) will probably be handled automatically 
+                // when the queue empties out (or not if we don't get SUCCESS/ERROR for them).
+                // Let's manually trigger a refresh to clear pending statuses and stop.
+                setIsEvaluating(false);
+                setEvaluationProgress(0);
+                setTimeout(() => setToastMessage(null), 4000);
+                await fetchEvaluations(); // reload actual statuses
+            } else {
+                throw new Error("Server nevrátil 2xx code při mazání fronty.");
+            }
+        } catch (e) {
+            console.error("Zastavení selhalo", e);
+            showAlert("Nepodařilo se zastavit vyhodnocování. Fronta nemusí být smazána.");
+        } finally {
+            setIsCancelling(false);
+        }
     };
 
-    const handleDeleteStudent = async (studentId: number) => {
+    const handleDeleteStudent = async (studentId: number, e: React.MouseEvent) => {
+        e.stopPropagation();
         const student = students.find(s => s.id === studentId);
         if (!student) return;
 
-        if (window.confirm(`Opravdu chcete smazat záznam studenta "${student.name}"?`)) {
+        const conf = await showConfirm(`Opravdu chcete smazat záznam studenta "${student.name}"?`);
+        if (conf) {
             try {
                 // If it's a persistent record (ID < 1000000000 based on Date.now() heuristic or similar)
                 // Actually, history IDs are small, Date.now() IDs are large.
                 if (studentId < 1700000000000) { // Heuristic for DB vs newly uploaded
-                    const res = await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${studentId}`, {
+                    const res = await fetch(`${API_BASE_URL}/analytics/evaluation/${studentId}`, {
                         method: 'DELETE',
                         headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
                     });
@@ -304,9 +459,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 if (selectedStudent === studentId) {
                     setSelectedStudent(null);
                 }
-            } catch (error) {
-                console.error("Chyba při mazání studenta:", error);
-                alert("Nepodařilo se smazat záznam.");
+            } catch (err) {
+                console.error("Delete failed", err);
+                showAlert("Nepodařilo se smazat záznam.");
             }
         }
     };
@@ -314,7 +469,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
 
-        if (window.confirm(`Opravdu chcete smazat ${selectedIds.length} vybraných záznamů?`)) {
+        const conf = await showConfirm(`Opravdu chcete smazat ${selectedIds.length} vybraných záznamů?`);
+        if (conf) {
             const idsToDelete = [...selectedIds];
             for (const id of idsToDelete) {
                 const student = students.find(s => s.id === id);
@@ -322,13 +478,14 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
                 try {
                     if (id < 1700000000000) {
-                        await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${id}`, {
+                        await fetch(`${API_BASE_URL}/analytics/evaluation/${id}`, {
                             method: 'DELETE',
                             headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
                         });
                     }
                 } catch (error) {
                     console.error(`Failed to delete student ${id}:`, error);
+                    showAlert(`Nepodařilo se smazat záznam pro studenta s ID ${id}.`);
                 }
             }
 
@@ -393,7 +550,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     vysledky: student.evaluationDetails
                 }
             };
-            const response = await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${student.id}/score`, {
+            const response = await fetch(`${API_BASE_URL}/analytics/evaluation/${student.id}/score`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
@@ -409,30 +566,64 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             } else {
                 throw new Error("Chyba ze serveru");
             }
-        } catch (error) {
-            console.error(error);
-            alert("Uložení úprav se nezdařilo.");
+        } catch (err) {
+            console.error(err);
+            showAlert("Uložení úprav se nezdařilo.");
         } finally {
             setIsSaving(false);
         }
     };
 
+    const handleSaveGoldenExample = async () => {
+        const student = students.find(s => s.id === selectedStudent);
+        if (!student) return;
+        setIsSavingGolden(true);
+        try {
+            const payload = {
+                scenario_id: scenarioId || 'unknown_scenario',
+                source_text: "Obsah úředního záznamu.", // Budoucí rozšíření pro pure cosine similarity
+                perfect_json: JSON.stringify({
+                    jmeno_studenta: student.name,
+                    celkove_skore: student.score,
+                    zpetna_vazba: student.zpetna_vazba,
+                    vysledky: student.evaluationDetails
+                }, null, 2)
+            };
+            const response = await fetch(`${API_BASE_URL}/evaluate/golden-example`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                setToastMessage("⭐ Zlatý příklad byl úspěšně uložen do sítě.");
+                setTimeout(() => setToastMessage(null), 4000);
+            } else {
+                const errData = await response.json();
+                throw new Error(errData.detail || "Chyba ze serveru");
+            }
+        } catch (error: any) {
+            console.error("Failed to save golden example:", error);
+            showAlert("Uložení Zlatého příkladu selhalo: " + error.message);
+        } finally {
+            setIsSavingGolden(false);
+        }
+    };
+
     const handleRenameClick = async (student: Student) => {
-        const defaultName = student.identita?.prijmeni ? `${student.identita.prijmeni.toUpperCase()} ${student.identita.jmeno}, ${student.identita.hodnost}` : student.cleanedName || student.name;
-        const newName = window.prompt("Upravte jméno studenta formátem: PŘÍJMENÍ Jméno, hodnost", defaultName);
+        let defaultName = student.identita?.prijmeni ? `${student.identita.prijmeni} ${student.identita.jmeno}` : (student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '');
+        defaultName = defaultName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim();
+        const newName = await showPrompt("Upravte jméno studenta formátem: Příjmení Jméno", defaultName);
         if (!newName || newName.trim() === defaultName) return;
 
         let finalName = newName.trim();
-        const spaceIndex = finalName.indexOf(' ');
-        if (spaceIndex !== -1) {
-            const surname = finalName.substring(0, spaceIndex).toUpperCase();
-            finalName = surname + finalName.substring(spaceIndex);
-        } else {
-            finalName = finalName.toUpperCase();
-        }
+        finalName = finalName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 
         try {
-            const res = await fetch(`http://localhost:8000/api/v1/analytics/evaluation/${student.id}/name`, {
+            const res = await fetch(`${API_BASE_URL}/analytics/evaluation/${student.id}/name`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
@@ -461,9 +652,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             } else {
                 throw new Error("Failed to save name");
             }
-        } catch (e) {
-            console.error(e);
-            alert("Nepodařilo se uložit nové jméno.");
+        } catch (err) {
+            console.error(err);
+            showAlert("Nepodařilo se uložit nové jméno.");
         }
     };
 
@@ -471,8 +662,28 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
     const activeStudentData = students.find(s => s.id === selectedStudent);
 
+    const canEvaluate = selectedIds.length > 0 && selectedIds.some(id => {
+        const student = students.find(s => s.id === id);
+        return student && student.status !== 'evaluated' && student.status !== 'evaluating';
+    });
+
     return (
-        <div className="h-full flex flex-col gap-6 max-w-[1400px] mx-auto relative cursor-default">
+        <div
+            className={`h-full flex flex-col gap-6 max-w-[1400px] mx-auto relative transition-colors duration-200 ${isDragging ? 'bg-blue-50/50 rounded-2xl ring-4 ring-blue-500/20' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        >
+            {isDragging && (
+                <div className="absolute inset-0 bg-blue-500/10 backdrop-blur-sm z-40 rounded-2xl flex flex-col items-center justify-center border-4 border-dashed border-blue-500 pointer-events-none">
+                    <div className="bg-white p-6 rounded-full shadow-2xl mb-4">
+                        <Upload className="w-16 h-16 text-blue-600 animate-bounce" />
+                    </div>
+                    <h2 className="text-3xl font-bold text-blue-800 drop-shadow-sm">Pusťte soubory zde</h2>
+                    <p className="text-blue-600 mt-2 font-medium">Podporované formáty: PDF, DOCX, RTF</p>
+                </div>
+            )}
+
             {/* Global Success Toast Notifikace */}
             {toastMessage && (
                 <div className="absolute top-0 right-1/2 translate-x-1/2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 z-50 animate-in fade-in slide-in-from-top-4">
@@ -486,7 +697,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
 
             {/* Top Action Bar */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between mt-2">
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex items-center justify-between mt-2 transition-colors duration-200">
                 <div className="flex items-center gap-4">
                     <input
                         type="file"
@@ -500,8 +711,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                         onClick={() => fileInputRef.current?.click()}
                         className="flex items-center gap-2 px-4 py-2 border-2 border-[#002855] text-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors text-sm font-semibold"
                     >
-                        <UploadCloud className="w-4 h-4" />
-                        Nahrát ÚZ (.docx, .rtf, .pdf)
+                        <Upload className="w-4 h-4" />
+                        Nahrát ÚZ
                     </button>
                     <button
                         onClick={handleSelectAll}
@@ -531,16 +742,16 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 <div className="flex items-center gap-3">
                     <button
                         onClick={handleBatchEvaluate}
-                        disabled={isEvaluating || students.length === 0}
-                        className={`flex flex-col items-center justify-center px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md relative overflow-hidden min-w-[200px] ${isEvaluating || students.length === 0
+                        disabled={!canEvaluate}
+                        className={`flex flex-col items-center justify-center px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md relative overflow-hidden min-w-[200px] ${!canEvaluate
                             ? 'bg-slate-300 cursor-not-allowed'
                             : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028] hover:opacity-90'
                             }`}
                     >
                         <div className="flex items-center gap-2 relative z-10">
-                            {isEvaluating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                            {(isEvaluating && canEvaluate) ? <Wand2 className="w-4 h-4" /> : isEvaluating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                             <span>
-                                {isEvaluating ? 'Hromadně AI...' : 'Hromadně vyhodnotit (AI)'}
+                                {(isEvaluating && canEvaluate) ? 'Přidat do fronty AI' : isEvaluating ? 'Hromadně AI...' : 'Hromadně vyhodnotit (AI)'}
                             </span>
                         </div>
                         {isEvaluating && (
@@ -595,7 +806,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                 <div className="flex-1 min-w-0 flex items-center justify-between group-inner">
                                     <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
                                         <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855]' : 'text-slate-700'}`}>
-                                            {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '')}
+                                            {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim()}
                                         </p>
                                         {!student.identita && student.status === 'evaluated' && (
                                             <Tooltip content="Identita studenta byla manuálně ověřena lektorem.">
@@ -609,10 +820,14 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                 <CheckCircle2 className="w-3 h-3" /> Zpracováno
                                             </span>
                                         ) : student.status === 'evaluating' ? (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
-                                                <Loader2 className="w-3 h-3 animate-spin" /> Vyhodnocuji
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-orange-50 text-orange-700 border border-orange-200 animate-pulse transition-all">
+                                                <Loader2 className="w-3 h-3 animate-spin" /> Zpracovává se
                                             </span>
-                                        ) : null}
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-red-50 text-red-700 border border-red-200">
+                                                <AlertCircle className="w-3 h-3" /> Nezpracováno
+                                            </span>
+                                        )}
 
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger asChild>
@@ -636,7 +851,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                         <Pencil className="w-3.5 h-3.5" /> Upravit jméno
                                                     </DropdownMenu.Item>
                                                     <DropdownMenu.Item
-                                                        onSelect={() => handleDeleteStudent(student.id)}
+                                                        onSelect={(e) => handleDeleteStudent(student.id, e as unknown as React.MouseEvent)}
                                                         className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
                                                     >
                                                         <Trash2 className="w-3.5 h-3.5" /> Smazat ÚZ
@@ -663,7 +878,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     </div>
                                     <div>
                                         <h2 className="text-xl font-bold text-[#002855] flex items-center gap-2">
-                                            Hodnocení: {activeStudentData.identita?.prijmeni ? `${activeStudentData.identita.prijmeni.toUpperCase()} ${activeStudentData.identita.jmeno}, ${activeStudentData.identita.hodnost}` : activeStudentData.cleanedName || activeStudentData.name}
+                                            Hodnocení: {activeStudentData.identita?.prijmeni ? `${activeStudentData.identita.prijmeni.toUpperCase()} ${activeStudentData.identita.jmeno || ''}, ${activeStudentData.identita.hodnost || ''}` : activeStudentData.cleanedName || activeStudentData.name}
                                             {(!activeStudentData.identita && activeStudentData.status === 'evaluated') && (
                                                 <Tooltip content="Identita studenta byla manuálně ověřena lektorem.">
                                                     <UserCheck className="w-5 h-5 text-blue-500" />
@@ -779,12 +994,23 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             Uložit úpravy {activeStudentData.score} / {activeStudentData.maxScore} b.
                                         </button>
                                     )}
+                                    {isRagEnabled && (
+                                        <button
+                                            onClick={handleSaveGoldenExample}
+                                            disabled={isSavingGolden}
+                                            className="flex items-center gap-2 px-6 py-3 bg-purple-100 text-purple-700 border border-purple-200 rounded-xl hover:bg-purple-200 transition-colors text-sm font-bold shadow-sm"
+                                            title="Uložit toto finální skvělé hodnocení do sady etalonů RAG paměti pro budoucí AI inference."
+                                        >
+                                            {isSavingGolden ? <Loader2 className="w-5 h-5 animate-spin" /> : <span className="text-xl -mt-1 leading-none">⭐</span>}
+                                            Uložit jako Zlatý příklad
+                                        </button>
+                                    )}
                                     <button
                                         onClick={async () => {
                                             if (activeStudentData) {
                                                 try {
                                                     const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
-                                                    const res = await fetch(`http://localhost:8000/api/v1/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
+                                                    const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
                                                         headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
                                                     });
                                                     if (!res.ok) throw new Error('PDF Export selhal');
@@ -799,7 +1025,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                     document.body.removeChild(a);
 
                                                     // Uložení záznamu do historie
-                                                    await fetch('http://localhost:8000/api/v1/export/history', {
+                                                    await fetch(`${API_BASE_URL}/export/history`, {
                                                         method: 'POST',
                                                         headers: {
                                                             'Content-Type': 'application/json',
@@ -812,7 +1038,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                         })
                                                     });
                                                 } catch (e: any) {
-                                                    alert(e.message);
+                                                    console.error("Zápis manuálního hodnocení selhal:", e);
+                                                    showAlert(e.message);
                                                 }
                                             }
                                         }}
@@ -834,9 +1061,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                 </div>
                             ) : (
                                 <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
-                                    <UploadCloud className="w-16 h-16 text-slate-300" />
+                                    <FileText className="w-16 h-16 text-slate-200" />
                                     <h3 className="text-xl font-medium text-slate-600">Nahrajte úřední záznamy a vyberte ty, které chcete vyhodnotit</h3>
-                                    <p className="text-sm">Klikněte na tlačítko "Nahrát práce (.docx, .pdf)" a vyberte dokumenty.</p>
+                                    <p className="text-sm max-w-md">Klikněte na tlačítko &quot;Nahrát ÚZ&quot;, nebo soubory prostě na tlačítko přetáhněte (drag &amp; drop). Pokud chcete, můžete využít synchronizaci celého lokálního adresáře — pozor na adresářovou strukturu, viz nápověda ❓ v postranním panelu.</p>
                                 </div>
                             )}
                         </div>
@@ -879,6 +1106,6 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     </div>
                 </div>
             )}
-        </div>
+        </div >
     );
 }
