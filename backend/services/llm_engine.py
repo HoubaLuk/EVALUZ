@@ -186,29 +186,49 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
         print(f"Fast-scan identity exception: {e}")
         return {}
 
-async def chat_completion(messages: list, system_prompt: str, temperature: float, db: Session) -> str:
+async def chat_completion(messages: list, system_prompt: str, temperature: float, db: Session, phase: str = None) -> str:
     """
-    Sends a chat history to the local vLLM model.
+    Sends a chat history to the local vLLM model. Supports phase-specific model configuration (e.g. Phase 1).
     """
     db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
-    db_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
     db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
     db_platform = db.query(AppSettings).filter(AppSettings.key == "VLLM_PLATFORM").first()
-    db_thinking = db.query(AppSettings).filter(AppSettings.key == "VLLM_ENABLE_THINKING").first()
     db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
     db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
     db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
     db_max_tokens = db.query(AppSettings).filter(AppSettings.key == "VLLM_MAX_TOKENS").first()
     
+    # Per-phase model lookup
+    model_name = ""
+    enable_thinking = True
+    
+    if phase:
+        phase_model_key = f"MODEL_{phase.upper()}"
+        phase_thinking_key = f"THINKING_{phase.upper()}"
+        
+        db_phase_model = db.query(AppSettings).filter(AppSettings.key == phase_model_key).first()
+        db_phase_thinking = db.query(AppSettings).filter(AppSettings.key == phase_thinking_key).first()
+        
+        if db_phase_model and db_phase_model.value:
+            model_name = db_phase_model.value
+        if db_phase_thinking and db_phase_thinking.value:
+            enable_thinking = (db_phase_thinking.value.lower() == 'true')
+
+    # Fallback to global if not found or no phase
+    if not model_name:
+        db_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
+        model_name = db_model.value if db_model and db_model.value else ""
+        
+        db_thinking = db.query(AppSettings).filter(AppSettings.key == "VLLM_ENABLE_THINKING").first()
+        if db_thinking and db_thinking.value:
+            enable_thinking = (db_thinking.value.lower() == 'true')
+    
     api_url = db_url.value if db_url and db_url.value else ""
     platform = db_platform.value if db_platform and db_platform.value else "vllm"
-    model_name = db_model.value if db_model and db_model.value else ""
     api_key = db_key.value if db_key and db_key.value else ""
     
-    enable_thinking = (db_thinking.value.lower() == 'true') if db_thinking and db_thinking.value else True
-    
     if not api_url or not model_name:
-        raise ValueError("LLM konfigurace chybí v databázi.")
+        raise ValueError(f"LLM konfigurace chybí v databázi (Phase: {phase or 'Global'}).")
 
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
         api_url = "https://openrouter.ai/api/v1"

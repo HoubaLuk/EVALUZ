@@ -148,15 +148,21 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
             }
 
             const data = await res.json();
+            const responseText = data.response;
 
-            // Assuming the assistant returns the criteria block in its response,
-            // we update the editable area if we detect it looks like criteria, 
-            // or just let the user edit it. For V1, let's auto-fill the right pane 
-            // with the latest assistant response just to be helpful, though 
-            // they can edit it freely.
-            setCriteriaMarkdown(data.response);
+            // Update criteria panel ONLY if a separator '---' or typical header is found
+            if (responseText.includes('---')) {
+                const parts = responseText.split('---');
+                const possibleCriteria = parts[parts.length - 1].trim();
+                if (possibleCriteria.length > 30) {
+                    setCriteriaMarkdown(possibleCriteria);
+                }
+            } else if (responseText.includes('###')) {
+                const headerIdx = responseText.indexOf('###');
+                setCriteriaMarkdown(responseText.slice(headerIdx).trim());
+            }
 
-            setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+            setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
 
         } catch (error: any) {
             console.error('Chyba při komunikaci s LLM:', error);
