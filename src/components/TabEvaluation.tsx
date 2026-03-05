@@ -35,6 +35,11 @@ interface TabEvaluationProps {
     onEvaluatedChange?: (hasEvaluated: boolean) => void;
 }
 
+/**
+ * KOMPONENTA: TAB EVALUATION (VYHODNOCOVÁNÍ)
+ * Tato komponenta je srdcem aplikace pro lektora. Umožňuje nahrávat soubory studentů, 
+ * spouštět AI analýzu a sledovat výsledky v reálném čase.
+ */
 export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange }: TabEvaluationProps) {
     const { showAlert, showConfirm, showPrompt } = useDialog();
     const [students, setStudents] = useState<Student[]>([]);
@@ -81,6 +86,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         fetchSettings();
     }, []);
 
+    // --- WEBSOCET: SLEDOVÁNÍ STAVU V REÁLNÉM ČASE ---
     useEffect(() => {
         let ws: WebSocket;
         const connectWs = () => {
@@ -88,11 +94,12 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             ws = new WebSocket(wsUrl);
             ws.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
+                // Backend posílá zprávy o startu (EVAL_START), úspěchu (EVAL_SUCCESS) nebo chybě (EVAL_ERROR).
                 if (data.type === 'EVAL_START') {
                     setStudents(prev => prev.map(s => s.name === data.student_name ? { ...s, status: 'evaluating' } : s));
                 } else if (data.type === 'EVAL_SUCCESS') {
                     setEvaluatedCount(prev => prev + 1);
-                    await fetchEvaluations();
+                    await fetchEvaluations(); // Po úspěchu načteme čerstvá data z DB
                 } else if (data.type === 'EVAL_ERROR') {
                     setEvaluatedCount(prev => prev + 1);
                     setToastMessage(`Chyba u studenta: ${data.error}`);
@@ -101,6 +108,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 }
             };
             ws.onclose = () => {
+                // Automatický reconnect při odpojení
                 setTimeout(connectWs, 3000);
             };
         };
@@ -204,6 +212,11 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     };
 
     const processFiles = async (selectedFiles: File[]) => {
+        /**
+         * FUNKCE: ZPRACOVÁNÍ SOUBORŮ
+         * Extrahuje text, provede Fast-Scan (identifikaci) a založí záznamy v databázi.
+         */
+
         if (!selectedFiles || selectedFiles.length === 0) return;
 
         // Filter only allowed extensions
@@ -289,6 +302,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         }
     };
 
+    /**
+     * AKCE: SPUŠTĚNÍ HROMADNÉHO VYHODNOCENÍ
+     * Sebere všechny označené studenty a pošle požadavek na backend do fronty.
+     */
     const handleBatchEvaluate = async () => {
         if (!scenarioId) {
             showAlert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");

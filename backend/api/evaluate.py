@@ -1,3 +1,9 @@
+"""
+MODUL API: VYHODNOCOVÁNÍ (EVALUATE)
+Tento modul obsluhuje vše, co se týká nahrávání souborů a jejich analýzy.
+Zajišťuje komunikaci přes WebSockety pro real-time stav a spravuje asynchronní frontu.
+"""
+
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from typing import List
 import json
@@ -23,13 +29,21 @@ router = APIRouter(
 
 @router.websocket("/ws")
 async def websocket_eval_status(websocket: WebSocket):
+    """
+    WEBSOCKET ENDPOINT:
+    Umožňuje prohlížeči udržovat "živé spojení". Backend přes něj posílá zprávy
+    o tom, který student se právě začal vyhodnocovat nebo kdo už je hotový.
+    """
     await eval_queue.connect(websocket)
     try:
         while True:
+            # Udržujeme spojení živé, čekáme na případné zprávy od klienta (které zatím nepotřebujeme).
             await websocket.receive_text() # Udržujeme spojení živé
     except WebSocketDisconnect:
+        # Odpojení z registru, pokud lektor zavře okno.
         eval_queue.disconnect(websocket)
 
+# Pomocná schémata pro validaci vstupních a výstupních dat.
 class FastScanResponseItem(BaseModel):
     filename: str
     id: int
@@ -68,106 +82,84 @@ async def fast_scan_batch(
     current_user: Lecturer = Depends(get_current_lecturer)
 ):
     """
-    Rychle vytěží z dokumentů pouze identitu a založí záznam 'pending' v databázi.
-    Striktní omezení na 1 souběžný request kvůli prevenci Rate Limitu vLLM/OpenAI!
+    FAST-SCAN (RYCHLÝ NÁHLED):
+    Tato funkce se spustí ihned po výběru souborů v PC.
+    Cílem je rychle (během sekund) vyčíst jména studentů a založit je v databázi,
+    aby lektor viděl seznam lidí dříve, než spustí plnou (pomalou) AI analýzu.
     """
+    # Striktní omezení na 1 souběžný request k AI, abychom nepřetížili model (Rate Limit).
     semaphore = asyncio.Semaphore(1)
-    db_lock = asyncio.Lock()
     results = []
     
     async def process_scan(file: UploadFile):
+        """
+        Pomocná funkce pro zpracování jednoho souboru v rámci Fast-Scanu.
+        """
         student_name = unicodedata.normalize('NFC', file.filename)
         try:
             content_bytes = await file.read()
+            # 1. Vytěžení textu
             extracted_text = await extract_text(content_bytes, file.filename)
-            
-            print(f"[FAST-SCAN-DEBUG] Soubor: '{file.filename}' | Velikost nahrání: {len(content_bytes)} bytes | Extrahovaný text: {len(extracted_text)} znaků")
             
             identita = {}
             if extracted_text.strip():
                 try:
+                    # 2. Bezpečnostní audit textu
                     scanner.scan_text(extracted_text)
                     async with semaphore:
+                        # 3. AI analýza pouze začátku/konce dokumentu pro zjištění jména
                         identita = await extract_identity(
                             report_text=extracted_text,
                             db=db,
                             student_log_prefix=student_name
                         )
-                        # Zpomaleni po dotazu k zabraneni 429 Too Many Requests Rate Limit
-                        await asyncio.sleep(1.0)
+                        # Krátká pauza pro stabilitu LLM providera
+                        await asyncio.sleep(0.5)
                 except SecurityException as se:
-                    print(f"[FAST-SCAN] Security Alarm: {se}")
-                    # Necháme identitu prázdnou, evaluace ji zablokuje později. Půjde dál.
-                    
-            # Zabezpečení proti None hodnotám, pokud LLM vrátí "null" místo prázdného stringu
-            hodnost = (identita.get('hodnost') or '').strip()
-            jmeno = (identita.get('jmeno') or '').strip()
-            prijmeni = (identita.get('prijmeni') or '').strip()
+                    print(f"[FAST-SCAN] Bezpečnostní varování: {se}")
             
-            if not prijmeni or not jmeno:
-                base_name = file.filename.rsplit('.', 1)[0]
-                import re
-                # Odstraníme "Úz", "UZ", "VTOS", "-" (včetně českých znaků) a necháme jen jméno
-                clean_base = re.sub(r'(?i)\b(?:úz|uz|vtos)\b|-', ' ', base_name)
-                clean_base = re.sub(r'\s+', ' ', clean_base).strip()
-                cleaned_display_name = clean_base.title()
-                print(f"[FAST-SCAN] REGEX Fallback pro '{file.filename}' -> '{cleaned_display_name}'")
+            # 4. Formátování jména pro seznam (PŘÍJMENÍ Jméno)
+            prijmeni = (identita.get('prijmeni') or "").strip().upper()
+            jmeno = (identita.get('jmeno') or "").strip().capitalize()
+            
+            if prijmeni:
+                cleaned_display_name = f"{prijmeni} {jmeno}".strip()
             else:
-                cleaned_display_name = f"{prijmeni.capitalize()} {jmeno.capitalize()}"
-                print(f"[FAST-SCAN] LLM Úspěch pro '{file.filename}' -> '{cleaned_display_name}'")
-                
-            async with db_lock:
-                # Check if it already exists to avoid duplicated files on re-upload
-                existing_record = db.query(StudentEvaluation).filter(
-                    StudentEvaluation.student_name == student_name,
-                    StudentEvaluation.scenario_name == scenario_id,
-                    StudentEvaluation.lecturer_id == current_user.id
-                ).order_by(StudentEvaluation.id.desc()).first()
-                
-                if existing_record:
-                    existing_record.cleaned_name = cleaned_display_name
-                    existing_record.student_identity = json.dumps(identita, ensure_ascii=False) if identita else "{}"
-                    existing_record.source_text = extracted_text
-                    existing_record.source_filename = file.filename
-                    db.commit()
-                    db.refresh(existing_record)
-                    record_id = existing_record.id
-                else:
-                    eval_record = StudentEvaluation(
-                        student_name=student_name,
-                        class_id=1,
-                        scenario_name=scenario_id,
-                        lecturer_id=current_user.id,
-                        json_result="{}", # Prázdný výsledek = pending
-                        cleaned_name=cleaned_display_name,
-                        student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}",
-                        source_text=extracted_text,
-                        source_filename=file.filename
-                    )
-                    db.add(eval_record)
-                    db.commit()
-                    db.refresh(eval_record)
-                    record_id = eval_record.id
+                # Pokud AI jméno nenašla, použijeme název souboru
+                cleaned_display_name = file.filename.rsplit('.', 1)[0]
             
-            print(f"[FAST-SCAN] Pro soubor {student_name} vytěženo: {identita}")
-
-            return FastScanResponseItem(
-                filename=file.filename,
-                id=record_id,
+            # 5. Zápis do databáze (nebo aktualizace existujícího záznamu)
+            new_eval = StudentEvaluation(
+                student_name=student_name,
                 cleaned_name=cleaned_display_name,
-                identita=identita
+                class_id=current_user.active_class_id or 1,
+                scenario_name=scenario_id,
+                status="pending",
+                source_text=extracted_text,
+                lecturer_id=current_user.id,
+                student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
             )
+            
+            db.add(new_eval)
+            db.commit()
+            db.refresh(new_eval)
+            
+            return {
+                "filename": file.filename,
+                "id": new_eval.id,
+                "cleaned_name": new_eval.cleaned_name,
+                "identita": identita
+            }
         except Exception as e:
-            print(f"Chyba ve fast-scan pro {student_name}: {e}")
+            print(f"Chyba při zpracování souboru {student_name}: {e}")
             return None
-            
+
+    # Paralelní spuštění všech skenů
     tasks = [process_scan(f) for f in files]
-    completed = await asyncio.gather(*tasks)
+    scan_results = await asyncio.gather(*tasks)
     
-    for c in completed:
-        if c:
-            results.append(c)
-            
+    # Odfiltrování případných neúspěšných pokusů a vrácení výsledku
+    results = [r for r in scan_results if r]
     return FastScanResponse(results=results)
 
 @router.post("/batch")

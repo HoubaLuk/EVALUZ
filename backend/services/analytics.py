@@ -1,16 +1,22 @@
+"""
+MODUL: ANALYTIKA TŘÍDY (ANALYTICS SERVICE)
+Tento modul má dva hlavní úkoly:
+1. EXAKTNÍ STATISTIKA: Matematicky spočítat úspěšnost třídy v jednotlivých kritériích (heatmapy, grafy).
+2. AI INSIGHT (Fáze 3): Předat tato tvrdá data AI modelu, aby je interpretoval a dal lektorovi pedagogické rady.
+"""
+
 from sqlalchemy.orm import Session
 import json
 from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, ClassAnalysis
 from services.llm_engine import chat_completion
 
-def generate_class_summary_sync(class_id: int, db: Session) -> dict:
-    pass
-
 async def generate_class_summary(class_id: int, scenario_id: str, force: bool, db: Session) -> dict:
     """
-    Agreguje data z hodnocení třídy, vypočítá statistiky pro frontend a zavolá 
-    lokální vLLM pro vytvoření pedagogického shrnutí/insightu na základě Fáze 3 promptu.
+    HLAVNÍ FUNKCE ANALÝZY.
+    Agreguje data z hodnocení všech studentů v dané třídě a modelové situaci.
     """
+    
+    # 1. CACHE: Pokud už analýza existuje a uživatel si nevynutil novou (force=True), vrátíme tu uloženou.
     if not force:
         cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == scenario_id).first()
         if cached_analysis:
@@ -19,11 +25,13 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             except Exception:
                 pass
                 
+    # Načteme všechna vyhodnocení pro tuto třídu a situaci.
     raw_evals = db.query(StudentEvaluation).filter(
         StudentEvaluation.class_id == class_id,
         StudentEvaluation.scenario_name == scenario_id
     ).all()
     
+    # Odfiltrujeme záznamy, které ještě nejsou vyhodnocené (nemají json_result).
     evaluations = []
     for e in raw_evals:
         try:
@@ -33,13 +41,14 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         except:
             pass
     
-    # Získání definic kritérií z DB pro zjištění max počtu a přesných názvů
+    # Získání definic kritérií z DB, abychom věděli, co přesně jsme měli hodnotit.
     criteria_record = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id).first()
     db_criteria = []
     if criteria_record:
         from models.db_models import Criterion
         db_criteria = db.query(Criterion).filter(Criterion.evaluation_criteria_id == criteria_record.id).all()
 
+    # Fallback: Pokud v DB definice kritérií chybí, pokusíme se je odvodit z již hotových výsledků.
     if not db_criteria and evaluations:
         class PseudoCriterion:
             def __init__(self, nazev, body):
@@ -65,6 +74,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         for name, max_pts in crit_maxes.items():
             db_criteria.append(PseudoCriterion(name, max_pts))
 
+    # Žádná data -> vrátíme prázdnou strukturu.
     if not evaluations or not db_criteria:
         max_possible_sc = sum([c.body for c in db_criteria]) if db_criteria else 0
         return {
@@ -80,7 +90,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         
     total_students = len(evaluations)
     
-    # --- 1. Deterministická agregace dat ---
+    # --- A. DETERMINISTICKÁ AGREGACE (Tvrdá matematika) ---
     criteria_totals = {}
     criterion_failures = {}
     for c in db_criteria:
@@ -94,6 +104,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         
     student_scores = []
     
+    # Procházíme JSON výsledek každého studenta a sčítáme úspěšnost per kritérium.
     for eval_record in evaluations:
         try:
             data = json.loads(eval_record.json_result)
@@ -102,7 +113,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             
             for criteria in data.get("vysledky", []):
                 name = criteria.get("nazev", "Neznámé")
-                # Match s DB kritériem (odolné vůči mírným úpravám od LLM)
+                # Párování názvu kritéria z AI (může se mírně lišit) s verzí v DB.
                 matched_key = None
                 for c_name in criteria_totals.keys():
                     if c_name.lower().strip() == name.lower().strip():
@@ -121,6 +132,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
                     if is_met:
                         criteria_totals[matched_key]["passes"] += 1
                     else:
+                        # Pokud student kritérium nesplnil, uložíme si jeho jméno a důvod pro detailní náhled v analýze.
                         criterion_failures[matched_key].append({
                             "id": eval_record.id,
                             "name": eval_record.cleaned_name if eval_record.cleaned_name else eval_record.student_name.replace(',', ''),
@@ -132,7 +144,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             print(f"Error parsing evaluation {eval_record.id}: {e}")
             continue
             
-    # Výpočet finálních procent EXACTNĚ podle vzorce pro N studentů
+    # Výpočet finálních procentuálních úspěšností.
     stats = []
     error_rates = []
     for criterion, counts in criteria_totals.items():
@@ -148,11 +160,11 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             "error_rate": 100 - success_rate
         })
         
-    # Top Errors
+    # Seřazení největších chyb (kritéria, kde třída nejvíc "hoří").
     sorted_errors = sorted(error_rates, key=lambda x: x["error_rate"], reverse=True)
     top_errors = [e["name"] for e in sorted_errors[:3] if e["error_rate"] > 0]
     
-    # Skóre distribuce atd.
+    # Distribuce skóre (kolik studentů je pod 50 %, kolik v elitě atd.).
     max_possible_sc = sum([c.body for c in db_criteria])
     if max_possible_sc == 0: max_possible_sc = 1
     
@@ -168,6 +180,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         else:
             dist["81_100"] += 1
 
+    # Seznam studentů, kteří potřebují doučování (úspěšnost pod 50 %).
     for eval_record in evaluations:
         try:
             data = json.loads(eval_record.json_result)
