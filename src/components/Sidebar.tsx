@@ -37,12 +37,13 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
         return saved ? JSON.parse(saved) : null;
     });
     const [showSyncHelp, setShowSyncHelp] = useState(false);
+    const [syncDirHandle, setSyncDirHandle] = useState<any>(null);
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
     const saveClasses = React.useCallback((newClasses: ClassData[]) => {
         setClasses(newClasses);
         localStorage.setItem('upvsp_classes', JSON.stringify(newClasses));
-    }, []);
+    }, [setClasses]);
 
     const handleSaveEdit = React.useCallback(() => {
         if (!editMode) return;
@@ -143,6 +144,114 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
         }
     }, [classes, saveClasses, showConfirm, activeScenarioId, onSelectScenario]);
 
+    const performSync = async (dirHandle: any) => {
+        try {
+            setIsSyncing(true);
+            let currentClasses = JSON.parse(JSON.stringify(classes)) as ClassData[];
+            let totalFiles = 0;
+            let newClassesCount = 0;
+            let newScenariosCount = 0;
+
+            for await (const [className, classHandle] of (dirHandle as any).entries()) {
+                if ((classHandle as any).kind !== 'directory') continue;
+
+                let cls = currentClasses.find(c => c.name === className);
+                if (!cls) {
+                    cls = { id: `class-${Date.now()}-${Math.random()}`, name: className, expanded: true, scenarios: [] };
+                    currentClasses.push(cls);
+                    newClassesCount++;
+                } else {
+                    cls.expanded = true;
+                }
+
+                for await (const [scenName, scenHandle] of (classHandle as any).entries()) {
+                    if ((scenHandle as any).kind !== 'directory') continue;
+
+                    let scen = cls.scenarios.find(s => s.name === scenName);
+                    if (!scen) {
+                        scen = { id: `scen-${Date.now()}-${Math.random()}`, name: scenName };
+                        cls.scenarios.push(scen);
+                        newScenariosCount++;
+                    }
+
+                    const validFiles: File[] = [];
+                    for await (const [fileName, fileHandle] of (scenHandle as any).entries()) {
+                        if ((fileHandle as any).kind === 'file') {
+                            const file = await (fileHandle as any).getFile();
+                            const ext = file.name.split('.').pop()?.toLowerCase();
+                            if (ext && ['pdf', 'doc', 'docx', 'rtf', 'odt'].includes(ext) && !fileName.startsWith('~') && !fileName.startsWith('.')) {
+                                validFiles.push(file);
+                            }
+                        }
+                    }
+
+                    if (validFiles.length > 0) {
+                        totalFiles += validFiles.length;
+                        const formData = new FormData();
+                        validFiles.forEach(f => formData.append('files', f));
+                        formData.append('scenario_id', scen.id);
+
+                        await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+                            body: formData
+                        });
+                    }
+                }
+            }
+
+            saveClasses(currentClasses);
+            const msg = totalFiles > 0
+                ? `Sync dokončen! ${newClassesCount > 0 ? newClassesCount + ' nových tříd, ' : ''}${newScenariosCount > 0 ? newScenariosCount + ' nových situací, ' : ''}${totalFiles} souborů nahráno.`
+                : newClassesCount > 0 || newScenariosCount > 0
+                    ? `Struktura synchronizována (${newClassesCount} tříd, ${newScenariosCount} situací). Žádné dokumenty k nahrání.`
+                    : 'Žádné nové položky nalezeny. Zkontrolujte strukturu složek (viz nápověda ❓).';
+
+            setLastSyncInfo({
+                name: dirHandle.name,
+                date: new Date().toLocaleString('cs-CZ')
+            });
+            localStorage.setItem('evaluz_last_sync', JSON.stringify({
+                name: dirHandle.name,
+                date: new Date().toLocaleString('cs-CZ')
+            }));
+
+            setToast({ message: msg, type: totalFiles > 0 || newClassesCount > 0 || newScenariosCount > 0 ? 'success' : 'error' });
+
+            if (totalFiles > 0) {
+                window.dispatchEvent(new CustomEvent('evaluz-sync-complete'));
+            }
+
+            setTimeout(() => setToast(null), 8000);
+        } catch (e: any) {
+            if (e.name !== 'AbortError') {
+                console.error('HDD Sync Error:', e);
+                setToast({ message: 'Nastala chyba při synchronizaci. Zkontrolujte strukturu složek.', type: 'error' });
+                setTimeout(() => setToast(null), 6000);
+            }
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    const handleSelectAndSync = async () => {
+        try {
+            const dirHandle = await (window as any).showDirectoryPicker();
+            setSyncDirHandle(dirHandle);
+            await performSync(dirHandle);
+        } catch (e: any) {
+            if (e.name !== 'AbortError') console.error('Directory Picker Error:', e);
+        }
+    };
+
+    const handleDirectSync = async () => {
+        if (syncDirHandle) {
+            await performSync(syncDirHandle);
+        } else {
+            await handleSelectAndSync();
+        }
+    };
+
     return (
         <aside className={`bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shadow-sm z-10 transition-all duration-300 relative ${isCollapsed ? 'w-[68px]' : 'w-72'}`}>
             <button
@@ -158,125 +267,29 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                     <>
                         <div className="flex gap-1.5">
                             <button
-                                onClick={async () => {
-                                    try {
-                                        setIsSyncing(true);
-                                        const dirHandle = await (window as any).showDirectoryPicker();
-                                        // Oprávnění ke čtení je u showDirectoryPicker pro aktuální relaci automatické.
-                                        // requestPermission se používá primárně při znovupoužití handle z IndexedDB.
-
-                                        let currentClasses = JSON.parse(JSON.stringify(classes)) as ClassData[];
-                                        let totalFiles = 0;
-                                        let newClassesCount = 0;
-                                        let newScenariosCount = 0;
-                                        let skippedFiles: string[] = [];
-                                        let allEntries: string[] = [];
-
-                                        // Nejdříve sesbírat VŠECHNY entries pro diagnostiku
-                                        for await (const [name, handle] of dirHandle.entries()) {
-                                            allEntries.push(`${name} (${handle.kind})`);
-                                        }
-
-                                        for await (const [className, classHandle] of dirHandle.entries()) {
-                                            if (classHandle.kind !== 'directory') continue;
-
-                                            let cls = currentClasses.find(c => c.name === className);
-                                            if (!cls) {
-                                                cls = { id: `class-${Date.now()}-${Math.random()}`, name: className, expanded: true, scenarios: [] };
-                                                currentClasses.push(cls);
-                                                newClassesCount++;
-                                            } else {
-                                                cls.expanded = true;
-                                            }
-
-                                            for await (const [scenName, scenHandle] of classHandle.entries()) {
-                                                if (scenHandle.kind !== 'directory') continue;
-
-                                                let scen = cls.scenarios.find(s => s.name === scenName);
-                                                if (!scen) {
-                                                    scen = { id: `scen-${Date.now()}-${Math.random()}`, name: scenName };
-                                                    cls.scenarios.push(scen);
-                                                    newScenariosCount++;
-                                                }
-
-                                                const validFiles: File[] = [];
-                                                for await (const [fileName, fileHandle] of scenHandle.entries()) {
-                                                    if (fileHandle.kind === 'file') {
-                                                        const file = await fileHandle.getFile();
-                                                        const ext = file.name.split('.').pop()?.toLowerCase();
-                                                        if (ext && ['pdf', 'doc', 'docx', 'rtf', 'odt'].includes(ext) && !fileName.startsWith('~') && !fileName.startsWith('.')) {
-                                                            validFiles.push(file);
-                                                        } else {
-                                                            skippedFiles.push(fileName);
-                                                        }
-                                                    }
-                                                }
-
-                                                if (validFiles.length > 0) {
-                                                    totalFiles += validFiles.length;
-                                                    const formData = new FormData();
-                                                    validFiles.forEach(f => formData.append('files', f));
-                                                    formData.append('scenario_id', scen.id);
-
-                                                    const uploadRes = await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
-                                                        method: 'POST',
-                                                        headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
-                                                        body: formData
-                                                    });
-                                                }
-                                            }
-                                        }
-
-                                        saveClasses(currentClasses);
-                                        const msg = totalFiles > 0
-                                            ? `Sync dokončen! ${newClassesCount > 0 ? newClassesCount + ' nových tříd, ' : ''}${newScenariosCount > 0 ? newScenariosCount + ' nových situací, ' : ''}${totalFiles} souborů nahráno.`
-                                            : newClassesCount > 0 || newScenariosCount > 0
-                                                ? `Struktura synchronizována (${newClassesCount} tříd, ${newScenariosCount} situací). Žádné dokumenty k nahrání.`
-                                                : 'Žádné nové položky nalezeny. Zkontrolujte strukturu složek (viz nápověda ❓).';
-                                        setLastSyncInfo({
-                                            name: dirHandle.name,
-                                            date: new Date().toLocaleString('cs-CZ')
-                                        });
-                                        localStorage.setItem('evaluz_last_sync', JSON.stringify({
-                                            name: dirHandle.name,
-                                            date: new Date().toLocaleString('cs-CZ')
-                                        }));
-
-                                        setToast({ message: msg, type: totalFiles > 0 || newClassesCount > 0 || newScenariosCount > 0 ? 'success' : 'error' });
-
-                                        // Trigger refresh in TabEvaluation if files were uploaded
-                                        if (totalFiles > 0) {
-                                            window.dispatchEvent(new CustomEvent('evaluz-sync-complete'));
-                                        }
-
-                                        setTimeout(() => setToast(null), 8000);
-                                    } catch (e: any) {
-                                        if (e.name !== 'AbortError') {
-                                            console.error('HDD Sync Error:', e);
-                                            setToast({ message: 'Nastala chyba při synchronizaci. Zkontrolujte strukturu složek.', type: 'error' });
-                                            setTimeout(() => setToast(null), 6000);
-                                        }
-                                    } finally {
-                                        setIsSyncing(false);
-                                    }
-                                }}
+                                onClick={handleDirectSync}
                                 disabled={isSyncing}
-                                className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-sm font-semibold whitespace-nowrap shadow-sm disabled:opacity-50 relative group"
-                                title={lastSyncInfo ? `Poslední synchronizace: ${lastSyncInfo.name} (${lastSyncInfo.date})` : undefined}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 border text-sm font-semibold whitespace-nowrap shadow-sm transition-colors rounded-lg disabled:opacity-50 relative group ${syncDirHandle
+                                        ? 'bg-[#002855] text-white border-[#002855] hover:bg-[#003a7a]'
+                                        : 'bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                    }`}
+                                title={syncDirHandle ? `Synchronizovat složku: ${syncDirHandle.name}` : 'Klikněte pro výběr složky a synchronizaci'}
                             >
                                 {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <HardDrive className="w-4 h-4" />}
                                 {isSyncing ? 'Synchronizuji...' : 'Sync ÚZ v PC'}
-                                {lastSyncInfo && !isSyncing && (
+                                {syncDirHandle && !isSyncing && (
                                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white dark:border-slate-800 rounded-full shadow-sm" />
                                 )}
-
-                                {lastSyncInfo && !isSyncing && (
-                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-800 text-white text-[10px] rounded shadow-xl z-50 pointer-events-none">
-                                        <p className="font-bold border-b border-slate-700 pb-1 mb-1">Aktivní synchronizace</p>
-                                        <p className="opacity-80">Složka: {lastSyncInfo.name}</p>
-                                        <p className="opacity-80">Čas: {lastSyncInfo.date}</p>
-                                    </div>
-                                )}
+                            </button>
+                            <button
+                                onClick={handleSelectAndSync}
+                                className={`p-2 border rounded-lg transition-colors ${syncDirHandle
+                                        ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-100'
+                                        : 'text-slate-400 hover:text-[#002855] dark:hover:text-blue-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                    }`}
+                                title="Změnit cílovou složku pro synchronizaci"
+                            >
+                                <Folder className="w-4 h-4" />
                             </button>
                             <button
                                 onClick={() => setShowSyncHelp(!showSyncHelp)}
@@ -537,23 +550,21 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
             </div>
 
             {/* Toast Notification */}
-            {
-                toast && (
-                    <div className={`absolute bottom-4 left-4 right-4 p-3 rounded-lg shadow-lg border flex items-start gap-2 text-sm animate-in slide-in-from-bottom-4 z-50 ${toast.type === 'success'
-                        ? 'bg-green-50 border-green-200 text-green-800'
-                        : 'bg-red-50 border-red-200 text-red-800'
-                        }`}>
-                        {toast.type === 'success'
-                            ? <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                            : <XCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
-                        }
-                        <span className="flex-1">{toast.message}</span>
-                        <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600">
-                            <XCircle className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-                )
-            }
-        </aside >
+            {toast && (
+                <div className={`absolute bottom-4 left-4 right-4 p-3 rounded-lg shadow-lg border flex items-start gap-2 text-sm animate-in slide-in-from-bottom-4 z-50 ${toast.type === 'success'
+                    ? 'bg-green-50 border-green-200 text-green-800'
+                    : 'bg-red-50 border-red-200 text-red-800'
+                    }`}>
+                    {toast.type === 'success'
+                        ? <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                        : <XCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                    }
+                    <span className="flex-1">{toast.message}</span>
+                    <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600">
+                        <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            )}
+        </aside>
     );
 }

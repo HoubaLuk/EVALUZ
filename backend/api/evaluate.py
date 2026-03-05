@@ -132,10 +132,10 @@ async def fast_scan_batch(
             new_eval = StudentEvaluation(
                 student_name=student_name,
                 cleaned_name=cleaned_display_name,
-                class_id=current_user.active_class_id or 1,
+                class_id=1,
                 scenario_name=scenario_id,
-                status="pending",
                 source_text=extracted_text,
+                source_filename=student_name,
                 lecturer_id=current_user.id,
                 student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
             )

@@ -19,13 +19,23 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     
     # 1. NAČTENÍ NASTAVENÍ: Vše se bere z databáze (z Administrace), aby uživatel mohl měnit modely za běhu.
     db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
-    db_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
     db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
     
-    # Pokud není v administraci nic nastaveno, použijeme prázdné řetězce a později vyhodíme chybu.
+    # Per-task model: try MODEL_PHASE2 first, then fall back to global VLLM_MODEL_NAME
+    db_phase_model = db.query(AppSettings).filter(AppSettings.key == "MODEL_PHASE2").first()
+    db_global_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
+    
+    # Per-task thinking: try THINKING_PHASE2 first, then fall back to global VLLM_ENABLE_THINKING
+    db_phase_thinking = db.query(AppSettings).filter(AppSettings.key == "THINKING_PHASE2").first()
+    db_global_thinking = db.query(AppSettings).filter(AppSettings.key == "VLLM_ENABLE_THINKING").first()
+    
     api_url = db_url.value if db_url and db_url.value else ""
-    model_name = db_model.value if db_model and db_model.value else ""
+    model_name = (db_phase_model.value if db_phase_model and db_phase_model.value else "") or (db_global_model.value if db_global_model and db_global_model.value else "")
     api_key = db_key.value if db_key and db_key.value else ""
+    
+    enable_thinking = True
+    thinking_value = (db_phase_thinking.value if db_phase_thinking and db_phase_thinking.value else "") or (db_global_thinking.value if db_global_thinking and db_global_thinking.value else "true")
+    enable_thinking = (thinking_value.lower() == 'true')
     
     if not api_url or not model_name:
         raise ValueError("LLM konfigurace (URL nebo Model) chybí v databázi. Nastavte je v Administraci.")
@@ -95,7 +105,11 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
             temperature=0.1, # Low temperature for analytical consistency
             max_tokens=16384,
             # Pokud model podporuje JSON mode, aktivujeme ho.
-            response_format={"type": "json_object"} 
+            response_format={"type": "json_object"},
+            extra_body={
+                "enable_thinking": enable_thinking,
+                "chat_template_kwargs": {"enable_thinking": enable_thinking}
+            }
         )
         
         # 3. PARSOVÁNÍ VÝSLEDKU: AI modely občas píší víc, než chceme. Tady odpověď čistíme.
@@ -113,7 +127,6 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         end_idx = clean_text.rfind('}')
         
         if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
-            print(f"{prefix}V odpovědi LLM nebyl nalezen žádný JSON objekt. Raw Response: {raw_response}")
             raise ValueError("V odpovědi LLM nebyl nalezen žádný JSON objekt.")
             
         clean_response = clean_text[start_idx:end_idx+1]
@@ -133,15 +146,25 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
     Neprovádí žádnou evaluaci kritérií (šetrné na tokeny a čas).
     """
     db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
-    db_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
     db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
     
+    # Per-task model: try MODEL_EXTRACTION first, then fall back to global VLLM_MODEL_NAME
+    db_extraction_model = db.query(AppSettings).filter(AppSettings.key == "MODEL_EXTRACTION").first()
+    db_global_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
+    
+    # Per-task thinking: try THINKING_EXTRACTION first, then fall back to global VLLM_ENABLE_THINKING
+    db_extraction_thinking = db.query(AppSettings).filter(AppSettings.key == "THINKING_EXTRACTION").first()
+    db_global_thinking = db.query(AppSettings).filter(AppSettings.key == "VLLM_ENABLE_THINKING").first()
+    
     api_url = db_url.value if db_url and db_url.value else ""
-    model_name = db_model.value if db_model and db_model.value else ""
+    model_name = (db_extraction_model.value if db_extraction_model and db_extraction_model.value else "") or (db_global_model.value if db_global_model and db_global_model.value else "")
     api_key = db_key.value if db_key and db_key.value else ""
     
+    enable_thinking = False # Default to false for fast scan
+    thinking_value = (db_extraction_thinking.value if db_extraction_thinking and db_extraction_thinking.value else "") or (db_global_thinking.value if db_global_thinking and db_global_thinking.value else "false")
+    enable_thinking = (thinking_value.lower() == 'true')
+    
     if not api_url or not model_name:
-        print("Fast-scan: LLM konfigurace chybí.")
         return {}
 
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
@@ -154,12 +177,21 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
         http_client=httpx.AsyncClient(timeout=60.0)
     )
     
+    print(f"[FAST-SCAN] Extrakce identity pomocí modelu: {model_name}")
+    
     system_prompt = "Jsi asistent pro vytěžování dat z textu. Tvým úkolem je najít jméno, příjmení a hodnost studenta."
+    
+    # Use only the first and last ~500 chars to save tokens
+    if len(report_text) > 1200:
+        trimmed_text = report_text[:500] + "\n\n[...zkráceno...]\n\n" + report_text[-500:]
+    else:
+        trimmed_text = report_text
+    
     user_prompt = f"""
     Z následujícího úředního záznamu (podpis a identifikace autora bývá většinou na konci) extrahuj hodnost, jméno a příjmení autora/studenta.
     
     TEXT ÚŘEDNÍHO ZÁZNAMU:
-    {report_text}
+    {trimmed_text}
     
     Musíš vrátit POUZE striktní JSON objekt v tomto formátu (žádný jiný text okolo!):
     {{
@@ -179,11 +211,19 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.0,
-            max_tokens=200,
-            response_format={"type": "json_object"} 
+            max_tokens=1000, # Increased margin for reasoning models even if thinking is off
+            extra_body={
+                "enable_thinking": enable_thinking,
+                "chat_template_kwargs": {"enable_thinking": enable_thinking}
+            }
         )
         
-        raw_response = response.choices[0].message.content.strip()
+        msg_content = response.choices[0].message.content
+        if not msg_content:
+            print(f"[FAST-SCAN] Model vrátil prázdnou odpověď (content=None). Model: {model_name}")
+            return {}
+        
+        raw_response = msg_content.strip()
         import re
         clean_text = re.sub(r"<(think|thought)>.*?</\1>", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
         
@@ -194,7 +234,10 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
             
         clean_response = clean_text[start_idx:end_idx+1]
         data = json.loads(clean_response)
-        return data.get("identita", {})
+        identity = data.get("identita", {})
+        if identity:
+            print(f"[FAST-SCAN] Identita nalezena: {identity}")
+        return identity
     except Exception as e:
         print(f"Fast-scan identity exception: {e}")
         return {}
@@ -273,7 +316,11 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
             model=model_name,
             messages=formatted_messages,
             temperature=temperature,
-            max_tokens=16384
+            max_tokens=16384,
+            extra_body={
+                "enable_thinking": enable_thinking,
+                "chat_template_kwargs": {"enable_thinking": enable_thinking}
+            }
         )
         return response.choices[0].message.content.strip()
     except Exception as e:

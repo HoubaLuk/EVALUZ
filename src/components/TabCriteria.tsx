@@ -235,7 +235,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
 
         try {
             const res = await fetch(`${API_BASE_URL}/criteria/save`, {
-                method: 'PUT',
+                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`

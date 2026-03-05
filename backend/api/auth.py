@@ -151,11 +151,9 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     """
     Standard OAuth2 Login endpoint.
     """
-    print(f">>> [LOGIN DEBUG] Pokus o přihlášení: user={form_data.username}")
     user = db.query(Lecturer).filter(Lecturer.email == form_data.username).first()
     
     if not user:
-        print(f">>> [LOGIN DEBUG] Uživatel {form_data.username} nebyl nalezen v DB.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -163,7 +161,6 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
         )
         
     is_valid = verify_password(form_data.password, user.password_hash)
-    print(f">>> [LOGIN DEBUG] Uživatel nalezen. Heslo validní: {is_valid}")
     
     if not is_valid:
         raise HTTPException(
