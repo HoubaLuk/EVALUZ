@@ -1,3 +1,9 @@
+"""
+MODUL: LLM ENGINE (AI JÁDRO)
+Tento soubor je srdcem celé AI analýzy. Obsahuje logiku pro komunikaci s modely (vLLM, Google Gemini atd.),
+přípravu promptů a následné čištění (parsování) odpovědí tak, aby z nich systém mohl vyčerpat data.
+"""
+
 import json
 import httpx
 from openai import AsyncOpenAI
@@ -7,14 +13,16 @@ from models.db_models import AppSettings
 
 async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "") -> dict:
     """
-    Evaluates a police report against criteria using a local vLLM model dynamically configured from DB.
+    HLAVNÍ FUNKCE PRO EVALUACI (Fáze 2).
+    Bere text studenta a zadaná kritéria, posílá je modelu a vrací vyčištěný JSON výsledek.
     """
     
-    # 1. Fetch dynamic settings from DB. NO env fallbacks allowed.
+    # 1. NAČTENÍ NASTAVENÍ: Vše se bere z databáze (z Administrace), aby uživatel mohl měnit modely za běhu.
     db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
     db_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
     db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
     
+    # Pokud není v administraci nic nastaveno, použijeme prázdné řetězce a později vyhodíme chybu.
     api_url = db_url.value if db_url and db_url.value else ""
     model_name = db_model.value if db_model and db_model.value else ""
     api_key = db_key.value if db_key and db_key.value else ""
@@ -22,13 +30,15 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     if not api_url or not model_name:
         raise ValueError("LLM konfigurace (URL nebo Model) chybí v databázi. Nastavte je v Administraci.")
 
+    # Oprava URL pro OpenRouter (pokud uživatel zapomene přidat /api/v1).
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
         api_url = "https://openrouter.ai/api/v1"
 
+    # Logování do terminálu pro kontrolu, kam požadavek zrovna teče.
     prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
     print(f"{prefix}LLM volání směřuje na: {api_url} s modelem: {model_name}")
 
-    # Initialize OpenAI client dynamically per request to ensure latest URL is used
+    # Inicializace klienta dynamicikého pro každý požadavek (aby se projevily změny v URL u stejné instance serveru).
     client = AsyncOpenAI(
         base_url=api_url,
         api_key=api_key or "sk-no-key-required",
@@ -38,7 +48,8 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     
     strict_system_prompt = system_prompt
     
-    # User prompt containing the report and the criteria
+    # 2. PŘÍPRAVA PROMPTU: Tady dáváme modelu přesné instrukce, jak má JSON vypadat.
+    # Používáme F-stringy pro vložení textu ÚZ a kritérií přímo do pokynů.
     user_prompt = f"""
     ### SEZNAM KRITÉRIÍ K VYHODNOCENÍ (TOTO JSOU JEDINÉ POLOŽKY, KTERÉ CHCI V JSONU):
     {criteria_markdown}
@@ -47,7 +58,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     {report_text}
     
     Požadovaná struktura JSON odpovědi (identita je POVINNÁ):
-    Vždy přesně identifikuj PŘÍJMENÍ (to bude sloužit jako hlavní řadící klíč). Očekávaný formát identity v JSONu musí striktně odlišit jméno a příjmení.
+    Vždy přesně identifikuj PŘÍJMENÍ (to bude sloužit jako hlavní řadící klíč).
     {{
         "identita": {{
             "hodnost": "prap.", 
@@ -67,14 +78,14 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         "zpetna_vazba": "celkové shrnutí a doporučení pro studenta"
     }}
     
-    IMPORTANT: Bez ohledu na předchozí instrukce o analýze, výsledkem tvé odpovědi MUSÍ být validní JSON výše popsané struktury! Vždy musíš vyhodnotit ÚPLNĚ VŠECHNA kritéria ze seznamu nahoře.
-    OUTPUT MUST BE STRICTLY IN JSON FORMAT. No preamble. Your output must cleanly parse via json.loads(). 
+    IMPORTANT: Výsledkem tvé odpovědi MUSÍ být validní JSON! 
     NEPIŠ ŽÁDNÝ JINÝ TEXT OKOLO, ŽÁDNÉ VYSVĚTLIVKY ANI MARKDOWN BLOKY (např. ```json).
     """
 
     # print(f"{prefix}FINAL PROMPT TO LLM:\n{user_prompt}\n<<< END OF PROMPT")
 
     try:
+        # Voláme model. Nastavujeme temperature=0.1 pro maximální stabilitu hlavy modelu (chceme fakta, ne kreativitu).
         response = await client.chat.completions.create(
             model=model_name,
             messages=[
@@ -83,19 +94,21 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
             ],
             temperature=0.1, # Low temperature for analytical consistency
             max_tokens=16384,
-            # If the vLLM supports JSON mode formatting, we can try to force it, otherwise prompt engineering handles it
+            # Pokud model podporuje JSON mode, aktivujeme ho.
             response_format={"type": "json_object"} 
         )
         
-        # Extract the raw text response safely, treating None as empty
+        # 3. PARSOVÁNÍ VÝSLEDKU: AI modely občas píší víc, než chceme. Tady odpověď čistíme.
         msg_content = response.choices[0].message.content or ""
         raw_response = msg_content.strip()
 
         
         import re
-        # Odstraníme myšlenkové bloky z uvažujících modelů (qwen, deepseek, mistral) vč. neukončených
+        # ODSTRANĚNÍ THOUGHT BLOKŮ: Některé modely (jako Qwen nebo DeepSeek) píší své "myšlenky" mezi <think> a </think>.
+        # Tyto bloky musíme odstranit předtím, než se pokusíme text vyparsovat jako JSON.
         clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
         
+        # Najdeme první '{' a poslední '}', abychom odsekli případný balast okolo (např. pokud model napsal "Here is the JSON: { ... }").
         start_idx = clean_text.find('{')
         end_idx = clean_text.rfind('}')
         

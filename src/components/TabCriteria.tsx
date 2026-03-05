@@ -16,6 +16,11 @@ interface TabCriteriaProps {
     onCriteriaSaved?: () => void;
 }
 
+/**
+ * KOMPONENTA: TAB CRITERIA (SPRÁVA KRITÉRIÍ)
+ * Tato část aplikace slouží k definování hodnotících kritérií.
+ * Lektor zde může využít AI asistenta (Phase 1) k vyladění kritérií před samotným hodnocením.
+ */
 export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCriteriaProps) {
     const { showAlert } = useDialog();
     const [messages, setMessages] = useState<ChatMessage[]>([{
@@ -78,16 +83,20 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
         }
     };
 
+    /**
+     * FUNKCE: NAHRÁNÍ METODIKY DO CHATU
+     * Umožňuje lektorovi nahrát soubor zadání, ze kterého si AI "vyčte" kontext
+     * a následně lépe pomůže s návrhem kritérií.
+     */
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setIsUploading(true);
 
-        // Add a message indicating the file is being processed
         const fileMessage: ChatMessage = {
             role: 'user',
-            content: `Posílám soubor metodiky: ${file.name}`
+            content: `Posílám soubor metodiky ke studiu: ${file.name}`
         };
         setMessages(prev => [...prev, fileMessage]);
 
@@ -181,6 +190,12 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
         }
     };
 
+    /**
+     * FUNKCE: ODESLÁNÍ ZPRÁVY ASISTENTOVI
+     * Odesílá historii chatu na backend (Sokratovské dotazování).
+     * Pokud AI odpověď obsahuje separátor "---", automaticky se návrh kritérií 
+     * překlopí do pravého editačního panelu.
+     */
     const handleSendMessage = async () => {
         if (!inputValue.trim() || isChatLoading) return;
 

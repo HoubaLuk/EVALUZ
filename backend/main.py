@@ -18,55 +18,60 @@ from services.evaluation_queue import eval_queue
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    LIFESPAN MANAGER:
+    Spouští se při startu aplikace a ukončuje se při vypnutí.
+    Zde startujeme asynchronního workera, který na pozadí zpracovává frontu vyhodnocování.
+    """
+    # Spuštění workera na pozadí (neblokuje zbytek aplikace).
     worker_task = asyncio.create_task(eval_queue.worker())
     yield
+    # Úklid po vypnutí serveru.
     worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        pass
 
+# Inicializace FastAPI s nastaveným životním cyklem.
 app = FastAPI(
-    title="ÚPVSP AI Evaluátor API",
-    description="Backend pro vyhodnocování úředních záznamů ÚPVSP pomocí lokálního vLLM",
-    version="2.0.0",
+    title="EVALUZ Backend",
+    description="Systém pro AI vyhodnocování modelových situací",
+    version="2.0.2",
     lifespan=lifespan
 )
 
-# CORS configuration
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://localhost:3333",
-    "http://127.0.0.1:3333",
-]
-
+# KONFIGURACE CORS:
+# Povoluje komunikaci mezi frontendem (běžícím na jiném portu/doméně) a tímto API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"], # V produkci by mělo být omezeno na konkrétní doménu.
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include Routers
-app.include_router(evaluate.router, prefix="/api/v1")
-app.include_router(admin.router, prefix="/api/v1")
-app.include_router(criteria.router, prefix="/api/v1")
-app.include_router(analytics.router, prefix="/api/v1")
-app.include_router(export.router, prefix="/api/v1")
+# REGISTRACE API ROUTERŮ:
+# Každý modul má svou vlastní sekci (vlastní soubor v /api).
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(lecturer.router, prefix="/api/v1")
+app.include_router(evaluate.router, prefix="/api/v1")
+app.include_router(criteria.router, prefix="/api/v1")
+app.include_router(settings.router, prefix="/api/v1")
+
+@app.get("/")
+async def root():
+    """Základní kontrola, že server běží."""
+    return {"message": "EVALUZ API is running", "version": "2.0.2"}
 
 @app.get("/api/v1/health")
-def health_check():
-    """
-    Simple health check endpoint.
-    """
-    return {
-        "status": "ok",
-        "message": "ÚPVSP Backend is running"
-    }
+async def health_check():
+    """Endpoint pro monitoring zdraví systému."""
+    return {"status": "healthy"}
+
+# SPUŠTĚNÍ AUTOMATICKÉHO SEEDOVÁNÍ:
+# Při každém startu se ujistíme, že v DB jsou základní prompty a nastavení, pokud tam chybí.
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
+    seed_database()
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
