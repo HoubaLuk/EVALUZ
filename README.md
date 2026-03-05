@@ -1,4 +1,4 @@
-# EVALUZ
+# EVALUZ (v3.1.0)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
@@ -15,14 +15,54 @@ Pro detailní pochopení systému, jeho architektury a historie vývoje navštiv
 
 ## 🏗 Architektura ve zkratce
 
-- **Frontend**: React 18 + Vite + TypeScript. Real-time komunikace přes WebSockets.
+- **Frontend**: React + Vite + TypeScript. (Build: `npm run build`)
 - **Backend**: FastAPI (Python 3.10+). Asynchronní fronta úloh pro LLM evaluaci.
-- **Databáze**: PostgreSQL 17 (produkční standard).
-- **AI Vrstva**: Univerzální rozhraní pro vLLM, Google Gemini a další providerery.
+- **Databáze**: PostgreSQL 17 (produkční) / SQLite (vývojová).
+- **AI Vrstva**: Podpora pro vLLM (OpenRouter), Reasoning modely (Qwen 3.5, DeepSeek).
 
 ---
 
-## 🚀 Rychlý start
+## ❄️ Air-Gapped Instalace (Bez přístupu k internetu)
+
+Tato verze je optimalizována pro nasazení v uzavřených sítích. Technikovi stačí připravit instalační balíček:
+
+### 1. Metoda: Docker (Doporučeno pro Air-Gapped)
+Tato metoda je nejrobustnější, protože přenášíte celé "kontejnery" se všemi závislostmi.
+
+**Na stroji s internetem:**
+1. Sestavte obrazy: `docker-compose build`
+2. Exportujte obrazy do souboru:
+   ```bash
+   docker save -o evaluz_images.tar evaluz_frontend evaluz_backend postgres:15-alpine
+   ```
+
+**Na cílovém stroji (offline):**
+1. Importujte obrazy: `docker load -i evaluz_images.tar`
+2. Spusťte systém: `docker-compose up -d`
+
+---
+
+### 2. Metoda: Ruční instalace (Python + Build)
+Pokud nemůžete použít Docker, připravte si balíček ručně:
+
+**Na stroji s internetem:**
+1. Backend (závislosti):
+   ```bash
+   cd backend && mkdir vendor
+   pip download -d ./vendor -r requirements.txt
+   ```
+2. Frontend (sestavení):
+   ```bash
+   npm install && npm run build
+   ```
+
+**Na cílovém stroji (offline):**
+1. Instalace backendu: `pip install --no-index --find-links=./vendor -r requirements.txt`
+2. Přeneste složku `dist/` a servírujte ji.
+
+---
+
+## 🚀 Standardní start (Online)
 
 ### 1. Backend
 ```bash
@@ -43,7 +83,7 @@ npm run dev
 ---
 
 ## 🛡 Bezpečnost a soukromí
-Systém je navržen pro provoz v uzavřených sítích (On-premise / Air-gapped). Data neodcházejí mimo infrastrukturu při použití lokálních modelů. Veškeré citlivé konfigurace jsou uloženy v šifrované DB nebo lokálním `.env`.
+Systém je navržen pro provoz v uzavřených sítích. Data neodcházejí mimo infrastrukturu při použití lokálních modelů.
 
 ---
 *Evaluz - Inteligentní pomocník pro lektory ÚPVSP.*

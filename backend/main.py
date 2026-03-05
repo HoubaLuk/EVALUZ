@@ -50,10 +50,11 @@ app.add_middleware(
 # REGISTRACE API ROUTERŮ:
 # Každý modul má svou vlastní sekci (vlastní soubor v /api).
 app.include_router(auth.router, prefix="/api/v1")
-app.include_router(lecturer.router, prefix="/api/v1")
 app.include_router(evaluate.router, prefix="/api/v1")
 app.include_router(criteria.router, prefix="/api/v1")
-app.include_router(settings.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
+app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(export.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
@@ -64,13 +65,6 @@ async def root():
 async def health_check():
     """Endpoint pro monitoring zdraví systému."""
     return {"status": "healthy"}
-
-# SPUŠTĚNÍ AUTOMATICKÉHO SEEDOVÁNÍ:
-# Při každém startu se ujistíme, že v DB jsou základní prompty a nastavení, pokud tam chybí.
-@app.on_event("startup")
-def on_startup():
-    Base.metadata.create_all(bind=engine)
-    seed_database()
 
 if __name__ == "__main__":
     import uvicorn

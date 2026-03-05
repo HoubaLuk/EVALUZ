@@ -34,9 +34,6 @@ def export_student_pdf(
         decoded_name = urllib.parse.unquote(student_name)
         normalized_name = unicodedata.normalize('NFC', decoded_name)
         
-        print(f">>> EXPORT: Hledám vyhodnocení pro: '{normalized_name}'")
-        # Výpis hex pro přesné určení Unicode neshod v logu
-        # print(f">>> DEBUG HEX: {normalized_name.encode('utf-8').hex()}")
         
         # Bereme nejnovější evaluaci pro daného studenta
         evaluation = db.query(StudentEvaluation).filter(
@@ -46,7 +43,7 @@ def export_student_pdf(
         
         if not evaluation:
             # Zkusíme ještě jednu šanci: vyhledat všechny a normalizovat v Pythonu (pomalejší, ale jistota)
-            print(">>> EXPORT: Přímá shoda selhala, zkouším prohledat všechny záznamy s NFC normalizací...")
+            
             all_evals = db.query(StudentEvaluation).filter(StudentEvaluation.lecturer_id == current_user.id).all()
             for ev in all_evals:
                 if unicodedata.normalize('NFC', ev.student_name) == normalized_name:

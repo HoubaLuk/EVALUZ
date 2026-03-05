@@ -220,7 +220,8 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             messages=messages,
             system_prompt=system_prompt,
             temperature=temperature,
-            db=db
+            db=db,
+            phase="phase3"
         )
     except Exception as e:
         print(f"Failed to generate insight: {e}")

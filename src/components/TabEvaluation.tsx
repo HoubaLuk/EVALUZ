@@ -437,6 +437,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 // Let's manually trigger a refresh to clear pending statuses and stop.
                 setIsEvaluating(false);
                 setEvaluationProgress(0);
+                setTotalToEvaluate(0);
+                setEvaluatedCount(0);
+                // Reset all 'evaluating' students to 'pending' before reloading from DB
+                setStudents(current => current.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
                 setTimeout(() => setToastMessage(null), 4000);
                 await fetchEvaluations(); // reload actual statuses
             } else {
