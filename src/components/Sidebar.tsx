@@ -234,7 +234,14 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
         }
     };
 
+    const isFileSystemApiSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+
     const handleSelectAndSync = async () => {
+        if (!isFileSystemApiSupported) {
+            setToast({ message: 'Synchronizace s PC vyžaduje HTTPS (zabezpečené připojení) nebo localhost.', type: 'error' });
+            setTimeout(() => setToast(null), 6000);
+            return;
+        }
         try {
             const dirHandle = await (window as any).showDirectoryPicker();
             setSyncDirHandle(dirHandle);
@@ -270,8 +277,8 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                                 onClick={handleDirectSync}
                                 disabled={isSyncing}
                                 className={`flex-1 flex items-center justify-center gap-2 py-2 border text-sm font-semibold whitespace-nowrap shadow-sm transition-colors rounded-lg disabled:opacity-50 relative group ${syncDirHandle
-                                        ? 'bg-[#002855] text-white border-[#002855] hover:bg-[#003a7a]'
-                                        : 'bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                    ? 'bg-[#002855] text-white border-[#002855] hover:bg-[#003a7a]'
+                                    : 'bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                                     }`}
                                 title={syncDirHandle ? `Synchronizovat složku: ${syncDirHandle.name}` : 'Klikněte pro výběr složky a synchronizaci'}
                             >
@@ -284,8 +291,8 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                             <button
                                 onClick={handleSelectAndSync}
                                 className={`p-2 border rounded-lg transition-colors ${syncDirHandle
-                                        ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-100'
-                                        : 'text-slate-400 hover:text-[#002855] dark:hover:text-blue-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                    ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-100'
+                                    : 'text-slate-400 hover:text-[#002855] dark:hover:text-blue-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
                                     }`}
                                 title="Změnit cílovou složku pro synchronizaci"
                             >
@@ -313,6 +320,11 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                                 </code>
                                 <p className="text-slate-500 dark:text-slate-400 mb-1">Podporované formáty: <strong>.docx, .doc, .pdf, .rtf</strong></p>
                                 <p className="text-red-500 dark:text-red-400 font-semibold">⚠ Nenazývejte složky s lomítkem „/" (např. ZOP 02/2026). Na macOS jsou pro prohlížeč neviditelné! Použijte pomlčku: ZOP 02-2026</p>
+                                {!isFileSystemApiSupported && (
+                                    <p className="mt-2 p-2 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded font-bold">
+                                        ⚠ Prohlížeč blokuje přístup k souborům (showDirectoryPicker) z důvodu nezabezpečeného připojení (HTTP). Pro funkční synchronizaci s HDD je NUTNÉ používat HTTPS.
+                                    </p>
+                                )}
                             </div>
                         )}
                     </>

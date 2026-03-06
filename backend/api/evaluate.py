@@ -11,7 +11,7 @@ import asyncio
 import unicodedata
 from sqlalchemy.orm import Session
 from core.database import get_db, SessionLocal
-from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion, AppSettings, GoldenExample
+from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion, AppSettings, GoldenExample, Class
 from api.auth import get_current_lecturer
 import datetime
 
@@ -128,6 +128,15 @@ async def fast_scan_batch(
                 # Pokud AI jméno nenašla, použijeme název souboru
                 cleaned_display_name = file.filename.rsplit('.', 1)[0]
             
+            # Ochrana proti selhání Foreign Key (class_id=1 nemusí být na prázdné nebo nové DB založena).
+            default_class = db.query(Class).filter(Class.id == 1).first()
+            if not default_class:
+                db.add(Class(id=1, name="Základní kurz", created_by_id=current_user.id))
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
+
             # 5. Zápis do databáze (nebo aktualizace existujícího záznamu)
             new_eval = StudentEvaluation(
                 student_name=student_name,
@@ -335,7 +344,15 @@ async def evaluate_batch(
                     if existing_eval.student_identity and existing_eval.student_identity != "None" and identita and not "prijmeni" in json.loads(existing_eval.student_identity or "{}"):
                          existing_eval.student_identity = json.dumps(identita, ensure_ascii=False)
                          existing_eval.cleaned_name = cleaned_eval_name
-                else:
+                if not existing_eval:
+                    # Pojistka pro asynchronní worker - třída ID 1 MUSÍ existovat.
+                    if not db_bg.query(Class).filter(Class.id == 1).first():
+                        db_bg.add(Class(id=1, name="Základní kurz", created_by_id=current_user_id))
+                        try:
+                            db_bg.commit()
+                        except Exception:
+                            db_bg.rollback()
+
                     eval_record = StudentEvaluation(
                         student_name=student_name,
                         class_id=1,

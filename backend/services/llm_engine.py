@@ -116,9 +116,19 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
             "presence_penalty": presence_penalty,
             "frequency_penalty": frequency_penalty,
             "max_tokens": 16384,
-            # Pokud model podporuje JSON mode, aktivujeme ho.
-            "response_format": {"type": "json_object"}
+            "max_tokens": 16384
         }
+
+        # Pokud model podporuje JSON mode a není to LM Studio/Ollama (které mívají nestandardní implementaci),
+        # můžeme ho zkusit aktivovat. Ale pro jistotu ho u local providerů vynecháme a spoléháme na prompt.
+        if platform == "vllm":
+            kwargs["response_format"] = {"type": "json_object"}
+        elif platform in ["lmstudio", "ollama"]:
+            # LM Studio často hlásí chybu 400, pokud response_format není 'text' nebo 'json_schema'
+            pass 
+        else:
+            # Default pro OpenAI/ostatní
+            kwargs["response_format"] = {"type": "json_object"}
 
         # vLLM specifické parametry pro uvažování posíláme jen tam, kde víme, že to API nezahodí s chybou
         if platform == "vllm":
@@ -242,8 +252,11 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
             "top_p": top_p,
             "presence_penalty": presence_penalty,
             "frequency_penalty": frequency_penalty,
-            "max_tokens": 1000 # Increased margin for reasoning models even if thinking is off
+            "max_tokens": 1000 
         }
+        
+        if platform == "vllm":
+            kwargs["response_format"] = {"type": "json_object"}
         
         if platform == "vllm":
             kwargs["extra_body"] = {

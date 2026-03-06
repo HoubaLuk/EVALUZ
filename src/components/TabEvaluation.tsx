@@ -96,15 +96,23 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 const data = JSON.parse(event.data);
                 // Backend posílá zprávy o startu (EVAL_START), úspěchu (EVAL_SUCCESS) nebo chybě (EVAL_ERROR).
                 if (data.type === 'EVAL_START') {
-                    setStudents(prev => prev.map(s => s.name === data.student_name ? { ...s, status: 'evaluating' } : s));
+                    setStudents(prev => prev.map(s => {
+                        const sName = (s.name || "").normalize('NFC');
+                        const dataName = (data.student_name || "").normalize('NFC');
+                        return sName === dataName ? { ...s, status: 'evaluating' } : s;
+                    }));
                 } else if (data.type === 'EVAL_SUCCESS') {
                     setEvaluatedCount(prev => prev + 1);
-                    await fetchEvaluations(); // Po úspěchu načteme čerstvá data z DB
+                    await fetchEvaluations();
                 } else if (data.type === 'EVAL_ERROR') {
                     setEvaluatedCount(prev => prev + 1);
                     setToastMessage(`Chyba u studenta: ${data.error}`);
                     setTimeout(() => setToastMessage(null), 5000);
-                    setStudents(prev => prev.map(s => s.name === data.student_name ? { ...s, status: 'pending' } : s));
+                    setStudents(prev => prev.map(s => {
+                        const sName = (s.name || "").normalize('NFC');
+                        const dataName = (data.student_name || "").normalize('NFC');
+                        return sName === dataName ? { ...s, status: 'pending' } : s;
+                    }));
                 }
             };
             ws.onclose = () => {
