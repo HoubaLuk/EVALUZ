@@ -11,7 +11,7 @@ import asyncio
 import unicodedata
 from sqlalchemy.orm import Session
 from core.database import get_db, SessionLocal
-from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion, AppSettings, GoldenExample, Class
+from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion, AppSettings, GoldenExample, ClassRoom
 from api.auth import get_current_lecturer
 import datetime
 
@@ -129,9 +129,9 @@ async def fast_scan_batch(
                 cleaned_display_name = file.filename.rsplit('.', 1)[0]
             
             # Ochrana proti selhání Foreign Key (class_id=1 nemusí být na prázdné nebo nové DB založena).
-            default_class = db.query(Class).filter(Class.id == 1).first()
+            default_class = db.query(ClassRoom).filter(ClassRoom.id == 1).first()
             if not default_class:
-                db.add(Class(id=1, name="Základní kurz", created_by_id=current_user.id))
+                db.add(ClassRoom(id=1, name="Základní kurz", created_by_id=current_user.id))
                 try:
                     db.commit()
                 except Exception:
@@ -346,8 +346,8 @@ async def evaluate_batch(
                          existing_eval.cleaned_name = cleaned_eval_name
                 if not existing_eval:
                     # Pojistka pro asynchronní worker - třída ID 1 MUSÍ existovat.
-                    if not db_bg.query(Class).filter(Class.id == 1).first():
-                        db_bg.add(Class(id=1, name="Základní kurz", created_by_id=current_user_id))
+                    if not db_bg.query(ClassRoom).filter(ClassRoom.id == 1).first():
+                        db_bg.add(ClassRoom(id=1, name="Základní kurz", created_by_id=current_user_id))
                         try:
                             db_bg.commit()
                         except Exception:
