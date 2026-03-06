@@ -51,7 +51,7 @@ export function Header({ setIsAdminOpen, lecturerName }: HeaderProps) {
                     <h1 className="text-sm font-medium tracking-wide text-[#facc15] leading-tight">Útvar policejního vzdělávání a služební přípravy</h1>
                     <h1 className="text-xl font-bold tracking-tight text-[#facc15] leading-tight mb-0.5">EVALUZ: Vyhodnocování ÚZ účastníků ZOP</h1>
                     <div className="text-xs text-blue-200/60 mt-0.5">
-                        <span>Vytvořeno interně na ÚPVSP. 2026. verze 3.1.0</span>
+                        <span>Vytvořeno interně na ÚPVSP. 2026. verze 3.1.1</span>
                     </div>
                 </div>
                 <h1 className="text-xl font-bold tracking-widest md:hidden">EVALUZ</h1>
