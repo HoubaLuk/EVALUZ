@@ -1,4 +1,4 @@
-# EVALUZ (v3.1.0)
+# EVALUZ (v3.1.1)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
