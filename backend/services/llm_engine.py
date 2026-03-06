@@ -38,14 +38,13 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     enable_thinking = (thinking_value.lower() == 'true')
     
     db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
-    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
-    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
-    db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
+    db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
     
     platform = db_platform.value if db_platform and db_platform.value else "vllm"
     top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
     presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
     frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
+    context_window = int(db_context.value) if db_context and db_context.value else 8192
     
     if not api_url or not model_name:
         raise ValueError("LLM konfigurace (URL nebo Model) chybí v databázi. Nastavte je v Administraci.")
@@ -136,6 +135,12 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 "enable_thinking": enable_thinking,
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
+        
+        # Pro Ollama přidáme nastavení kontextového okna přímo do požadavku
+        if platform == "ollama":
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = {}
+            kwargs["extra_body"]["num_ctx"] = context_window
             
         # Voláme model.
         response = await client.chat.completions.create(**kwargs)
@@ -193,14 +198,14 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
     enable_thinking = (thinking_value.lower() == 'true')
     
     db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
-    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
-    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
     db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
+    db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
     
     platform = db_platform.value if db_platform and db_platform.value else "vllm"
     top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
     presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
     frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
+    context_window = int(db_context.value) if db_context and db_context.value else 8192
     
     if not api_url or not model_name:
         return {}
@@ -263,6 +268,11 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
                 "enable_thinking": enable_thinking,
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
+            
+        if platform == "ollama":
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = {}
+            kwargs["extra_body"]["num_ctx"] = context_window
 
         response = await client.chat.completions.create(**kwargs)
         
@@ -301,6 +311,7 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
     db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
     db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
     db_max_tokens = db.query(AppSettings).filter(AppSettings.key == "VLLM_MAX_TOKENS").first()
+    db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
     
     # Per-phase model lookup
     model_name = ""
@@ -343,6 +354,7 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
     
     # Razantní navýšení hardlimitu pro gpt-oss-120b a thinking modely
     max_tokens = int(db_max_tokens.value) if db_max_tokens and db_max_tokens.value else 6000
+    context_window = int(db_context.value) if db_context and db_context.value else 8192
     
     print(f">>> LLM volání směřuje na: {api_url} s modelem: {model_name}")
 
@@ -375,6 +387,11 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
                 "enable_thinking": enable_thinking,
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
+            
+        if platform == "ollama":
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = {}
+            kwargs["extra_body"]["num_ctx"] = context_window
 
         response = await client.chat.completions.create(**kwargs)
         return response.choices[0].message.content.strip()

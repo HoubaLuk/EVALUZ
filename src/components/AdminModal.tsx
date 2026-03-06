@@ -60,6 +60,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     const [vllmPresence, setVllmPresence] = useState(0.0);
     const [vllmFreq, setVllmFreq] = useState(0.0);
     const [vllmMaxTokens, setVllmMaxTokens] = useState(2048);
+    const [vllmContextWindow, setVllmContextWindow] = useState(8192);
     const [vllmEnableThinking, setVllmEnableThinking] = useState(true);
 
     // MLOps & RAG
@@ -143,6 +144,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     if (s.key === 'VLLM_PRESENCE_PENALTY') setVllmPresence(parseFloat(s.value));
                     if (s.key === 'VLLM_FREQUENCY_PENALTY') setVllmFreq(parseFloat(s.value));
                     if (s.key === 'VLLM_MAX_TOKENS') setVllmMaxTokens(parseInt(s.value, 10));
+                    if (s.key === 'LLM_CONTEXT_WINDOW') setVllmContextWindow(parseInt(s.value, 10));
 
                     // Multi-LLM Parsing
                     if (s.key === 'LLM_PLATFORM') setLlmPlatform(s.value);
@@ -361,7 +363,8 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                         { key: 'VLLM_TOP_P', value: vllmTopP.toString() },
                         { key: 'VLLM_PRESENCE_PENALTY', value: vllmPresence.toString() },
                         { key: 'VLLM_FREQUENCY_PENALTY', value: vllmFreq.toString() },
-                        { key: 'VLLM_MAX_TOKENS', value: vllmMaxTokens.toString() }
+                        { key: 'VLLM_MAX_TOKENS', value: vllmMaxTokens.toString() },
+                        { key: 'LLM_CONTEXT_WINDOW', value: vllmContextWindow.toString() }
                     ])
                 });
             } else if (adminTab === 'profile') {
@@ -993,43 +996,73 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                                 <p className="text-[10px] text-slate-400 mb-2 leading-tight">Hard stop stav pro generování. Qwen3.5 potřebuje 2048+.</p>
                                                 <input type="number" min="128" max="32768" value={vllmMaxTokens} onChange={e => setVllmMaxTokens(parseInt(e.target.value) || 2048)} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm outline-none shadow-sm" />
                                             </div>
-                                            <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700 flex flex-col justify-center">
-                                                <p className="text-xs text-slate-500 dark:text-slate-400 italic text-center">Teplotu (Kreativitu) modelu lze nastavit ručně pro každou jednotlivou fázi hodnocení v příslušných záložkách.</p>
+                                            <div className="bg-blue-50/30 dark:bg-blue-900/10 p-3 rounded-lg border border-blue-200/50 dark:border-blue-800/50">
+                                                <label className="block text-sm font-semibold text-blue-800 dark:text-blue-300 mb-1 flex items-center gap-1.5">
+                                                    Context Window
+                                                    {llmPlatform === 'ollama' && <span className="text-[8px] bg-green-500 text-white px-1 rounded-sm uppercase">Auto-Apply</span>}
+                                                </label>
+                                                <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-2 leading-tight">Velikost kontextu modelu. Pro ÚZ s 25+ kritérii doporučeno 16384+.</p>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="number"
+                                                        min="1024"
+                                                        max="128000"
+                                                        step="1024"
+                                                        value={vllmContextWindow}
+                                                        onChange={e => setVllmContextWindow(parseInt(e.target.value) || 8192)}
+                                                        className="flex-1 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-1.5 text-sm outline-none shadow-sm bg-white dark:bg-slate-900"
+                                                    />
+                                                </div>
                                             </div>
                                         </div>
 
-                                        <div className="space-y-4">
-                                            <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
-                                                <div className="pr-4 w-1/2">
-                                                    <label className="block text-sm font-semibold text-[#002855] mb-1">Top_P (Nucleus Sampling)</label>
-                                                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Vybírá nejlepší slova v percentilu. Snižuje šanci na utíkání od tématu. Doporučeno: 0.8 pro kratší odpovědi.</p>
-                                                </div>
-                                                <div className="flex items-center gap-3 w-1/2 justify-end">
-                                                    <input type="range" min="0" max="1" step="0.05" value={vllmTopP} onChange={(e) => setVllmTopP(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
-                                                    <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmTopP}</span>
-                                                </div>
+                                        {llmPlatform !== 'ollama' && (
+                                            <div className="mb-4 bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800/50 p-2.5 rounded-lg flex items-start gap-2.5">
+                                                <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                                                <p className="text-[10px] text-orange-800 dark:text-orange-300 leading-normal font-medium">
+                                                    U platformy <strong>{llmPlatform.toUpperCase()}</strong> musí být tato hodnota nastavena přímo v inferenčním serveru (v záložce Configuration/Settings u LM Studia). EVALUZ tuto hodnotu pro {llmPlatform.toUpperCase()} používá pouze jako limit pro přípravu promptu.
+                                                </p>
                                             </div>
+                                        )}
 
-                                            <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
-                                                <div className="pr-4 w-1/2">
-                                                    <label className="block text-sm font-semibold text-[#002855] mb-1">Presence Penalty</label>
-                                                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Zamezuje neúnavnému generování nových témat a redukuje "rozvláčnost". 0.0 je neutrální, 1.0 je vysoké rozšiřování.</p>
-                                                </div>
-                                                <div className="flex items-center gap-3 w-1/2 justify-end">
-                                                    <input type="range" min="-2.0" max="2.0" step="0.1" value={vllmPresence} onChange={(e) => setVllmPresence(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
-                                                    <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmPresence}</span>
-                                                </div>
+                                        <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 italic text-center leading-relaxed">
+                                                Teplotu (Kreativitu) modelu lze nastavit ručně pro každou jednotlivou fázi hodnocení v příslušných záložkách promptů.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
+                                            <div className="pr-4 w-1/2">
+                                                <label className="block text-sm font-semibold text-[#002855] mb-1">Top_P (Nucleus Sampling)</label>
+                                                <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Vybírá nejlepší slova v percentilu. Snižuje šanci na utíkání od tématu. Doporučeno: 0.8 pro kratší odpovědi.</p>
                                             </div>
+                                            <div className="flex items-center gap-3 w-1/2 justify-end">
+                                                <input type="range" min="0" max="1" step="0.05" value={vllmTopP} onChange={(e) => setVllmTopP(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
+                                                <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmTopP}</span>
+                                            </div>
+                                        </div>
 
-                                            <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
-                                                <div className="pr-4 w-1/2">
-                                                    <label className="block text-sm font-semibold text-[#002855] mb-1">Frequency Penalty</label>
-                                                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Penalizuje často se opakující slova. Pomáhá zamezit smyčkám při dlouhých výstupech (0.0 neutrální).</p>
-                                                </div>
-                                                <div className="flex items-center gap-3 w-1/2 justify-end">
-                                                    <input type="range" min="-2.0" max="2.0" step="0.1" value={vllmFreq} onChange={(e) => setVllmFreq(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
-                                                    <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmFreq}</span>
-                                                </div>
+                                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
+                                            <div className="pr-4 w-1/2">
+                                                <label className="block text-sm font-semibold text-[#002855] mb-1">Presence Penalty</label>
+                                                <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Zamezuje neúnavnému generování nových témat a redukuje "rozvláčnost". 0.0 je neutrální, 1.0 je vysoké rozšiřování.</p>
+                                            </div>
+                                            <div className="flex items-center gap-3 w-1/2 justify-end">
+                                                <input type="range" min="-2.0" max="2.0" step="0.1" value={vllmPresence} onChange={(e) => setVllmPresence(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
+                                                <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmPresence}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
+                                            <div className="pr-4 w-1/2">
+                                                <label className="block text-sm font-semibold text-[#002855] mb-1">Frequency Penalty</label>
+                                                <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Penalizuje často se opakující slova. Pomáhá zamezit smyčkám při dlouhých výstupech (0.0 neutrální).</p>
+                                            </div>
+                                            <div className="flex items-center gap-3 w-1/2 justify-end">
+                                                <input type="range" min="-2.0" max="2.0" step="0.1" value={vllmFreq} onChange={(e) => setVllmFreq(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
+                                                <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmFreq}</span>
                                             </div>
                                         </div>
                                     </div>
