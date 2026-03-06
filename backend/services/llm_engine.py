@@ -37,6 +37,16 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     thinking_value = (db_phase_thinking.value if db_phase_thinking and db_phase_thinking.value else "") or (db_global_thinking.value if db_global_thinking and db_global_thinking.value else "true")
     enable_thinking = (thinking_value.lower() == 'true')
     
+    db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
+    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
+    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
+    db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
+    
+    platform = db_platform.value if db_platform and db_platform.value else "vllm"
+    top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
+    presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
+    frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
+    
     if not api_url or not model_name:
         raise ValueError("LLM konfigurace (URL nebo Model) chybí v databázi. Nastavte je v Administraci.")
 
@@ -95,22 +105,30 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     # print(f"{prefix}FINAL PROMPT TO LLM:\n{user_prompt}\n<<< END OF PROMPT")
 
     try:
-        # Voláme model. Nastavujeme temperature=0.1 pro maximální stabilitu hlavy modelu (chceme fakta, ne kreativitu).
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=[
+        kwargs = {
+            "model": model_name,
+            "messages": [
                 {"role": "system", "content": strict_system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.1, # Low temperature for analytical consistency
-            max_tokens=16384,
+            "temperature": 0.1, # Low temperature for analytical consistency
+            "top_p": top_p,
+            "presence_penalty": presence_penalty,
+            "frequency_penalty": frequency_penalty,
+            "max_tokens": 16384,
             # Pokud model podporuje JSON mode, aktivujeme ho.
-            response_format={"type": "json_object"},
-            extra_body={
+            "response_format": {"type": "json_object"}
+        }
+
+        # vLLM specifické parametry pro uvažování posíláme jen tam, kde víme, že to API nezahodí s chybou
+        if platform == "vllm":
+            kwargs["extra_body"] = {
                 "enable_thinking": enable_thinking,
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
-        )
+            
+        # Voláme model.
+        response = await client.chat.completions.create(**kwargs)
         
         # 3. PARSOVÁNÍ VÝSLEDKU: AI modely občas píší víc, než chceme. Tady odpověď čistíme.
         msg_content = response.choices[0].message.content or ""
@@ -164,6 +182,16 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
     thinking_value = (db_extraction_thinking.value if db_extraction_thinking and db_extraction_thinking.value else "") or (db_global_thinking.value if db_global_thinking and db_global_thinking.value else "false")
     enable_thinking = (thinking_value.lower() == 'true')
     
+    db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
+    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
+    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
+    db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
+    
+    platform = db_platform.value if db_platform and db_platform.value else "vllm"
+    top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
+    presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
+    frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
+    
     if not api_url or not model_name:
         return {}
 
@@ -204,19 +232,26 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
     """
     
     try:
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=[
+        kwargs = {
+            "model": model_name,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.0,
-            max_tokens=1000, # Increased margin for reasoning models even if thinking is off
-            extra_body={
+            "temperature": 0.0,
+            "top_p": top_p,
+            "presence_penalty": presence_penalty,
+            "frequency_penalty": frequency_penalty,
+            "max_tokens": 1000 # Increased margin for reasoning models even if thinking is off
+        }
+        
+        if platform == "vllm":
+            kwargs["extra_body"] = {
                 "enable_thinking": enable_thinking,
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
-        )
+
+        response = await client.chat.completions.create(**kwargs)
         
         msg_content = response.choices[0].message.content
         if not msg_content:
@@ -248,7 +283,7 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
     """
     db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
     db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
-    db_platform = db.query(AppSettings).filter(AppSettings.key == "VLLM_PLATFORM").first()
+    db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
     db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
     db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
     db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
@@ -312,16 +347,23 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
         formatted_messages.append({"role": msg.get("role"), "content": msg.get("content")})
 
     try:
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=formatted_messages,
-            temperature=temperature,
-            max_tokens=16384,
-            extra_body={
+        kwargs = {
+            "model": model_name,
+            "messages": formatted_messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "presence_penalty": presence_penalty,
+            "frequency_penalty": frequency_penalty,
+            "max_tokens": max_tokens
+        }
+        
+        if platform == "vllm":
+            kwargs["extra_body"] = {
                 "enable_thinking": enable_thinking,
                 "chat_template_kwargs": {"enable_thinking": enable_thinking}
             }
-        )
+
+        response = await client.chat.completions.create(**kwargs)
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Error in chat_completion with vLLM at {api_url}: {e}")

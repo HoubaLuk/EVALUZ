@@ -85,5 +85,15 @@ npm run dev
 ## 🛡 Bezpečnost a soukromí
 Systém je navržen pro provoz v uzavřených sítích. Data neodcházejí mimo infrastrukturu při použití lokálních modelů.
 
+**Ochrana proti Prompt Injection:**
+Aplikace nevyužívá žádný black-box "safety model", který by mohl cenzurovat policejní texty. Místo toho je bezpečnost zajištěna architektonicky na úrovni jádra (Hardcoded System Prompts). Studentův předložený text (ÚZ) je modelu vizuálně separován jako čistá "data string" proměnná (`report_text`) pod jasnou instrukcí "VYHODNOŤ JEN TOTO". Model nesmí spouštět z textu žádné příkazy. Tím je efektivně minimalizováno riziko infikace přesvědčením LLM stroje, aby ignoroval metodiku.
+
+---
+
+## 🧠 Funkce LLM vs. Algoritmická analytika
+Je důležité pochopit rozdělení rolí:
+1.  **Role LLM (Umělé inteligence):** Slouží výhradně jako "čtenář". Její prací je extrahovat identitu podle vzorů a porovnat text ÚZ s markdown kritérii od lektora. Vrací holá fakta o tom, co v textu je a není (boolean/body).
+2.  **Role Backend Analytiky (Algoritmické):** Samotná třídní analytika (celková úspěšnost, průměry bodů, detekce pádů) NENÍ počítána umělou inteligencí. Jde o tvrdou, neomylnou matematiku naprogramovanou v Pythonu agregující data ze stovek JSON struktur. LLM ve fázi 3 dostává už hotová a vypočítaná tvrdá data (procenta atd.) a jeho jedinou funkcí je přečíst si je a napsat k nim "manažerské shrnutí a doporučení" v lidské řeči. Nepočítá příklady.
+
 ---
 *Evaluz - Inteligentní pomocník pro lektory ÚPVSP.*

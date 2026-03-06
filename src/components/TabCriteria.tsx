@@ -263,31 +263,31 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
     return (
         <div className="h-full flex gap-6 max-w-7xl mx-auto overflow-hidden">
             {/* Left Column: Socratic AI Chat */}
-            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden max-w-[50%]">
-                <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+            <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden max-w-[50%]">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <Wand2 className="w-5 h-5 text-[#002855]" />
                         <h3 className="font-semibold text-[#002855]">AI Asistent</h3>
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 dark:bg-slate-800/50/50">
                     {messages.map((msg, index) => (
                         <div key={index} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === 'user' ? 'bg-slate-200' : 'bg-[#002855]'
                                 }`}>
-                                {msg.role === 'user' ? <User className="w-4 h-4 text-slate-600" /> : <Wand2 className="w-4 h-4 text-[#D4AF37]" />}
+                                {msg.role === 'user' ? <User className="w-4 h-4 text-slate-600 dark:text-slate-300" /> : <Wand2 className="w-4 h-4 text-[#D4AF37]" />}
                             </div>
                             <div className={`rounded-2xl p-3 text-sm shadow-sm whitespace-pre-wrap max-w-[85%] flex flex-col gap-2 ${msg.role === 'user'
                                 ? 'bg-[#002855] text-white rounded-tr-none'
-                                : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
+                                : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-tl-none'
                                 }`}>
                                 <div>{msg.content}</div>
                                 {msg.uploadedText && (
                                     <button
                                         onClick={() => handleProcessUploadedText(msg.uploadedText!)}
                                         disabled={isChatLoading}
-                                        className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[#002855] bg-slate-100 hover:bg-slate-200 py-1.5 px-3 rounded-md transition-colors w-fit border border-slate-200 disabled:opacity-50"
+                                        className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[#002855] bg-slate-100 hover:bg-slate-200 py-1.5 px-3 rounded-md transition-colors w-fit border border-slate-200 dark:border-slate-700 disabled:opacity-50"
                                     >
                                         <Wand2 className="w-3 h-3" />
                                         Chci tento text dodatečně nechat zpracovat AI asistentem
@@ -302,7 +302,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                             <div className="w-8 h-8 rounded-full bg-[#002855] flex items-center justify-center flex-shrink-0">
                                 <Wand2 className="w-4 h-4 text-[#D4AF37]" />
                             </div>
-                            <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-none p-4 text-sm text-slate-700 shadow-sm flex items-center gap-1.5">
+                            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl rounded-tl-none p-4 text-sm text-slate-700 dark:text-slate-300 shadow-sm flex items-center gap-1.5">
                                 <div className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
                                 <div className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
                                 <div className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
@@ -312,7 +312,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                     <div ref={chatEndRef} />
                 </div>
 
-                <div className="p-4 border-t border-slate-100 bg-white">
+                <div className="p-4 border-t border-slate-100 bg-white dark:bg-slate-800">
                     <div className="relative flex items-center gap-2">
                         <input
                             type="file"
@@ -324,7 +324,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isChatLoading || isUploading || !scenarioId}
-                            className="p-3 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50 border border-transparent shadow-sm"
+                            className="p-3 text-slate-500 dark:text-slate-400 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50 border border-transparent shadow-sm"
                             title="Nahrát metodiku (.docx, .rtf, .pdf)"
                         >
                             <Paperclip className="w-5 h-5" />
@@ -336,7 +336,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                             onChange={(e) => setInputValue(e.target.value)}
                             onKeyDown={handleKeyDown}
                             disabled={isChatLoading || isUploading || !scenarioId}
-                            className="flex-1 border border-slate-300 rounded-lg pl-4 pr-12 py-3 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none disabled:bg-slate-50 disabled:text-slate-500"
+                            className="flex-1 border border-slate-300 dark:border-slate-600 rounded-lg pl-4 pr-12 py-3 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none disabled:bg-slate-50 dark:bg-slate-800/50 disabled:text-slate-500 dark:text-slate-400"
                         />
                         <button
                             onClick={handleSendMessage}
@@ -358,15 +358,15 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                     <Shield className="w-5 h-5 text-[#D4AF37]" />
                 </div>
 
-                <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 relative overflow-hidden flex flex-col">
-                    <div className="bg-slate-50 p-2 text-xs text-slate-500 border-b border-slate-200 font-medium">
+                <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 relative overflow-hidden flex flex-col">
+                    <div className="bg-slate-50 dark:bg-slate-800/50 p-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 font-medium">
                         Zde můžete manuálně upravit vygenerovaná kritéria. Změny se trvale uloží.
                     </div>
                     <textarea
                         value={criteriaMarkdown}
                         onChange={(e) => setCriteriaMarkdown(e.target.value)}
                         disabled={!scenarioId || isFetchingCriteria}
-                        className={`flex-1 w-full p-4 resize-none outline-none font-sans text-sm text-slate-700 leading-relaxed overflow-y-auto ${(!scenarioId || isFetchingCriteria) ? 'bg-slate-50 opacity-70 cursor-not-allowed' : ''}`}
+                        className={`flex-1 w-full p-4 resize-none outline-none font-sans text-sm text-slate-700 dark:text-slate-300 leading-relaxed overflow-y-auto ${(!scenarioId || isFetchingCriteria) ? 'bg-slate-50 dark:bg-slate-800/50 opacity-70 cursor-not-allowed' : ''}`}
                         placeholder={isFetchingCriteria ? "Načítám kritéria..." : "Zde pište svá kritéria..."}
                     />
                 </div>
