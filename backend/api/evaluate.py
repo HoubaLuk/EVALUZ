@@ -131,7 +131,7 @@ async def fast_scan_batch(
             # Ochrana proti selhání Foreign Key (class_id=1 nemusí být na prázdné nebo nové DB založena).
             default_class = db.query(ClassRoom).filter(ClassRoom.id == 1).first()
             if not default_class:
-                db.add(ClassRoom(id=1, name="Základní kurz", created_by_id=current_user.id))
+                db.add(ClassRoom(id=1, name="Základní kurz", lecturer_id=current_user.id))
                 try:
                     db.commit()
                 except Exception:
@@ -347,7 +347,7 @@ async def evaluate_batch(
                 if not existing_eval:
                     # Pojistka pro asynchronní worker - třída ID 1 MUSÍ existovat.
                     if not db_bg.query(ClassRoom).filter(ClassRoom.id == 1).first():
-                        db_bg.add(ClassRoom(id=1, name="Základní kurz", created_by_id=current_user_id))
+                        db_bg.add(ClassRoom(id=1, name="Základní kurz", lecturer_id=current_user_id))
                         try:
                             db_bg.commit()
                         except Exception:
