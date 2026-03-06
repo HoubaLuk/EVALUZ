@@ -206,7 +206,7 @@ export default function EvaluzDashboard() {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center">
         <Loader2 className="w-8 h-8 text-[#002855] animate-spin mb-4" />
-        <p className="text-slate-500 font-medium">Ověřování přístupu...</p>
+        <p className="text-slate-500 dark:text-slate-400 font-medium">Ověřování přístupu...</p>
       </div>
     );
   }
@@ -232,7 +232,7 @@ export default function EvaluzDashboard() {
   if (authState === 'LOGIN_REQUIRED') {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white rounded-xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden">
+        <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden">
           <div className="bg-[#002855] px-6 py-6 text-center">
             <Lock className="w-12 h-12 text-white/90 mx-auto mb-3" />
             <h2 className="text-2xl font-bold text-white">Přihlášení do systému</h2>
@@ -243,24 +243,24 @@ export default function EvaluzDashboard() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">E-mail lektora</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">E-mail lektora</label>
                 <input type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent" />
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Heslo</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Heslo</label>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={authPassword}
                     onChange={e => setAuthPassword(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent"
+                    className="w-full px-3 py-2 pr-10 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:text-slate-300"
                     tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -312,7 +312,7 @@ export default function EvaluzDashboard() {
 
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white rounded-xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden">
+        <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden">
           <div className="bg-[#D4AF37] px-6 py-6 text-center">
             <Lock className="w-12 h-12 text-white/90 mx-auto mb-3" />
             <h2 className="text-2xl font-bold text-white">Vynucená změna hesla</h2>
@@ -321,21 +321,21 @@ export default function EvaluzDashboard() {
           <form onSubmit={handleChangePassword} className="p-6">
             {authError && <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">{authError}</div>}
 
-            <p className="text-sm text-slate-600 mb-6">
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">
               Administrátor resetoval Vaše heslo, případně Vaše heslo expirovalo.
               Prosím zadejte nové bezpečné heslo (min. 12 znaků, kombinace malých, velkých písmen a číslic).
             </p>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nové heslo</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nové heslo</label>
                 <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Potvrzení nového hesla</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Potvrzení nového hesla</label>
                 <input type="password" required value={newPasswordConfirm} onChange={e => setNewPasswordConfirm(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
               </div>
             </div>
 
@@ -376,7 +376,7 @@ export default function EvaluzDashboard() {
           </div>
 
           {/* Workflow Stepper */}
-          <div className="px-8 py-6 bg-slate-50 border-b border-slate-200">
+          <div className="px-8 py-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
             <div className="flex items-center justify-between max-w-4xl mx-auto relative">
               {/* Connecting Line */}
               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0"></div>
@@ -407,7 +407,7 @@ export default function EvaluzDashboard() {
                   ? `bg-[#D4AF37] text-white overflow-hidden transition-all duration-300 ${isActive ? 'ring-4 ring-[#D4AF37]/20 shadow-md' : ''}`
                   : isActive
                     ? 'bg-[#002855] text-white ring-4 ring-[#002855]/20 shadow-md transition-all duration-300'
-                    : 'bg-white text-slate-400 border-2 border-slate-200 hover:border-slate-300 transition-all duration-300';
+                    : 'bg-white dark:bg-slate-800 text-slate-400 border-2 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:border-slate-600 transition-all duration-300';
 
                 return (
                   <button
@@ -418,7 +418,7 @@ export default function EvaluzDashboard() {
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${circleColorClass}`}>
                       {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.num}
                     </div>
-                    <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855]' : isCompleted ? 'text-slate-700' : 'text-slate-400'
+                    <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855]' : isCompleted ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400'
                       }`}>
                       {step.label}
                     </span>

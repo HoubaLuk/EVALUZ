@@ -30,14 +30,14 @@ class Lecturer(Base):
 class EvaluationCriteria(Base):
     __tablename__ = "evaluation_criteria"
     id = Column(Integer, primary_key=True, index=True)
-    lecturer_id = Column(Integer, ForeignKey("lecturers.id"))
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"))
     scenario_name = Column(String, index=True) # e.g., 'MS2'
     markdown_content = Column(Text)
 
 class Criterion(Base):
     __tablename__ = "criteria"
     id = Column(Integer, primary_key=True, index=True)
-    evaluation_criteria_id = Column(Integer, ForeignKey("evaluation_criteria.id"))
+    evaluation_criteria_id = Column(Integer, ForeignKey("evaluation_criteria.id", ondelete="CASCADE"))
     nazev = Column(String)
     popis = Column(Text)
     body = Column(Integer)
@@ -45,15 +45,15 @@ class Criterion(Base):
 class ClassRoom(Base):
     __tablename__ = "classes"
     id = Column(Integer, primary_key=True, index=True)
-    lecturer_id = Column(Integer, ForeignKey("lecturers.id"))
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"))
     name = Column(String, index=True)
 
 class StudentEvaluation(Base):
     __tablename__ = "student_evaluations"
     id = Column(Integer, primary_key=True, index=True)
-    lecturer_id = Column(Integer, ForeignKey("lecturers.id"))
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"))
     student_name = Column(String, index=True)
-    class_id = Column(Integer, ForeignKey("classes.id"))
+    class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"))
     scenario_name = Column(String, index=True, default="scen-1")
     json_result = Column(Text) # Store output as JSON string
     cleaned_name = Column(String, index=True) # "Příjmení Jméno, hodnost"
@@ -77,7 +77,7 @@ class ClassAnalysis(Base):
 class ExportHistory(Base):
     __tablename__ = "export_history"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("lecturers.id"), index=True)
+    user_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
     scenario_name = Column(String)
     type = Column(String)
     download_url = Column(String)

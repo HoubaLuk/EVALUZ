@@ -71,13 +71,13 @@ function DialogModal({ dialog, onClose }: { dialog: DialogOptions; onClose: (val
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
                 <div className="bg-[#002855] px-6 py-4 flex items-center justify-between">
                     <h3 className="text-white font-semibold text-lg">{dialog.title}</h3>
                 </div>
 
                 <div className="p-6">
-                    <p className="text-slate-700 whitespace-pre-wrap">{dialog.message}</p>
+                    <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{dialog.message}</p>
 
                     {dialog.type === 'prompt' && (
                         <input
@@ -85,7 +85,7 @@ function DialogModal({ dialog, onClose }: { dialog: DialogOptions; onClose: (val
                             type="text"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
-                            className="mt-4 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent"
+                            className="mt-4 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') onClose(inputValue);
                                 if (e.key === 'Escape') onClose(null);
@@ -94,11 +94,11 @@ function DialogModal({ dialog, onClose }: { dialog: DialogOptions; onClose: (val
                     )}
                 </div>
 
-                <div className="bg-slate-50 px-6 py-4 flex justify-end gap-3 border-t border-slate-100">
+                <div className="bg-slate-50 dark:bg-slate-800/50 px-6 py-4 flex justify-end gap-3 border-t border-slate-100">
                     {(dialog.type === 'confirm' || dialog.type === 'prompt') && (
                         <button
                             onClick={() => onClose(dialog.type === 'prompt' ? null : false)}
-                            className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+                            className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:bg-slate-800/50 transition-colors"
                         >
                             Zrušit
                         </button>

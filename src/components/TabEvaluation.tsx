@@ -697,7 +697,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         >
             {isDragging && (
                 <div className="absolute inset-0 bg-blue-500/10 backdrop-blur-sm z-40 rounded-2xl flex flex-col items-center justify-center border-4 border-dashed border-blue-500 pointer-events-none">
-                    <div className="bg-white p-6 rounded-full shadow-2xl mb-4">
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-full shadow-2xl mb-4">
                         <Upload className="w-16 h-16 text-blue-600 animate-bounce" />
                     </div>
                     <h2 className="text-3xl font-bold text-blue-800 drop-shadow-sm">Pusťte soubory zde</h2>
@@ -738,14 +738,14 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     <button
                         onClick={handleSelectAll}
                         disabled={students.length === 0}
-                        className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors text-sm font-medium disabled:opacity-50"
+                        className="flex items-center gap-2 px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 rounded-lg transition-colors text-sm font-medium disabled:opacity-50"
                     >
                         <input
                             type="checkbox"
                             checked={selectAll && students.length > 0}
                             onChange={handleSelectAll}
                             disabled={students.length === 0}
-                            className="w-4 h-4 rounded border-slate-300 text-[#002855] focus:ring-[#002855] disabled:opacity-50"
+                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#002855] focus:ring-[#002855] disabled:opacity-50"
                         />
                         Vybrat všechny
                     </button>
@@ -776,7 +776,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             </span>
                         </div>
                         {isEvaluating && (
-                            <div className="absolute bottom-0 left-0 h-1 bg-white/30 transition-all duration-300" style={{ width: `${evaluationProgress}%` }}></div>
+                            <div className="absolute bottom-0 left-0 h-1 bg-white dark:bg-slate-800/30 transition-all duration-300" style={{ width: `${evaluationProgress}%` }}></div>
                         )}
                     </button>
                     {isEvaluating && (
@@ -798,8 +798,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             {/* Two-Column Layout */}
             <div className="flex-1 flex gap-6 min-h-[500px]">
                 {/* Left Column: Student Roster (35%) */}
-                <div className="w-[35%] bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                <div className="w-[35%] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
                         <h3 className="font-semibold text-[#002855]">Seznam studentů</h3>
                         <span className="text-xs font-medium text-slate-400">{selectedIds.length}/{students.length}</span>
                     </div>
@@ -813,7 +813,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                 key={student.id}
                                 className={`w-full text-left px-3 py-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer group ${selectedStudent === student.id
                                     ? 'bg-[#002855]/10 border border-[#002855]/20'
-                                    : 'hover:bg-slate-50 border border-transparent'
+                                    : 'hover:bg-slate-50 dark:bg-slate-800/50 border border-transparent'
                                     }`}
                                 onClick={() => setSelectedStudent(student.id)}
                             >
@@ -822,11 +822,11 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     checked={selectedIds.includes(student.id)}
                                     onChange={() => toggleStudent(student.id)}
                                     onClick={(e) => e.stopPropagation()}
-                                    className="w-4 h-4 rounded border-slate-300 text-[#002855] focus:ring-[#002855]"
+                                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#002855] focus:ring-[#002855]"
                                 />
                                 <div className="flex-1 min-w-0 flex items-center justify-between group-inner">
                                     <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
-                                        <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855]' : 'text-slate-700'}`}>
+                                        <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855]' : 'text-slate-700 dark:text-slate-300'}`}>
                                             {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim()}
                                         </p>
                                         {!student.identita && student.status === 'evaluated' && (
@@ -861,13 +861,13 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             </DropdownMenu.Trigger>
                                             <DropdownMenu.Portal>
                                                 <DropdownMenu.Content
-                                                    className="w-44 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-[100] animate-in fade-in-80 zoom-in-95"
+                                                    className="w-44 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-100 py-1.5 z-[100] animate-in fade-in-80 zoom-in-95"
                                                     sideOffset={5}
                                                     align="end"
                                                 >
                                                     <DropdownMenu.Item
                                                         onSelect={() => handleRenameClick(student)}
-                                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-slate-50 border-b border-slate-50"
+                                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-slate-50 dark:bg-slate-800/50 border-b border-slate-50"
                                                     >
                                                         <Pencil className="w-3.5 h-3.5" /> Upravit jméno
                                                     </DropdownMenu.Item>
@@ -892,10 +892,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     {activeStudentData && activeStudentData.status === 'evaluated' ? (
                         <>
                             {/* Header */}
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
+                            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
-                                        <User className="w-5 h-5 text-slate-500" />
+                                        <User className="w-5 h-5 text-slate-500 dark:text-slate-400" />
                                     </div>
                                     <div>
                                         <h2 className="text-xl font-bold text-[#002855] flex items-center gap-2">
@@ -906,7 +906,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                 </Tooltip>
                                             )}
                                         </h2>
-                                        <p className="text-sm text-slate-500">{scenarioName || 'Evaluováno dynamicky'}</p>
+                                        <p className="text-sm text-slate-500 dark:text-slate-400">{scenarioName || 'Evaluováno dynamicky'}</p>
                                     </div>
 
                                 </div>
@@ -919,7 +919,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             </div>
 
                             {/* AI Evaluation Table */}
-                            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                            <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
                                 <div className="p-4 border-b border-slate-100 bg-[#002855] text-white flex items-center gap-2">
                                     <Wand2 className="w-5 h-5 text-[#D4AF37]" />
                                     <h3 className="font-semibold text-base tracking-wide">Výsledky AI Evaluace Serveru</h3>
@@ -927,7 +927,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                 <div className="flex-1 overflow-y-auto">
                                     <table className="w-full text-left border-collapse">
                                         <thead>
-                                            <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
+                                            <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                                 <th className="px-6 py-4 font-medium w-1/4">Kritérium</th>
                                                 <th className="px-6 py-4 font-medium text-center w-24">Splněno</th>
                                                 <th className="px-6 py-4 font-medium">Zdůvodnění</th>
@@ -936,7 +936,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {activeStudentData.evaluationDetails?.map((detail, idx) => (
-                                                <tr key={idx} className={`hover:bg-slate-50/50 transition-colors ${detail.upraveno_lektorem ? 'bg-blue-50/30' : ''}`}>
+                                                <tr key={idx} className={`hover:bg-slate-50 dark:bg-slate-800/50/50 transition-colors ${detail.upraveno_lektorem ? 'bg-blue-50/30' : ''}`}>
                                                     <td className="px-6 py-5 text-sm font-medium text-[#002855] align-top">
                                                         <div className="flex items-center gap-2">
                                                             {detail.nazev}
@@ -961,13 +961,13 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                             )}
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-5 text-sm text-slate-600 align-top">
+                                                    <td className="px-6 py-5 text-sm text-slate-600 dark:text-slate-300 align-top">
                                                         <div className="flex items-start gap-3">
                                                             <p className="leading-relaxed flex-1">{detail.oduvodneni}</p>
                                                             <Tooltip content="Zobrazit zdroj v textu studenta (AI Act Compliance)">
                                                                 <button
                                                                     onClick={() => openSourceModal(detail.citace)}
-                                                                    className="p-2 text-[#D4AF37] hover:bg-[#D4AF37]/10 rounded-lg transition-colors flex-shrink-0 mt-0.5 border border-[#D4AF37]/30 shadow-sm bg-white"
+                                                                    className="p-2 text-[#D4AF37] hover:bg-[#D4AF37]/10 rounded-lg transition-colors flex-shrink-0 mt-0.5 border border-[#D4AF37]/30 shadow-sm bg-white dark:bg-slate-800"
                                                                     aria-label="Zobrazit zdroj v textu studenta"
                                                                 >
                                                                     <MessageSquareQuote className="w-4 h-4" />
@@ -981,7 +981,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                                 type="number"
                                                                 value={detail.body}
                                                                 onChange={(e) => handleScoreChange(idx, parseInt(e.target.value, 10) || 0)}
-                                                                className={`w-14 text-center border rounded-md py-1 text-sm font-medium focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37] outline-none ${detail.upraveno_lektorem ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-300'}`}
+                                                                className={`w-14 text-center border rounded-md py-1 text-sm font-medium focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37] outline-none ${detail.upraveno_lektorem ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-300 dark:border-slate-600'}`}
                                                             />
                                                         </div>
                                                     </td>
@@ -993,13 +993,13 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             </div>
 
                             {/* Bottom Action Bar */}
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-4">
                                 <div>
                                     <label className="block text-xs font-bold text-[#002855] uppercase tracking-wider mb-2">
                                         Závěrečná pedagogická zpětná vazba (Editovatelné)
                                     </label>
                                     <textarea
-                                        className="w-full border border-slate-300 rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-24 bg-slate-50 leading-relaxed"
+                                        className="w-full border border-slate-300 dark:border-slate-600 rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-24 bg-slate-50 dark:bg-slate-800/50 leading-relaxed"
                                         value={activeStudentData.zpetna_vazba || ""}
                                         onChange={(e) => handleFeedbackChange(e.target.value)}
                                     />
@@ -1009,7 +1009,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         <button
                                             onClick={handleSaveChanges}
                                             disabled={isSaving}
-                                            className="flex items-center gap-2 px-6 py-3 bg-white border border-[#D4AF37] text-[#D4AF37] rounded-xl hover:bg-[#D4AF37]/5 transition-colors text-sm font-bold shadow-sm"
+                                            className="flex items-center gap-2 px-6 py-3 bg-white dark:bg-slate-800 border border-[#D4AF37] text-[#D4AF37] rounded-xl hover:bg-[#D4AF37]/5 transition-colors text-sm font-bold shadow-sm"
                                         >
                                             {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
                                             Uložit úpravy {activeStudentData.score} / {activeStudentData.maxScore} b.
@@ -1073,17 +1073,17 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             </div>
                         </>
                     ) : (
-                        <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-slate-400">
+                        <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center text-slate-400">
                             {activeStudentData && activeStudentData.status === 'pending' ? (
                                 <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
                                     <Hourglass className="w-16 h-16 text-slate-200" />
-                                    <h3 className="text-xl font-medium text-slate-600">Čeká se na zahájení evaluace...</h3>
+                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Čeká se na zahájení evaluace...</h3>
                                     <p className="text-sm">Vyberte studenty a klikněte na "Hromadně vyhodnotit (AI)".</p>
                                 </div>
                             ) : (
                                 <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
                                     <FileText className="w-16 h-16 text-slate-200" />
-                                    <h3 className="text-xl font-medium text-slate-600">Nahrajte úřední záznamy a vyberte ty, které chcete vyhodnotit</h3>
+                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Nahrajte úřední záznamy a vyberte ty, které chcete vyhodnotit</h3>
                                     <p className="text-sm max-w-md">Klikněte na tlačítko &quot;Nahrát ÚZ&quot;, nebo soubory prostě na tlačítko přetáhněte (drag &amp; drop). Pokud chcete, můžete využít synchronizaci celého lokálního adresáře — pozor na adresářovou strukturu, viz nápověda ❓ v postranním panelu.</p>
                                 </div>
                             )}
@@ -1095,7 +1095,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             {/* AI Act Source Modal */}
             {isSourceModalOpen && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                         <div className="px-6 py-4 bg-[#002855] text-white flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <Shield className="w-5 h-5 text-[#D4AF37]" />
@@ -1103,23 +1103,23 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             </div>
                             <button
                                 onClick={() => setIsSourceModalOpen(false)}
-                                className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+                                className="p-1.5 hover:bg-white dark:bg-slate-800/20 rounded-lg transition-colors"
                             >
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
                         <div className="p-6 bg-[#fdfdfc]">
-                            <p className="text-sm text-slate-500 mb-4">
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
                                 Níže je zobrazen text studenta. Zvýrazněná pasáž posloužila AI k rozhodnutí.
                             </p>
-                            <div className="font-serif text-sm leading-relaxed text-slate-800 whitespace-pre-wrap max-w-prose mx-auto bg-white border border-slate-200 p-6 rounded-xl shadow-sm">
+                            <div className="font-serif text-sm leading-relaxed text-slate-800 dark:text-slate-100 whitespace-pre-wrap max-w-prose mx-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-6 rounded-xl shadow-sm">
                                 <mark className="bg-yellow-200 px-1 rounded text-slate-900 font-medium">{activeSourceQuote}</mark>
                             </div>
                         </div>
-                        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+                        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700 flex justify-end">
                             <button
                                 onClick={() => setIsSourceModalOpen(false)}
-                                className="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors text-sm font-medium shadow-sm"
+                                className="px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-100 transition-colors text-sm font-medium shadow-sm"
                             >
                                 Zavřít
                             </button>
