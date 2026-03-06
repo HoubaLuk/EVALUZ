@@ -12,3 +12,8 @@ upvsp_evaluator.db
 backend/__pycache__/
 frontend/node_modules/
 backend/static/pdfs/*
+.agent/
+.gemini/
+.agents/
+_agent/
+_agents/
