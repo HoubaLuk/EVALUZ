@@ -1,6 +1,6 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.0.0 (Humanized Codebase)
-**Poslední aktualizace:** 5. března 2026
+**Verze:** 3.1.1 (Air-Gap Robust)
+**Poslední aktualizace:** 6. března 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -8,7 +8,8 @@
 3. [Architektura a datový tok](#architektura-a-datový-tok)
 4. [AI Strategie (Fáze 1-3)](#ai-strategie-fáze-1-3)
 5. [Databázové schéma](#databázové-schéma)
-6. [Changelog](#changelog)
+6. [Air-Gap & Intranet Readiness](#air-gap--intranet-readiness)
+7. [Changelog](#changelog)
 
 ---
 
@@ -69,7 +70,27 @@ V milníku 2.0.0 proběhl přechod ze SQLite na PostgreSQL. Klíčové body:
 
 ---
 
-## 🕒 4. Historie vývoje (Changelog)
+## 🏗 6. Air-Gap & Intranet Readiness
+
+Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k internetu a HTTPS, dodržuje EVALUZ tyto principy:
+
+### 6.1 Databázová autonomie
+- **Assertive Initialization:** Backend nečeká na externí migrační skripty pro základní data. Při každém zápisu (Fast-Scan, Evaluation) aktivně kontroluje existenci výchozí třídy (`id=1`) a v případě potřeby ji založí "za běhu".
+- **Cascading Integrity:** Všechny cizí klíče používají `ondelete="CASCADE"`, což zjednodušuje správu dat při promazávání testovacích běhů v produkci.
+
+### 6.2 Unicode & Cross-Platform kompatibilita
+- **NFC Normalizace:** Všechny názvy souborů a textové vstupy jsou na backendu i frontendovém WebSocketu normalizovány na **NFC**. Toto řeší konflikty mezi macOS (NFD) a Linux/Windows (NFC) servery, které dříve způsobovaly "zamrzání" indikátorů průběhu.
+
+### 6.3 Environment-Aware UI
+- **Secure Context Fallback:** Funkce vyžadující HTTPS (např. synchronizace s HDD přes `showDirectoryPicker`) jsou v nezabezpečeném prostředí detekovány a nepoužitelnost je uživateli srozumitelně vysvětlena varovným textem.
+- **Tab Persistence:** UI využívá `display: hidden` místo odpojování komponent (unmount), čímž chrání rozpracovaná data (např. nahrané ÚZ) při navigaci mezi kartami v prohlížeči.
+
+### 6.4 LLM Compatibility
+- **Flexible JSON Format:** Pro lokální providery (LM Studio, Ollama) je parametr `response_format: json_object` nastaven jako volitelný. Aplikace spoléhá na vylepšené regex čištění odpovědí, které odstraňuje "thought" bloky modelů před samotným parsováním JSON.
+
+---
+
+## 🕒 7. Historie vývoje (Changelog)
 
 ### v3.0.0 (Aktuální) - Humanizace codebase
 - **Cíl:** Maximální srozumitelnost kódu pro člověka.

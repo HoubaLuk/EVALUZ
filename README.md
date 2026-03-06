@@ -1,4 +1,4 @@
-# EVALUZ (v3.1.1)
+# EVALUZ (v3.1.1 - Air-Gap Robust)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
@@ -24,7 +24,13 @@ Pro detailní pochopení systému, jeho architektury a historie vývoje navštiv
 
 ## ❄️ Air-Gapped Instalace (Bez přístupu k internetu)
 
-Tato verze je optimalizována pro nasazení v uzavřených sítích. Technikovi stačí připravit instalační balíček:
+Tato verze je speciálně optimalizována pro nasazení v uzavřených sítích policejních intranetů. Obsahuje kritické opravy pro:
+- **Zero-Config DB:** Automatické zakládání výchozích tříd (řeší chybu `ForeignKeyViolation`).
+- **LM Studio Compatibility:** Opravena chyba 400 při vynucování JSON formátu u lokálních LLM.
+- **HTTP/SSL Support:** Inteligentní detekce nezabezpečeného připojení (HTTP) s varováním pro HDD Sync.
+- **Unicode Normalization:** Robustní párování jmen souborů (Mac NFD vs Linux NFC).
+
+Technikovi stačí připravit instalační balíček:
 
 ### 1. Metoda: Docker (Doporučeno pro Air-Gapped)
 Tato metoda je nejrobustnější, protože přenášíte celé "kontejnery" se všemi závislostmi.
