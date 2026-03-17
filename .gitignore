@@ -9,7 +9,7 @@ coverage/
 *.db
 upvsp_evaluator.db
 .venv/
-backend/__pycache__/
+**/__pycache__/
 frontend/node_modules/
 backend/static/pdfs/*
 .agent/

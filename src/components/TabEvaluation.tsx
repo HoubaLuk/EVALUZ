@@ -58,6 +58,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const [evaluationProgress, setEvaluationProgress] = useState(0);
     const [totalToEvaluate, setTotalToEvaluate] = useState(0);
     const [evaluatedCount, setEvaluatedCount] = useState(0);
+    const [errorCount, setErrorCount] = useState(0);
     const [files, setFiles] = useState<File[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
@@ -106,6 +107,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     await fetchEvaluations();
                 } else if (data.type === 'EVAL_ERROR') {
                     setEvaluatedCount(prev => prev + 1);
+                    setErrorCount(prev => prev + 1);
                     setToastMessage(`Chyba u studenta: ${data.error}`);
                     setTimeout(() => setToastMessage(null), 5000);
                     setStudents(prev => prev.map(s => {
@@ -421,12 +423,21 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 setTimeout(() => {
                     setIsEvaluating(false);
                     setEvaluationProgress(0);
-                    setToastMessage("Vyhodnocování celé dávky bylo úspěšně dokončeno.");
-                    setTimeout(() => setToastMessage(null), 4000);
+                    
+                    if (errorCount > 0) {
+                        setToastMessage(`Vyhodnocování dokončeno s ${errorCount} chybami. Zkontrolujte prosím seznam záznamů.`);
+                    } else {
+                        setToastMessage("Vyhodnocovávání celé dávky bylo úspěšně dokončeno.");
+                    }
+                    
+                    setTimeout(() => {
+                        setToastMessage(null);
+                        setErrorCount(0);
+                    }, 5000);
                 }, 1000);
             }
         }
-    }, [evaluatedCount, totalToEvaluate, isEvaluating]);
+    }, [evaluatedCount, totalToEvaluate, isEvaluating, errorCount]);
 
     const handleCancelEvaluation = async () => {
         if (abortControllerRef.current) {

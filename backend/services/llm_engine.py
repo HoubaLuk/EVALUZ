@@ -38,6 +38,9 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     enable_thinking = (thinking_value.lower() == 'true')
     
     db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
+    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
+    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
+    db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
     db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
     
     platform = db_platform.value if db_platform and db_platform.value else "vllm"
@@ -198,6 +201,8 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
     enable_thinking = (thinking_value.lower() == 'true')
     
     db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
+    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
+    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
     db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
     db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
     
