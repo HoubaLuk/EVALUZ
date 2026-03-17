@@ -1,5 +1,5 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.2.0 (Air-Gap Robust)
+**Verze:** 3.2.1 (Air-Gap Robust)
 **Poslední aktualizace:** 17. března 2026
 
 ## Obsah
@@ -92,7 +92,15 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.2.0 (Aktuální) - Robust vLLM Integration
+### v3.2.1 (Aktuální) - LLM Parameter Enforcement
+- **Cíl:** Odstranění chyb spojených s limity kontextového okna (Error 400) a respektování nastavení v administraci.
+- **Změny:**
+  - **Backend**: Respektování hodnoty `Max Output Tokens` (z databáze) v `llm_engine.py` namísto natvrdo zakódovaných 16k.
+  - **Backend**: Oprava `NameError` u proměnné `max_tokens` při volání vLLM ve fázi 2.
+  - **Backend**: Odstranění duplicitních klíčů v parametrech pro OpenAI client.
+  - **Stability**: Zajištění plynulého vyhodnocování i u delších ÚZ na limitovaných vLLM serverech (v rámci 16k okna).
+
+### v3.2.0 - Robust vLLM Integration
 - **Cíl:** Odstranění kritických chyb při integraci s vLLM a zlepšení uživatelské zpětné vazby.
 - **Změny:**
   - **Backend**: Oprava `NameError` u parametrů `top_p`, `presence_penalty` a `frequency_penalty` v `llm_engine.py`.
@@ -124,4 +132,4 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 Pouze uživatel s příznakem `is_superadmin = true` může vytvářet nové lektory a spravovat globální nastavení LLM.
 
 ---
-*Poslední aktualizace dokumentace: 2026-03-05*
+*Poslední aktualizace dokumentace: 17. března 2026*
