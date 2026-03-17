@@ -15,3 +15,18 @@
 - Full persistence of newly uploaded records (Fixes "disappearing records" issue).
 - Reliable evaluation tracking for lecturers on intranet servers.
 - Compatible with vLLM, LM Studio, and Ollama providers.
+
+## 2026-03-17: LLM Parameter Enforcement (v3.2.1)
+
+**Status:** Decided & Implemented
+**Context:** vLLM inference servers often have a hard-coded context limit (e.g., 16384 tokens). EVALUZ was previously hard-coding `max_tokens: 16384` for the completion, which, when added to large inputs (11k+ tokens), exceeded the server's capacity even if the model itself supported larger contexts.
+
+**Decisions:**
+1. **Dynamic Token Management:** The `max_tokens` parameter for LLM calls is now dynamically fetched from the database (`VLLM_MAX_TOKENS`). This ensures users can tune the "reservation" for output to fit within the server's context window.
+2. **Key Deduplication:** Fixed a bug in `llm_engine.py` where `max_tokens` was provided twice in the `kwargs` dictionary, ensuring clean API requests.
+3. **Admin Consistency:** The `evaluate_report` function now correctly uses the database setting instead of bypassing it, restoring control to the Lecturers via the Administration panel.
+
+**Impact:**
+- Resolved "Error 400 - Context Length Exceeded" for large evaluation tasks.
+- Improved reliability on resource-constrained vLLM deployments.
+- Restored integrity between UI settings and backend execution.

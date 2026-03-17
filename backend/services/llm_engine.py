@@ -42,12 +42,14 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
     db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
     db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
+    db_max_tokens = db.query(AppSettings).filter(AppSettings.key == "VLLM_MAX_TOKENS").first()
     
     platform = db_platform.value if db_platform and db_platform.value else "vllm"
     top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
     presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
     frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
     context_window = int(db_context.value) if db_context and db_context.value else 8192
+    max_tokens = int(db_max_tokens.value) if db_max_tokens and db_max_tokens.value else 4096
     
     if not api_url or not model_name:
         raise ValueError("LLM konfigurace (URL nebo Model) chybí v databázi. Nastavte je v Administraci.")
@@ -117,8 +119,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
             "top_p": top_p,
             "presence_penalty": presence_penalty,
             "frequency_penalty": frequency_penalty,
-            "max_tokens": 16384,
-            "max_tokens": 16384
+            "max_tokens": max_tokens
         }
 
         # Pokud model podporuje JSON mode a není to LM Studio/Ollama (které mívají nestandardní implementaci),
