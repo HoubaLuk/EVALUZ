@@ -1,6 +1,6 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.1.1 (Air-Gap Robust)
-**Poslední aktualizace:** 6. března 2026
+**Verze:** 3.2.0 (Air-Gap Robust)
+**Poslední aktualizace:** 17. března 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -92,7 +92,16 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.0.0 (Aktuální) - Humanizace codebase
+### v3.2.0 (Aktuální) - Robust vLLM Integration
+- **Cíl:** Odstranění kritických chyb při integraci s vLLM a zlepšení uživatelské zpětné vazby.
+- **Změny:**
+  - **Backend**: Oprava `NameError` u parametrů `top_p`, `presence_penalty` a `frequency_penalty` v `llm_engine.py`.
+  - **Backend**: Korektní dotazování na LLM nastavení z DB pro všechny typy AI úloh.
+  - **Frontend**: Implementace error trackingu v dávkovém vyhodnocování (`TabEvaluation`).
+  - **Frontend**: Inteligentní toast notifikace rozlišující čistý úspěch od částečného selhání.
+  - **Fix**: Oprava chyby, kdy se nově nahraní studenti neukládali při selhání Fast-Scanu.
+
+### v3.1.1 - Humanizace codebase
 - **Cíl:** Maximální srozumitelnost kódu pro člověka.
 - **Změny:**
   - Kompletní revize komentářů v celém backendu (services, api, core).
