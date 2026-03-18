@@ -27,21 +27,21 @@ router = APIRouter(
     tags=["evaluation"]
 )
 
-@router.websocket("/ws")
-async def websocket_eval_status(websocket: WebSocket):
+@router.websocket("/ws/{lecturer_id}")
+async def websocket_eval_status(websocket: WebSocket, lecturer_id: int):
     """
     WEBSOCKET ENDPOINT:
     Umožňuje prohlížeči udržovat "živé spojení". Backend přes něj posílá zprávy
     o tom, který student se právě začal vyhodnocovat nebo kdo už je hotový.
     """
-    await eval_queue.connect(websocket)
+    await eval_queue.connect(websocket, lecturer_id)
     try:
         while True:
             # Udržujeme spojení živé, čekáme na případné zprávy od klienta (které zatím nepotřebujeme).
             await websocket.receive_text() # Udržujeme spojení živé
     except WebSocketDisconnect:
         # Odpojení z registru, pokud lektor zavře okno.
-        eval_queue.disconnect(websocket)
+        eval_queue.disconnect(websocket, lecturer_id)
 
 # Pomocná schémata pro validaci vstupních a výstupních dat.
 class FastScanResponseItem(BaseModel):
@@ -66,6 +66,7 @@ def save_golden_example(request: GoldenExampleRequest, db: Session = Depends(get
 
     new_example = GoldenExample(
         scenario_id=request.scenario_id,
+        lecturer_id=current_user.id, # Isolate golden examples per lecturer
         source_text=request.source_text,
         perfect_json=request.perfect_json,
         created_at=datetime.datetime.now().isoformat()
@@ -128,20 +129,27 @@ async def fast_scan_batch(
                 # Pokud AI jméno nenašla, použijeme název souboru
                 cleaned_display_name = file.filename.rsplit('.', 1)[0]
             
-            # Ochrana proti selhání Foreign Key (class_id=1 nemusí být na prázdné nebo nové DB založena).
-            default_class = db.query(ClassRoom).filter(ClassRoom.id == 1).first()
+            # Ochrana proti selhání Foreign Key (isoloaná třída pro konkrétního lektora).
+            default_class = db.query(ClassRoom).filter(
+                ClassRoom.name == "Základní kurz",
+                ClassRoom.lecturer_id == current_user.id
+            ).first()
             if not default_class:
-                db.add(ClassRoom(id=1, name="Základní kurz", lecturer_id=current_user.id))
+                default_class = ClassRoom(name="Základní kurz", lecturer_id=current_user.id)
+                db.add(default_class)
                 try:
                     db.commit()
+                    db.refresh(default_class)
                 except Exception:
                     db.rollback()
+                    # Pokud se nepodaří vytvořit, zkusíme najít jakoukoli třídu lektora nebo id=1 jako nouzovku
+                    default_class = db.query(ClassRoom).filter(ClassRoom.lecturer_id == current_user.id).first()
 
             # 5. Zápis do databáze (nebo aktualizace existujícího záznamu)
             new_eval = StudentEvaluation(
                 student_name=student_name,
                 cleaned_name=cleaned_display_name,
-                class_id=1,
+                class_id=default_class.id if default_class else 1,
                 scenario_name=scenario_id,
                 source_text=extracted_text,
                 source_filename=student_name,
@@ -285,7 +293,7 @@ async def evaluate_batch(
             "type": "EVAL_START",
             "student_name": student_name,
             "scenario_id": scen_id
-        })
+        }, lecturer_id=current_user_id)
         
         try:
             if file_data.get('content'):
@@ -305,7 +313,8 @@ async def evaluate_batch(
                 system_prompt=system_prompt,
                 db=db_bg,
                 scenario_id=scen_id,
-                student_log_prefix=student_name
+                student_log_prefix=student_name,
+                lecturer_id=current_user_id # Přidáno pro filtraci v LLM enginu / RAGu
             )
             
             async with evaluate_db_lock:
@@ -336,17 +345,25 @@ async def evaluate_batch(
                          existing_eval.student_identity = json.dumps(identita, ensure_ascii=False)
                          existing_eval.cleaned_name = cleaned_eval_name
                 if not existing_eval:
-                    # Pojistka pro asynchronní worker - třída ID 1 MUSÍ existovat.
-                    if not db_bg.query(ClassRoom).filter(ClassRoom.id == 1).first():
-                        db_bg.add(ClassRoom(id=1, name="Základní kurz", lecturer_id=current_user_id))
+                    # Pojistka pro asynchronní worker - třída 'Základní kurz' MUSÍ existovat pro lektora.
+                    default_class = db_bg.query(ClassRoom).filter(
+                        ClassRoom.name == "Základní kurz",
+                        ClassRoom.lecturer_id == current_user_id
+                    ).first()
+                    
+                    if not default_class:
+                        default_class = ClassRoom(name="Základní kurz", lecturer_id=current_user_id)
+                        db_bg.add(default_class)
                         try:
                             db_bg.commit()
+                            db_bg.refresh(default_class)
                         except Exception:
                             db_bg.rollback()
+                            default_class = db_bg.query(ClassRoom).filter(ClassRoom.lecturer_id == current_user_id).first()
 
                     eval_record = StudentEvaluation(
                         student_name=student_name,
-                        class_id=1,
+                        class_id=default_class.id if default_class else 1,
                         scenario_name=scen_id,
                         lecturer_id=current_user_id,
                         json_result=json.dumps(llm_result_dict, ensure_ascii=False),
@@ -361,20 +378,20 @@ async def evaluate_batch(
                 "type": "EVAL_SUCCESS",
                 "student_name": student_name,
                 "scenario_id": scen_id
-            })
+            }, lecturer_id=current_user_id)
 
         except SecurityException as se:
             await eval_queue.broadcast({
                 "type": "EVAL_ERROR",
                 "student_name": student_name,
                 "error": str(se)
-            })
+            }, lecturer_id=current_user_id)
         except Exception as e:
             await eval_queue.broadcast({
                 "type": "EVAL_ERROR",
                 "student_name": student_name,
                 "error": str(e)
-            })
+            }, lecturer_id=current_user_id)
         finally:
             db_bg.close()
 

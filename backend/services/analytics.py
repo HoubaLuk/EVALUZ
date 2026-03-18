@@ -10,25 +10,30 @@ import json
 from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, ClassAnalysis
 from services.llm_engine import chat_completion
 
-async def generate_class_summary(class_id: int, scenario_id: str, force: bool, db: Session) -> dict:
+async def generate_class_summary(class_id: int, scenario_id: str, force: bool, db: Session, lecturer_id: int) -> dict:
     """
     HLAVNÍ FUNKCE ANALÝZY.
-    Agreguje data z hodnocení všech studentů v dané třídě a modelové situaci.
+    Agreguje data z hodnocení všech studentů v dané třídě a modelové situaci pro konkrétního lektora.
     """
     
     # 1. CACHE: Pokud už analýza existuje a uživatel si nevynutil novou (force=True), vrátíme tu uloženou.
     if not force:
-        cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == scenario_id).first()
+        cached_analysis = db.query(ClassAnalysis).filter(
+            ClassAnalysis.scenario_id == scenario_id,
+            ClassAnalysis.lecturer_id == lecturer_id,
+            ClassAnalysis.class_id == class_id
+        ).first()
         if cached_analysis:
             try:
                 return json.loads(cached_analysis.content_json)
             except Exception:
                 pass
                 
-    # Načteme všechna vyhodnocení pro tuto třídu a situaci.
+    # Načteme všechna vyhodnocení pro tuto třídu a situaci, VÝHRADNĚ pro tohoto lektora.
     raw_evals = db.query(StudentEvaluation).filter(
         StudentEvaluation.class_id == class_id,
-        StudentEvaluation.scenario_name == scenario_id
+        StudentEvaluation.scenario_name == scenario_id,
+        StudentEvaluation.lecturer_id == lecturer_id
     ).all()
     
     # Odfiltrujeme záznamy, které ještě nejsou vyhodnocené (nemají json_result).
@@ -41,8 +46,12 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         except:
             pass
     
-    # Získání definic kritérií z DB, abychom věděli, co přesně jsme měli hodnotit.
-    criteria_record = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id).first()
+    # Získání definic kritérií z DB VÝHRADNĚ pro tohoto lektora.
+    criteria_record = db.query(EvaluationCriteria).filter(
+        EvaluationCriteria.scenario_name == scenario_id,
+        EvaluationCriteria.lecturer_id == lecturer_id
+    ).first()
+    
     db_criteria = []
     if criteria_record:
         from models.db_models import Criterion
@@ -179,7 +188,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             dist["51_80"] += 1
         else:
             dist["81_100"] += 1
-
+ 
     # Seznam studentů, kteří potřebují doučování (úspěšnost pod 50 %).
     for eval_record in evaluations:
         try:
@@ -189,7 +198,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
                 needs_help.append((eval_record.cleaned_name if eval_record.cleaned_name else eval_record.student_name).replace(',', ''))
         except Exception:
             pass
-
+ 
     # --- 2. Request AI Insight via vLLM ---
     average_score = round(sum(student_scores) / total_students, 1) if total_students > 0 else 0
     
@@ -226,7 +235,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     except Exception as e:
         print(f"Failed to generate insight: {e}")
         ai_insight = "Nepodařilo se spojit s asistentem pro vygenerování analýzy. Zkontrolujte připojení k vLLM."
-
+ 
     res = {
         "scenario_id": str(scenario_id),
         "stats": stats,
@@ -238,15 +247,24 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         "needs_help": needs_help,
         "criterion_failures": criterion_failures
     }
-
+ 
     import datetime
-    cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == scenario_id).first()
+    cached_analysis = db.query(ClassAnalysis).filter(
+        ClassAnalysis.scenario_id == scenario_id,
+        ClassAnalysis.lecturer_id == lecturer_id,
+        ClassAnalysis.class_id == class_id
+    ).first()
+    
     if not cached_analysis:
-        cached_analysis = ClassAnalysis(scenario_id=scenario_id)
+        cached_analysis = ClassAnalysis(
+            scenario_id=scenario_id,
+            lecturer_id=lecturer_id,
+            class_id=class_id
+        )
         db.add(cached_analysis)
     
     cached_analysis.content_json = json.dumps(res, ensure_ascii=False)
     cached_analysis.created_at = datetime.datetime.now().isoformat()
     db.commit()
-
+ 
     return res

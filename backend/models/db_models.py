@@ -70,7 +70,9 @@ class AppSettings(Base):
 class ClassAnalysis(Base):
     __tablename__ = "class_analyses"
     id = Column(Integer, primary_key=True, index=True)
-    scenario_id = Column(String, index=True, unique=True)
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
+    class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), index=True)
+    scenario_id = Column(String, index=True) # REMOVED unique=True to allow different lecturers to have their own analysis for the same scenario
     content_json = Column(Text)
     created_at = Column(String)
 
@@ -86,6 +88,7 @@ class ExportHistory(Base):
 class GoldenExample(Base):
     __tablename__ = "golden_examples"
     id = Column(Integer, primary_key=True, index=True)
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
     scenario_id = Column(String, index=True)
     source_text = Column(Text)
     perfect_json = Column(Text)
