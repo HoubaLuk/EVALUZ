@@ -48,6 +48,12 @@ def run_migrations(engine):
                         ALTER TABLE class_analyses ADD COLUMN lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE;
                         CREATE INDEX IF NOT EXISTS idx_class_analyses_lecturer_id ON class_analyses(lecturer_id);
                     END IF;
+
+                    -- Add class_id
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='class_analyses') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='class_analyses' AND column_name='class_id') THEN
+                        ALTER TABLE class_analyses ADD COLUMN class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE;
+                        CREATE INDEX IF NOT EXISTS idx_class_analyses_class_id ON class_analyses(class_id);
+                    END IF;
                     
                     -- Drop unique scenario_id
                     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'class_analyses_scenario_id_key') THEN
