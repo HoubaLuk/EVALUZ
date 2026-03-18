@@ -23,8 +23,8 @@ async def lifespan(app: FastAPI):
     Spouští se při startu aplikace a ukončuje se při vypnutí.
     Zde startujeme asynchronního workera, který na pozadí zpracovává frontu vyhodnocování.
     """
-    # Spuštění workeru s paralelním zpracováním (např. 4 souběžné úlohy pro vLLM batching).
-    worker_task = asyncio.create_task(eval_queue.worker(concurrency=4))
+    # Spuštění workeru s paralelním zpracováním (8 souběžných úloh pro optimální využití L40S batchingu).
+    worker_task = asyncio.create_task(eval_queue.worker(concurrency=8))
     yield
     # Úklid po vypnutí serveru.
     worker_task.cancel()

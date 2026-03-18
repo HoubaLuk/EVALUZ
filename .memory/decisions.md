@@ -45,3 +45,16 @@
 - Drastically improved performance for batch evaluations.
 - Support for high-throughput vLLM backends.
 - Mitigation for truncated JSON responses on small context models.
+
+## 2026-03-18: Hardware-Specific Concurrency Tweak (v3.2.3)
+
+**Status:** Decided & Implemented
+**Context:** The production environment uses NVIDIA L40S 48GB VRAM cards. Initial concurrency of 4 was too conservative given the 18GB+ of free VRAM after loading the Qwen-30B-FP8 model.
+
+**Decisions:**
+1. **Higher Concurrency:** Increased `concurrency` to 8 in the background worker. This allows for better exploitation of vLLM's batching capabilities on high-end hardware.
+2. **Resource Validation:** Confirmed that with ~10-12 criteria, the total token budget (Input + Output) fits within the current 16k server limit while allowing for `max_tokens` up to 10,000 for the response.
+
+**Impact:**
+- Significant reduction in evaluation latency for large class batches.
+- Efficient utilization of L40S GPU resources.

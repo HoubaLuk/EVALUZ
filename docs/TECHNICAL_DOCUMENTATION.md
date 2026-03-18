@@ -1,5 +1,5 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.2.2 (Air-Gap Robust)
+**Verze:** 3.2.3 (Air-Gap Robust)
 **Poslední aktualizace:** 18. března 2026
 
 ## Obsah
@@ -92,7 +92,12 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.2.2 (Aktuální) - vLLM Batching & Parallel Processing
+### v3.2.3 (Aktuální) - L40S Hardware Optimization
+- **Výkon:** Navýšení souběžnosti fronty na 8 paralelních úloh pro optimální využití 48GB VRAM na kartách NVIDIA L40S.
+- **Strategie:** Implementace "sliding window" přístupu pro plynulé batchování požadavků na vLLM server.
+- **Vyladění:** Potvrzena nutnost hlídat součet (Input + Output tokens) vůči 16k limitu serveru – doporučená redukce počtu kritérií na 10–12 při zachování detailních citací.
+
+### v3.2.2 - vLLM Batching & Parallel Processing
 - **Výkon:** Implementace paralelního vyhodnocování ve frontě (`EvaluationQueue`) s nastavitelnou souběžností (výchozí 4).
 - **vLLM Integration:** Výrazně vyšší propustnost při hromadném zpracování ÚZ díky využití vLLM batchingu.
 - **Fix:** Oprava zasekávání fronty při chybě jednoho studenta (lepší error handling v `_run_task` s využitím Semaphore).
