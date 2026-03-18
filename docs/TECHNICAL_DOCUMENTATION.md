@@ -96,6 +96,7 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 ### v3.3.1 (Aktuální) - Auto-Migration & WebSocket Fix
 - **Fix:** Oprava kritické chyby `403 Forbidden` u WebSocketů. Frontend nyní správně posílá ID lektora v URL.
 - **DB Migrace:** Implementována funkce `run_migrations` v jádru backendu. Databáze se nyní při startu aplikace sama zkontroluje a přidá chybějící sloupce (např. `lecturer_id`), což usnadňuje nasazování nových verzí na server.
+- **Robustnost:** Přidána granulární kontrola existence sloupců v tabulkách `golden_examples` a `export_history` pro zamezení chyb `UndefinedColumn` při aktualizaci ze starších verzí.
 - **Verzování:** Sjednocení všech verzí v systému (backend, frontend, package.json) na 3.3.1.
 
 ### v3.3.0 - Data Isolation & Multi-Instructor Support
