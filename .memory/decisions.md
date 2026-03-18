@@ -91,3 +91,20 @@
 - Eliminates UI hanging during large batch evaluations.
 - Significantly improves readability and usability of the criteria editor.
 - Fixes critical production crashes during PDF report generation.
+
+## 2026-03-18: Data Isolation & Instructor Partitioning (v3.3.0)
+
+**Status:** Decided & Implemented
+**Context:** Reports of "data leaks" or "cross-talk" between instructors on the server. The cause was identified as global, shared states in several database tables (`class_analyses`, `golden_examples`) and missing `lecturer_id` filters in analytics queries. WebSocket broadcasts were also global, showing anyone's evaluation status to any connected user.
+
+**Decisions:**
+1. **Schema Partitioning:** Added `lecturer_id` and `class_id` to the `ClassAnalysis` model and `lecturer_id` to `GoldenExample`. Replaced the `unique=True` constraint on `scenario_id` with a non-unique index to allow independent analyses of the same scenario by different instructors.
+2. **WebSocket Isolation:** Refactored `EvaluationQueue` to store `active_connections` as a mapping of `{lecturer_id: [WebSocket, ...]}`. Broadcasts are now strictly filtered by the instructor who initiated the task.
+3. **Analytics & Export Filtering:** Enforced `lecturer_id` checks across all analytics and export endpoints. `generate_class_summary` now requires the instructor's ID to fetch the correct evaluations and cached results.
+4. **Classroom Personalization:** Removed the hard-coded `class_id=1` logic. The system now automatically creates and retrieves a private "Základní kurz" (Default Class) for each instructor individually.
+5. **Service Signature Update:** Updated `evaluate_report` and `extract_identity` signatures in `llm_engine.py` to accept `lecturer_id` for potential future context-aware logic (e.g., instructor-specific RAG).
+
+**Impact:**
+- **Security:** Complete data isolation between instructors. Users can no longer see, delete, or influence each other's data.
+- **Privacy:** Status updates via WebSockets are now private.
+- **Reliability:** Eliminated cache collisions where one instructor's analysis was overwritten by another.

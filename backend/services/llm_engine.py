@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from models.db_models import AppSettings
 
-async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "") -> dict:
+async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None) -> dict:
     """
     HLAVNÍ FUNKCE PRO EVALUACI (Fáze 2).
     Bere text studenta a zadaná kritéria, posílá je modelu a vrací vyčištěný JSON výsledek.
@@ -177,7 +177,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         print(f"{prefix}Error communicating with vLLM at {api_url}: {e}")
         raise
 
-async def extract_identity(report_text: str, db: Session, student_log_prefix: str = "") -> dict:
+async def extract_identity(report_text: str, db: Session, student_log_prefix: str = "", lecturer_id: int = None) -> dict:
     """
     Rychlá extrakce identity studenta (jméno, příjmení a hodnost) pomocí LLM.
     Neprovádí žádnou evaluaci kritérií (šetrné na tokeny a čas).

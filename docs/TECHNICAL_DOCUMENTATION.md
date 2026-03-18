@@ -1,5 +1,5 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.2.5 (Air-Gap Robust)
+**Verze:** 3.3.0 (Instructor Isolated)
 **Poslední aktualizace:** 18. března 2026
 
 ## Obsah
@@ -32,9 +32,9 @@ EVALUZ využívá dekomponovanou architekturu oddělující prezentační vrstvu
 ### 1.2 Tok dat (Data Flow)
 1. Lektor nahraje ÚZ (PDF/DOCX/RTF).
 2. Backend extrahuje text a pomocí AI/Regexu identifikuje identitu studenta.
-3. Požadavek na evaluaci je zařazen do asynchronní fronty (`EvaluationQueue`).
+3. Požadavek na evaluaci je zařazen do asynchronní fronty (`EvaluationQueue`), která je striktně izolována podle `lecturer_id`.
 4. AI evaluátor analyzuje text oproti kritériím a vrací strukturovaný JSON.
-5. Výsledky jsou uloženy v DB a real-time odeslány na frontend přes WebSockets.
+5. Výsledky jsou uloženy v DB a real-time odeslány výhradně danému lektorovi přes WebSockets.
 
 ---
 
@@ -64,8 +64,9 @@ V milníku 2.0.0 proběhl přechod ze SQLite na PostgreSQL. Klíčové body:
 
 ### 3.2 Klíčové tabulky
 - `lecturers`: Správa identit lektorů a SuperAdminů (včetně `must_change_password`).
-- `evaluation_criteria`: Definice metodik pro jednotlivé modelové situace.
-- `student_evaluations`: Výsledky AI a manuálních korekcí. Obsahuje `json_result` s detaily o každém splněném bodu.
+- `evaluation_criteria`: Definice metodik pro jednotlivé modelové situace, filtrováno podle `lecturer_id`.
+- `student_evaluations`: Výsledky AI a manuálních korekcí. Obsahuje `json_result` s detaily o každém splněném bodu a `lecturer_id`.
+- `class_analyses`: Globální (výkonové) statistiky třídy, izolované podle `lecturer_id` a `class_id`.
 - `app_settings`: Dynamická konfigurace systému (LLM URL, Klíče, Modely).
 
 ---
@@ -92,7 +93,13 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.2.5 (Aktuální) - Parallel Processing & Dark Mode Overhaul
+### v3.3.0 (Aktuální) - Data Isolation & Multi-Instructor Support
+- **Bezpečnost:** Kompletní izolace dat mezi lektory (Multi-Tenancy). Přidány filtry `lecturer_id` do všech dotazů na evaluace, analytiky a exporty.
+- **Backend:** Rozdělení WebSocket fronty (`EvaluationQueue`) – notifikace o průběhu vyhodnocování jsou nyní doručovány pouze lektorovi, který úlohu spustil.
+- **Databáze:** Rozšíření schématu `ClassAnalysis` a `GoldenExample` o `lecturer_id`. Odstraněn globálně unikátní index na `scenario_id` v tabulce analýz.
+- **Logika:** Automatická instance personalizované výchozí třídy ("Základní kurz") pro každého lektora zvlášť (nahrazení globální `id=1`).
+
+### v3.2.5 - Parallel Processing & Dark Mode Overhaul
 - **Performance:** Oprava paralelního vyhodnocování (Batch Processing) – odstraněn redundantní zámek v backendu, který způsoboval sekvenční zpracování i při volné kapacitě GPU. Nyní plné využití paralelity L40S.
 - **UI/UX:** Kompletní vizuální redesign **Dark Mode** pro maximální čitelnost. Nahrazení tmavě modrých textů vysoce kontrastní zlatou/žlutou (`#facc15`) a bílou barvou.
 - **UI/UX:** Zpřehlednění ovládacích prvků (tlačítka pro nahrávání, stepper, výběr studentů) pomocí nového barevného schématu.

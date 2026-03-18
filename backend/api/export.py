@@ -88,8 +88,11 @@ def export_class_report_pdf(scenario_id: str, db: Session = Depends(get_db), cur
         if not decoded_id or decoded_id == "null":
             raise HTTPException(status_code=400, detail="Neplatné ID scénáře.")
         
-        # Extract from database cache
-        cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == decoded_id).first()
+        # Extract from database cache (filtered by current lecturer)
+        cached_analysis = db.query(ClassAnalysis).filter(
+            ClassAnalysis.scenario_id == decoded_id,
+            ClassAnalysis.lecturer_id == current_user.id
+        ).first()
         if not cached_analysis:
             raise HTTPException(status_code=404, detail="Analýza pro toto téma zatím neexistuje. Obnovte a vygenerujte analýzu ve frontend aplikaci.")
             

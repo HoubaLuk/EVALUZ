@@ -85,7 +85,7 @@ async def get_class_summary(class_id: int, scenario_id: str = "default", force: 
     an AI pedagogical insight from the vLLM engine based on Phase 3 prompt
     and context. Checks db for cached analysis first unless forced.
     """
-    return await generate_class_summary(class_id, scenario_id, force, db)
+    return await generate_class_summary(class_id, scenario_id, force, db, current_user.id)
 
 @router.delete("/evaluation/{evaluation_id}")
 def delete_evaluation(evaluation_id: int, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
@@ -120,9 +120,13 @@ def patch_evaluation_score(evaluation_id: int, request: EvaluationPatchRequest, 
     # Uložení nového JSON z frontendu
     eval_record.json_result = json.dumps(request.json_result, ensure_ascii=False)
     
-    # Invalidation of cache
+    # Invalidation of cache (only for the current lecturer)
     if eval_record.scenario_name:
-        db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == eval_record.scenario_name).delete()
+        db.query(ClassAnalysis).filter(
+            ClassAnalysis.scenario_id == eval_record.scenario_name,
+            ClassAnalysis.lecturer_id == current_user.id,
+            ClassAnalysis.class_id == eval_record.class_id
+        ).delete()
         
     db.commit()
     return {"status": "success", "message": "Hodnocení manuálně upraveno. Analytika bude při příštím zobrazení přepočítána."}
@@ -147,10 +151,13 @@ def patch_evaluation_name(evaluation_id: int, request: NamePatchRequest, db: Ses
 
 
 @router.get("/class/{class_id}/status")
-def get_class_analysis_status(class_id: int, db: Session = Depends(get_db)):
+def get_class_analysis_status(class_id: int, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """
     Vrátí seznam scenario_id, pro které již existuje uložená globální analýza.
     Slouží pro UI (zlatá fajfka ve Stepperu), aniž by se musela tahat/generovat velká data.
     """
-    analyses = db.query(ClassAnalysis.scenario_id).all()
+    analyses = db.query(ClassAnalysis.scenario_id).filter(
+        ClassAnalysis.lecturer_id == current_user.id,
+        ClassAnalysis.class_id == class_id
+    ).all()
     return [a[0] for a in analyses]
