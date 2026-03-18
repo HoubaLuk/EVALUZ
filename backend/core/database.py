@@ -107,15 +107,43 @@ def run_migrations(engine):
         # 5. TABULKA: golden_examples
         if not is_sqlite:
             conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS golden_examples (
-                    id SERIAL PRIMARY KEY,
-                    lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE,
-                    scenario_id VARCHAR(255),
-                    source_text TEXT,
-                    perfect_json TEXT,
-                    created_at VARCHAR(255)
-                );
-                CREATE INDEX IF NOT EXISTS idx_golden_examples_lecturer_id ON golden_examples(lecturer_id);
+                DO $$ 
+                BEGIN 
+                    -- Create table if not exists
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='golden_examples') THEN
+                        CREATE TABLE golden_examples (
+                            id SERIAL PRIMARY KEY,
+                            lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE,
+                            scenario_id VARCHAR(255),
+                            source_text TEXT,
+                            perfect_json TEXT,
+                            created_at VARCHAR(255)
+                        );
+                    END IF;
+                    
+                    -- Check lecturer_id
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='golden_examples' AND column_name='lecturer_id') THEN
+                        ALTER TABLE golden_examples ADD COLUMN lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE;
+                    END IF;
+                    
+                    -- Ensure index
+                    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_golden_examples_lecturer_id') THEN
+                        CREATE INDEX idx_golden_examples_lecturer_id ON golden_examples(lecturer_id);
+                    END IF;
+                END $$;
+            """))
+
+        # 6. TABULKA: export_history
+        if not is_sqlite:
+            conn.execute(text("""
+                DO $$ 
+                BEGIN 
+                    -- Check user_id
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='export_history') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='export_history' AND column_name='user_id') THEN
+                        ALTER TABLE export_history ADD COLUMN user_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE;
+                        CREATE INDEX IF NOT EXISTS idx_export_history_user_id ON export_history(user_id);
+                    END IF;
+                END $$;
             """))
 
         # Commit migrations
