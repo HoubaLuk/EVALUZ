@@ -1,6 +1,6 @@
-# Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.3.0 (Instructor Isolated)
-**Poslední aktualizace:** 18. března 2026
+# Technická dokumentace EVALUZ
+**Verze:** 3.3.1 (Auto-Migrate & WebSocket Fix)
+**Poslední aktualizace:** 18. března 2026 (odpoledne)
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -93,7 +93,12 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.3.0 (Aktuální) - Data Isolation & Multi-Instructor Support
+### v3.3.1 (Aktuální) - Auto-Migration & WebSocket Fix
+- **Fix:** Oprava kritické chyby `403 Forbidden` u WebSocketů. Frontend nyní správně posílá ID lektora v URL.
+- **DB Migrace:** Implementována funkce `run_migrations` v jádru backendu. Databáze se nyní při startu aplikace sama zkontroluje a přidá chybějící sloupce (např. `lecturer_id`), což usnadňuje nasazování nových verzí na server.
+- **Verzování:** Sjednocení všech verzí v systému (backend, frontend, package.json) na 3.3.1.
+
+### v3.3.0 - Data Isolation & Multi-Instructor Support
 - **Bezpečnost:** Kompletní izolace dat mezi lektory (Multi-Tenancy). Přidány filtry `lecturer_id` do všech dotazů na evaluace, analytiky a exporty.
 - **Backend:** Rozdělení WebSocket fronty (`EvaluationQueue`) – notifikace o průběhu vyhodnocování jsou nyní doručovány pouze lektorovi, který úlohu spustil.
 - **Databáze:** Rozšíření schématu `ClassAnalysis` a `GoldenExample` o `lecturer_id`. Odstraněn globálně unikátní index na `scenario_id` v tabulce analýz.
@@ -161,4 +166,4 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 Pouze uživatel s příznakem `is_superadmin = true` může vytvářet nové lektory a spravovat globální nastavení LLM.
 
 ---
-*Poslední aktualizace dokumentace: 17. března 2026*
+*Poslední aktualizace dokumentace: 18. března 2026*

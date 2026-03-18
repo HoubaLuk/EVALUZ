@@ -33,6 +33,7 @@ interface TabEvaluationProps {
     className?: string;
     scenarioName?: string;
     onEvaluatedChange?: (hasEvaluated: boolean) => void;
+    lecturerId?: number | null;
 }
 
 /**
@@ -40,7 +41,7 @@ interface TabEvaluationProps {
  * Tato komponenta je srdcem aplikace pro lektora. Umožňuje nahrávat soubory studentů, 
  * spouštět AI analýzu a sledovat výsledky v reálném čase.
  */
-export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange }: TabEvaluationProps) {
+export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange, lecturerId }: TabEvaluationProps) {
     const { showAlert, showConfirm, showPrompt } = useDialog();
     const [students, setStudents] = useState<Student[]>([]);
     const [selectAll, setSelectAll] = useState(false);
@@ -91,7 +92,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     useEffect(() => {
         let ws: WebSocket;
         const connectWs = () => {
-            const wsUrl = API_BASE_URL.replace('http', 'ws') + '/evaluate/ws';
+            if (!lecturerId) return;
+            const wsUrl = API_BASE_URL.replace('http', 'ws') + `/evaluate/ws/${lecturerId}`;
             ws = new WebSocket(wsUrl);
             ws.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
@@ -124,7 +126,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         };
         connectWs();
         return () => ws?.close();
-    }, [scenarioId]);
+    }, [scenarioId, lecturerId]);
     useEffect(() => {
         const handleSyncComplete = () => {
             fetchEvaluations();

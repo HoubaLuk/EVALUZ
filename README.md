@@ -1,4 +1,4 @@
-# EVALUZ (v3.3.0 - Instructor Isolated)
+# EVALUZ (v3.3.1 - Instructor Isolated & Auto-Migrate)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
