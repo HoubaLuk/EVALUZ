@@ -30,3 +30,18 @@
 - Resolved "Error 400 - Context Length Exceeded" for large evaluation tasks.
 - Improved reliability on resource-constrained vLLM deployments.
 - Restored integrity between UI settings and backend execution.
+
+## 2026-03-18: Parallel Processing & Batching (v3.2.2)
+
+**Status:** Decided & Implemented
+**Context:** vLLM inference engines are highly efficient when handling multiple requests concurrently (batching). The previous sequential queue worker was underutilizing the server's throughput, leading to slow mass evaluations. Additionally, reasoning/thinking models were consuming too much output budget in a constrained context window.
+
+**Decisions:**
+1. **Concurrency Support:** Refactored `EvaluationQueue` to support parallel task execution using `asyncio.Semaphore`. This allows the Orchestrator to define the degree of parallelism (default set to 4).
+2. **Batch Throughput:** Tasks are now spawned as background tasks (`asyncio.create_task`), allowing vLLM to process them as a single batch, significantly reducing total wall time for large classes.
+3. **Reasoning Budget Management:** Identified that the "Thinking" Monologue in Qwen-based models counts towards `max_tokens`. In 16k context environments, users are recommended to disable "Enable Thinking" for Phase 2 to prevent JSON truncation.
+
+**Impact:**
+- Drastically improved performance for batch evaluations.
+- Support for high-throughput vLLM backends.
+- Mitigation for truncated JSON responses on small context models.
