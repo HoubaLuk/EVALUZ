@@ -122,4 +122,5 @@
 122: **Impact:**
 123: - **Maintenance:** "Zero-touch" updates for system administrators (database fixes itself on boot).
 124: - **Stability:** Fixed critical production crashes in analytics and real-time status tracking.
-125: - **Clarity:** Clear version tracking across the entire stack.
+125: - **Robustness:** Added `DO $$ BEGIN ... END $$;` blocks with column existence checks to ensure that `lecturer_id` and `user_id` are added even if `golden_examples` or `export_history` tables already existed.
+126: - **Clarity:** Clear version tracking across the entire stack.
