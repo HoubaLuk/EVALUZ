@@ -1,4 +1,4 @@
-# EVALUZ (v3.2.5 - Air-Gap Robust)
+# EVALUZ (v3.3.0 - Instructor Isolated)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
