@@ -1,6 +1,6 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.2.1 (Air-Gap Robust)
-**Poslední aktualizace:** 17. března 2026
+**Verze:** 3.2.2 (Air-Gap Robust)
+**Poslední aktualizace:** 18. března 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -92,7 +92,13 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.2.1 (Aktuální) - LLM Parameter Enforcement
+### v3.2.2 (Aktuální) - vLLM Batching & Parallel Processing
+- **Výkon:** Implementace paralelního vyhodnocování ve frontě (`EvaluationQueue`) s nastavitelnou souběžností (výchozí 4).
+- **vLLM Integration:** Výrazně vyšší propustnost při hromadném zpracování ÚZ díky využití vLLM batchingu.
+- **Fix:** Oprava zasekávání fronty při chybě jednoho studenta (lepší error handling v `_run_task` s využitím Semaphore).
+- **Stabilita:** Doporučení pro Qwen modely (vypnutí "Enable Thinking" ve Fázi 2 pro úsporu tokenů při malém kontextovém okně 16k).
+
+### v3.2.1 - LLM Parameter Enforcement
 - **Cíl:** Odstranění chyb spojených s limity kontextového okna (Error 400) a respektování nastavení v administraci.
 - **Změny:**
   - **Backend**: Respektování hodnoty `Max Output Tokens` (z databáze) v `llm_engine.py` namísto natvrdo zakódovaných 16k.

@@ -46,28 +46,36 @@ class EvaluationQueue:
             except asyncio.QueueEmpty:
                 break
         
-    async def worker(self):
+    async def worker(self, concurrency: int = 4):
         """
         WORKER (DĚLNÍK) NA POZADÍ:
-        Tento proces běží nekonečně dlouho. Jakmile se ve frontě objeví úkol, vezme ho, 
-        spustí příslušnou funkci (handler) a po dokončení čeká na další.
+        Tento proces běží nekonečně dlouho a zpracovává úkoly z fronty PARALELNĚ.
+        Využívá Semaphor k omezení maximálního počtu souběžných úkolů, 
+        aby nedošlo k přehlcení LLM serveru (batch processing).
         """
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _run_task(task_data):
+            async with semaphore:
+                try:
+                    handler = task_data.get('handler')
+                    if handler:
+                        await handler(task_data)
+                except Exception as e:
+                    print(f"Chyba při zpracování úkolu: {e}")
+                finally:
+                    self.queue.task_done()
+
         while True:
             try:
-                # Čekáme na úkol (pokud je fronta prázdná, worker zde prostě spí a nezatěžuje procesor).
+                # Čekáme na úkol (pokud je fronta prázdná, worker zde prostě spí).
                 task_data = await self.queue.get()
-                
-                # Handler je funkce, která má úkol skutečně provést (většinou process_single_file_bg z evaluate.py).
-                handler = task_data.get('handler')
-                if handler:
-                    await handler(task_data)
+                # Spustíme úkol asynchronně (neblokujeme smyčku).
+                asyncio.create_task(_run_task(task_data))
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"Kritická chyba ve workeru na pozadí: {e}")
-            finally:
-                # Potvrdíme, že úkol je hotový (důležité pro vnitřní správu fronty).
-                self.queue.task_done()
 
 # Vytvoření jedné globální instance, kterou sdílí celá aplikace.
 eval_queue = EvaluationQueue()
