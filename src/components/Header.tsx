@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { API_BASE_URL } from '../utils/api';
-
 import { User, ChevronDown, Settings, LogOut, UserPen, Moon, Sun } from 'lucide-react';
+import packageJson from '../../package.json';
 
 interface HeaderProps {
     setIsAdminOpen: (isOpen: boolean) => void;
@@ -50,8 +49,8 @@ export function Header({ setIsAdminOpen, lecturerName }: HeaderProps) {
                 <div className="flex flex-col justify-center hidden md:flex flex-1 pr-12">
                     <h1 className="text-sm font-medium tracking-wide text-[#facc15] leading-tight">Útvar policejního vzdělávání a služební přípravy</h1>
                     <h1 className="text-xl font-bold tracking-tight text-[#facc15] leading-tight mb-0.5">EVALUZ: Vyhodnocování ÚZ účastníků ZOP</h1>
-                    <div className="text-xs text-blue-200/60 mt-0.5">
-                        <span>Vytvořeno interně na ÚPVSP. 2026. verze 3.1.1</span>
+                    <div className="text-xs text-blue-200/60 dark:text-blue-200/40 mt-0.5">
+                        <span>Vytvořeno interně na ÚPVSP. 2026. verze {packageJson.version}</span>
                     </div>
                 </div>
                 <h1 className="text-xl font-bold tracking-widest md:hidden">EVALUZ</h1>

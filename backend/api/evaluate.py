@@ -264,9 +264,7 @@ async def evaluate_batch(
     
     print(f">>> [BATCH START] Zahajuji paralelní vyhodnocení pro {total_processing} studentů.")
 
-    # Zajištění rate limitingu a bezpečného zápisu pro dávkové zpracování na pozadí
-    from asyncio import Semaphore, Lock
-    evaluate_semaphore = Semaphore(1)
+    from asyncio import Lock
     evaluate_db_lock = Lock()
 
     # Asynchronní handler pro jeden soubor (bude spuštěn přes eval_queue.worker)
@@ -300,22 +298,15 @@ async def evaluate_batch(
                 
             scanner.scan_text(extracted_text)
                 
-            async with evaluate_semaphore:
-                # Upozornění frontendu na zahájení práce (z fronty -> do procesu)
-                await eval_queue.broadcast({
-                    "type": "EVAL_START",
-                    "student_name": student_name,
-                    "scenario_id": scen_id
-                })
-                
-                llm_result_dict = await evaluate_report(
-                    report_text=extracted_text,
-                    criteria_markdown=criteria_markdown,
-                    system_prompt=system_prompt,
-                    db=db_bg,
-                    scenario_id=scen_id,
-                    student_log_prefix=student_name
-                )
+            # AI analýza poslaná do fronty
+            llm_result_dict = await evaluate_report(
+                report_text=extracted_text,
+                criteria_markdown=criteria_markdown,
+                system_prompt=system_prompt,
+                db=db_bg,
+                scenario_id=scen_id,
+                student_log_prefix=student_name
+            )
             
             async with evaluate_db_lock:
                 identita = llm_result_dict.get('identita', {})

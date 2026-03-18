@@ -1,5 +1,5 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.2.4 (Air-Gap Robust)
+**Verze:** 3.2.5 (Air-Gap Robust)
 **Poslední aktualizace:** 18. března 2026
 
 ## Obsah
@@ -92,7 +92,14 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.2.4 (Aktuální) - UI & Export Stability
+### v3.2.5 (Aktuální) - Parallel Processing & Dark Mode Overhaul
+- **Performance:** Oprava paralelního vyhodnocování (Batch Processing) – odstraněn redundantní zámek v backendu, který způsoboval sekvenční zpracování i při volné kapacitě GPU. Nyní plné využití paralelity L40S.
+- **UI/UX:** Kompletní vizuální redesign **Dark Mode** pro maximální čitelnost. Nahrazení tmavě modrých textů vysoce kontrastní zlatou/žlutou (`#facc15`) a bílou barvou.
+- **UI/UX:** Zpřehlednění ovládacích prvků (tlačítka pro nahrávání, stepper, výběr studentů) pomocí nového barevného schématu.
+- **Versioning:** Verze aplikace v záhlaví je nyní plně dynamická a čerpá se přímo z `package.json`.
+- **Toast:** Zkrácena a zpřesněna hláška po dokončení hromadného vyhodnocení.
+
+### v3.2.4 - UI & Export Stability
 - **Oprava:** Odstraněno "zasekávání" tlačítka hromadného vyhodnocení po úspěšném dokončení dávky.
 - **UI:** Zvětšen prostor pro editaci kritérií v kartě "Precizace kritérií" tak, aby využíval plnou výšku okna.
 - **UI:** Přejmenováno pole zpětné vazby na "Zpětná vazba lektora" a navýšena jeho výška pro lepší čitelnost delších textů.

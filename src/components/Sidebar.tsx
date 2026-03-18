@@ -308,7 +308,7 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                         </div>
                         {showSyncHelp && (
                             <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                                <p className="font-bold text-[#002855] dark:text-blue-300 mb-1">📁 Požadovaná struktura složek:</p>
+                                <p className="font-bold text-[#002855] dark:text-[#facc15] mb-1">📁 Požadovaná struktura složek:</p>
                                 <code className="block bg-white dark:bg-slate-800 p-2 rounded text-[11px] font-mono mb-2">
                                     Kořenová složka/<br />
                                     &nbsp;&nbsp;├── ZOP 02-2026/<br />
@@ -349,12 +349,12 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                             onKeyDown={handleInputKeyDown}
                             onBlur={handleSaveEdit}
                             placeholder="Název třídy (Enter pro uložení)"
-                            className="w-full px-3 py-1.5 border border-[#002855]/30 rounded-md text-sm outline-none focus:border-[#002855] focus:ring-1 focus:ring-[#002855]"
+                            className="w-full px-3 py-1.5 border border-[#002855]/30 dark:border-slate-600 rounded-md text-sm outline-none focus:border-[#002855] dark:focus:border-[#D4AF37] focus:ring-1 focus:ring-[#002855] dark:focus:ring-[#D4AF37] bg-white dark:bg-slate-800"
                         />
                     ) : (
                         <button
                             onClick={(e) => startEdit(e, { type: 'new_class' })}
-                            className="w-full flex items-center justify-center gap-2 py-2 border-2 border-[#002855] text-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors text-sm font-semibold whitespace-nowrap"
+                            className="w-full flex items-center justify-center gap-2 py-2 border-2 border-[#002855] dark:border-[#D4AF37] text-[#002855] dark:text-[#facc15] rounded-lg hover:bg-[#002855] dark:hover:bg-[#D4AF37] hover:text-white transition-colors text-sm font-semibold whitespace-nowrap"
                         >
                             <Folder className="w-4 h-4" />
                             + Nová třída
@@ -363,7 +363,7 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                 ) : (
                     <button
                         onClick={() => setIsCollapsed(false)}
-                        className="w-full flex items-center justify-center p-2 text-[#002855] border-2 border-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors"
+                        className="w-full flex items-center justify-center p-2 text-[#002855] dark:text-[#facc15] border-2 border-[#002855] dark:border-[#D4AF37] rounded-lg hover:bg-[#002855] dark:hover:bg-[#D4AF37] hover:text-white transition-colors"
                         title="Přidat třídu"
                     >
                         <Folder className="w-5 h-5" />
@@ -461,12 +461,12 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                                                 key={scen.id}
                                                 onClick={() => onSelectScenario(cls.id, scen.id)}
                                                 className={`relative group/scen flex items-center justify-between px-2 py-1.5 rounded-md transition-colors cursor-pointer ${isSelected
-                                                    ? 'bg-[#002855]/5 text-[#002855] border-l-2 border-[#002855]'
-                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50'
+                                                    ? 'bg-[#002855]/5 dark:bg-[#facc15]/10 text-[#002855] dark:text-[#facc15] border-l-2 border-[#002855] dark:border-[#D4AF37]'
+                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
                                                     }`}
                                             >
                                                 <div className="flex items-center gap-2 pl-1 flex-1">
-                                                    <FileText className={`w-4 h-4 ${isSelected ? 'text-[#002855]' : 'text-slate-400'}`} />
+                                                    <FileText className={`w-4 h-4 ${isSelected ? 'text-[#002855] dark:text-[#facc15]' : 'text-slate-400'}`} />
                                                     {editMode?.type === 'rename_scenario' && editMode.scenId === scen.id ? (
                                                         <input
                                                             autoFocus
