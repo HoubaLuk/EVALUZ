@@ -58,3 +58,20 @@
 **Impact:**
 - Significant reduction in evaluation latency for large class batches.
 - Efficient utilization of L40S GPU resources.
+
+## 2026-03-18: UI & Export Stability Fixes (v3.2.4)
+
+**Status:** Decided & Implemented
+**Context:** Production feedback indicated issues with the evaluation button status, PDF font errors in the containerized environment, and sub-optimal UI sizing for criteria editing.
+
+**Decisions:**
+1. **Batch Progress Reset:** Fixed the `totalToEvaluate` accumulation bug in `TabEvaluation.tsx` by resetting it for each new batch.
+2. **Flexible UI Layout:** Converted the main tab container in `App.tsx` and `TabCriteria.tsx` to a full-height flex column, ensuring the criteria editor expands to fill the screen on large displays.
+3. **Robust PDF Generation:** Fixed `BASE_DIR` calculation in `pdf_generator.py` and updated `add_font` parameters to match `fpdf2` standards, resolving the Docker font error.
+4. **Excel Data Integrity:** Changed the "Average Score" export to a numeric value with right-alignment for better readability.
+5. **Feedback Field UX:** Renamed the final feedback label to "Zpětná vazba lektora" and increased the textarea height to `h-40` (approx 10 lines) for easier proofreading.
+
+**Impact:**
+- Eliminates UI hanging during large batch evaluations.
+- Significantly improves readability and usability of the criteria editor.
+- Fixes critical production crashes during PDF report generation.

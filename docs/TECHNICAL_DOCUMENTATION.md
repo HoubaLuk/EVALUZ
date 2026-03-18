@@ -1,5 +1,5 @@
 # Komplexní# Technická dokumentace EVALUZ
-**Verze:** 3.2.3 (Air-Gap Robust)
+**Verze:** 3.2.4 (Air-Gap Robust)
 **Poslední aktualizace:** 18. března 2026
 
 ## Obsah
@@ -92,10 +92,14 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.2.3 (Aktuální) - L40S Hardware Optimization
-- **Výkon:** Navýšení souběžnosti fronty na 8 paralelních úloh pro optimální využití 48GB VRAM na kartách NVIDIA L40S.
-- **Strategie:** Implementace "sliding window" přístupu pro plynulé batchování požadavků na vLLM server.
-- **Vyladění:** Potvrzena nutnost hlídat součet (Input + Output tokens) vůči 16k limitu serveru – doporučená redukce počtu kritérií na 10–12 při zachování detailních citací.
+### v3.2.4 (Aktuální) - UI & Export Stability
+- **Oprava:** Odstraněno "zasekávání" tlačítka hromadného vyhodnocení po úspěšném dokončení dávky.
+- **UI:** Zvětšen prostor pro editaci kritérií v kartě "Precizace kritérií" tak, aby využíval plnou výšku okna.
+- **UI:** Přejmenováno pole zpětné vazby na "Zpětná vazba lektora" a navýšena jeho výška pro lepší čitelnost delších textů.
+- **Export PDF:** Oprava chyby fontů při generování tloušťkové analýzy třídy (nyní robustní i v Docker prostředí).
+- **Export Excel:** Průměrné skóre nyní exportováno jako číslo (zarovnání vpravo) pro čistší profesionální výstup.
+
+### v3.2.3 - L40S Hardware Optimization
 
 ### v3.2.2 - vLLM Batching & Parallel Processing
 - **Výkon:** Implementace paralelního vyhodnocování ve frontě (`EvaluationQueue`) s nastavitelnou souběžností (výchozí 4).

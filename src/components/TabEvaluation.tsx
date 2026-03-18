@@ -371,7 +371,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             return;
         }
 
-        setTotalToEvaluate(prev => prev + studentIdsBeingProcessed.length);
+        setTotalToEvaluate(studentIdsBeingProcessed.length);
         setIsEvaluating(true);
 
         setStudents(current => current.map(s =>
@@ -1015,12 +1015,13 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-4">
                                 <div>
                                     <label className="block text-xs font-bold text-[#002855] uppercase tracking-wider mb-2">
-                                        Závěrečná pedagogická zpětná vazba (Editovatelné)
+                                        Zpětná vazba lektora
                                     </label>
                                     <textarea
-                                        className="w-full border border-slate-300 dark:border-slate-600 rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-24 bg-slate-50 dark:bg-slate-800/50 leading-relaxed"
+                                        className="w-full border border-slate-300 dark:border-slate-600 rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-40 bg-slate-50 dark:bg-slate-800/50 leading-relaxed shadow-inner"
                                         value={activeStudentData.zpetna_vazba || ""}
                                         onChange={(e) => handleFeedbackChange(e.target.value)}
+                                        placeholder="Zde uveďte celkové shrnutí a doporučení pro studenta..."
                                     />
                                 </div>
                                 <div className="flex justify-end gap-3">

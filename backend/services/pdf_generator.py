@@ -8,10 +8,11 @@ from models.db_models import StudentEvaluation, Lecturer, EvaluationCriteria, Cr
 from utils.sorting import sort_evaluations_by_surname
 
 
-# Paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PUBLIC_DIR = os.path.join(BASE_DIR, "public")
-FONTS_DIR = os.path.join(BASE_DIR, "backend", "static", "fonts")
+# Paths (Robust calculation for both local and Docker)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# BASE_DIR is now 'backend' folder
+PUBLIC_DIR = os.path.join(os.path.dirname(BASE_DIR), "public")
+FONTS_DIR = os.path.join(BASE_DIR, "static", "fonts")
 LOGO_PATH = os.path.join(PUBLIC_DIR, "ÚPVSP bez okrajů.jpg")
 
 # Pomocná funkce pro převod plného názvu hodnosti na zkratku
@@ -43,7 +44,7 @@ class PDFReport(FPDF):
     def header(self):
         """Definuje záhlaví dokumentu (logo ÚPVSP a název systému). Zobrazuje se pouze na první straně."""
         if self.page_no() == 1:
-            logo_path = os.path.join(BASE_DIR, "backend", "static", "logo_upvsp.png")
+            logo_path = os.path.join(BASE_DIR, "static", "logo_upvsp.png")
             if os.path.exists(logo_path):
                 self.image(logo_path, x=10, y=8, w=20)
             
@@ -377,7 +378,11 @@ def generate_class_excel(class_id: int, db: Session, lecturer_id: int, scenario_
     avg_score = round(total_score_sum / total_students, 1) if total_students > 0 else 0
     ws_summary.append(["Celkový počet hodnocených studentů", total_students])
     ws_summary.append(["Max. možný počet bodů", max_pts])
-    ws_summary.append(["Průměrné skóre", f"{avg_score} b."])
+    
+    # Průměrné skóre jako číslo pro automatické zarovnání vpravo
+    ws_summary.append(["Průměrné skóre (body)", avg_score])
+    ws_summary.cell(row=ws_summary.max_row, column=2).number_format = '#,##0.0'
+    
     ws_summary.append(["Úspěšnost (pod 50 %)", dist["0-50%"]])
     ws_summary.append(["Úspěšnost (51-80 %)", dist["51-80%"]])
     ws_summary.append(["Úspěšnost (81-100 %)", dist["81-100%"]])
@@ -543,15 +548,18 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         )
 
         # Registrace fontů
-        fonts_exist = os.path.exists(os.path.join(FONTS_DIR, "DejaVuSans.ttf"))
-        if fonts_exist:
-            pdf.add_font('DejaVu', '', os.path.join(FONTS_DIR, "DejaVuSans.ttf"), uni=True)
-            pdf.add_font('DejaVu', 'B', os.path.join(FONTS_DIR, "DejaVuSans-Bold.ttf"), uni=True)
-            pdf.add_font('DejaVu', 'I', os.path.join(FONTS_DIR, "DejaVuSans-Oblique.ttf"), uni=True)
+        font_regular = os.path.join(FONTS_DIR, "DejaVuSans.ttf")
+        font_bold = os.path.join(FONTS_DIR, "DejaVuSans-Bold.ttf")
+        font_oblique = os.path.join(FONTS_DIR, "DejaVuSans-Oblique.ttf")
+        
+        if os.path.exists(font_regular):
+            pdf.add_font('DejaVu', '', font_regular)
+            pdf.add_font('DejaVu', 'B', font_bold)
+            pdf.add_font('DejaVu', 'I', font_oblique)
         else:
-            pdf.add_font('DejaVu', '', 'Arial', uni=True)
-            pdf.add_font('DejaVu', 'B', 'Arial', uni=True)
-            pdf.add_font('DejaVu', 'I', 'Arial', uni=True)
+            # V Dockeru / PC bez DejaVu fallback na standardní fonty (bez UTF-8 podpory pro CZ, ale nespadne to)
+            pdf.set_font("Helvetica", size=10)
+            print(f">>> [PDF WARNING] Fonty nenalezeny v {FONTS_DIR}, pouzivam Helvetica fallback.")
             
         pdf.add_page()
         
