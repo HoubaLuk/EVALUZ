@@ -228,7 +228,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
             {/* HLAVIČKA A EXPORTNÍ TLAČÍTKA */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h3 className="text-xl font-semibold text-[#002855]">Globální analýza třídy</h3>
+                    <h3 className="text-xl font-semibold text-[#002855] dark:text-blue-200">Globální analýza třídy</h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                         Agregovaná data a pedagogické statistiky
                     </p>
@@ -262,7 +262,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
             </div>
 
             {loading ? (
-                <div className="w-full h-64 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center text-[#002855]">
+                <div className="w-full h-64 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center text-[#002855] dark:text-blue-300">
                     <RefreshCw className="w-8 h-8 animate-spin mb-4" />
                     <p className="font-semibold">Generuji analýzu, AI čte výsledky třídy...</p>
                 </div>
@@ -318,8 +318,8 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                         {/* Koláčový graf rozložení ziskovosti */}
                         <div className="col-span-1 bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
                             <div className="flex items-center gap-2 mb-4">
-                                <PieChartIcon className="w-5 h-5 text-[#002855]" />
-                                <h4 className="font-semibold text-[#002855]">Percentuální ziskovost (rozložení studentů)</h4>
+                                <PieChartIcon className="w-5 h-5 text-[#002855] dark:text-blue-400" />
+                                <h4 className="font-semibold text-[#002855] dark:text-blue-300">Percentuální ziskovost (rozložení studentů)</h4>
                             </div>
                             <div className="flex-1 w-full h-full min-h-[160px] flex items-center justify-center">
                                 {pieData.length > 0 ? (
@@ -353,8 +353,8 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                         {/* SLOUPCOVÝ GRAF ÚSPĚŠNOSTI DLOUHÝCH KRITÉRIÍ */}
                         <div className="col-span-1 bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                             <div className="flex items-center gap-2 mb-6">
-                                <BarChart3 className="w-5 h-5 text-[#002855]" />
-                                <h4 className="font-semibold text-[#002855]">Úspěšnost jednotlivých kritérií</h4>
+                                <BarChart3 className="w-5 h-5 text-[#002855] dark:text-blue-400" />
+                                <h4 className="font-semibold text-[#002855] dark:text-blue-300">Úspěšnost jednotlivých kritérií</h4>
                             </div>
                             <div className="h-[500px] w-full relative -left-4">
                                 <ResponsiveContainer width="100%" height="100%">
@@ -485,7 +485,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                     <div className="bg-white dark:bg-slate-800 max-w-2xl w-full max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                         <div className="flex items-center justify-between px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
                             <div>
-                                <h3 className="text-lg font-bold text-[#002855]">
+                                <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200">
                                     {previewStudentData?.name || 'Načítání...'}
                                 </h3>
                                 {previewStudentData && (

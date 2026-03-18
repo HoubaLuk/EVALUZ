@@ -427,7 +427,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     if (errorCount > 0) {
                         setToastMessage(`Vyhodnocování dokončeno s ${errorCount} chybami. Zkontrolujte prosím seznam záznamů.`);
                     } else {
-                        setToastMessage("Vyhodnocovávání celé dávky bylo úspěšně dokončeno.");
+                        setToastMessage("Dávka úspěšně zpracována.");
                     }
                     
                     setTimeout(() => {
@@ -749,7 +749,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     />
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-2 px-4 py-2 border-2 border-[#002855] text-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors text-sm font-semibold"
+                        className="flex items-center gap-2 px-4 py-2 border-2 border-[#002855] text-[#002855] dark:border-[#D4AF37] dark:text-[#facc15] rounded-lg hover:bg-[#002855] dark:hover:bg-[#D4AF37] hover:text-white transition-colors text-sm font-semibold shadow-sm"
                     >
                         <Upload className="w-4 h-4" />
                         Nahrát ÚZ
@@ -819,7 +819,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 {/* Left Column: Student Roster (35%) */}
                 <div className="w-[35%] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
                     <div className="p-4 border-b border-slate-100 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
-                        <h3 className="font-semibold text-[#002855]">Seznam studentů</h3>
+                        <h3 className="font-semibold text-[#002855] dark:text-[#facc15]">Seznam studentů</h3>
                         <span className="text-xs font-medium text-slate-400">{selectedIds.length}/{students.length}</span>
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -845,7 +845,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                 />
                                 <div className="flex-1 min-w-0 flex items-center justify-between group-inner">
                                     <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
-                                        <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855]' : 'text-slate-700 dark:text-slate-300'}`}>
+                                        <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855] dark:text-[#facc15]' : 'text-slate-700 dark:text-slate-300'}`}>
                                             {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim()}
                                         </p>
                                         {!student.identita && student.status === 'evaluated' && (
@@ -917,7 +917,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         <User className="w-5 h-5 text-slate-500 dark:text-slate-400" />
                                     </div>
                                     <div>
-                                        <h2 className="text-xl font-bold text-[#002855] flex items-center gap-2">
+                                        <h2 className="text-xl font-bold text-[#002855] dark:text-[#facc15] flex items-center gap-2">
                                             Hodnocení: {activeStudentData.identita?.prijmeni ? `${activeStudentData.identita.prijmeni.toUpperCase()} ${activeStudentData.identita.jmeno || ''}, ${activeStudentData.identita.hodnost || ''}` : activeStudentData.cleanedName || activeStudentData.name}
                                             {(!activeStudentData.identita && activeStudentData.status === 'evaluated') && (
                                                 <Tooltip content="Identita studenta byla manuálně ověřena lektorem.">
@@ -956,7 +956,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         <tbody className="divide-y divide-slate-100">
                                             {activeStudentData.evaluationDetails?.map((detail, idx) => (
                                                 <tr key={idx} className={`hover:bg-slate-50 dark:bg-slate-800/50/50 transition-colors ${detail.upraveno_lektorem ? 'bg-blue-50/30' : ''}`}>
-                                                    <td className="px-6 py-5 text-sm font-medium text-[#002855] align-top">
+                                                    <td className="px-6 py-5 text-sm font-medium text-[#002855] dark:text-white align-top">
                                                         <div className="flex items-center gap-2">
                                                             {detail.nazev}
                                                         </div>
@@ -1014,7 +1014,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             {/* Bottom Action Bar */}
                             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-[#002855] uppercase tracking-wider mb-2">
+                                    <label className="block text-xs font-bold text-[#002855] dark:text-[#facc15] uppercase tracking-wider mb-2">
                                         Zpětná vazba lektora
                                     </label>
                                     <textarea

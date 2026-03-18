@@ -266,8 +266,8 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
             <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden max-w-[50%]">
                 <div className="p-4 border-b border-slate-100 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <Wand2 className="w-5 h-5 text-[#002855]" />
-                        <h3 className="font-semibold text-[#002855]">AI Asistent</h3>
+                        <Wand2 className="w-5 h-5 text-[#002855] dark:text-[#facc15]" />
+                        <h3 className="font-semibold text-[#002855] dark:text-[#facc15]">AI Asistent</h3>
                     </div>
                 </div>
 
@@ -341,7 +341,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                         <button
                             onClick={handleSendMessage}
                             disabled={!inputValue.trim() || isChatLoading || isUploading || !scenarioId}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-[#002855] text-white rounded-md hover:bg-[#002855]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-[#002855] dark:bg-[#D4AF37] text-white rounded-md hover:bg-[#002855]/90 dark:hover:bg-[#C5A028] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <ChevronRight className="w-4 h-4" />
                         </button>
@@ -351,7 +351,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
 
             {/* Right Column: Criteria Output */}
             <div className="flex-1 flex flex-col gap-4 max-w-[50%]">
-                <div className="flex items-center justify-between bg-[#002855] text-white p-4 rounded-xl shadow-sm">
+                <div className="flex items-center justify-between bg-[#002855] dark:bg-slate-800 text-white p-4 rounded-xl shadow-sm border dark:border-slate-700">
                     <h3 className="text-lg font-bold tracking-wide">
                         HODNOTÍCÍ KRITÉRIA: {scenarioName ? scenarioName.toUpperCase() : (scenarioId ? scenarioId.toUpperCase() : 'NEVYBRÁNO')}
                     </h3>

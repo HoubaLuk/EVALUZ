@@ -368,9 +368,9 @@ export default function EvaluzDashboard() {
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-2">
               <span>{activeClass?.name || 'Nevybráno'}</span>
               <ChevronRight className="w-4 h-4" />
-              <span className="text-[#002855] dark:text-blue-300 font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
+              <span className="text-[#002855] dark:text-[#facc15] font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
             </div>
-            <h2 className="text-3xl font-bold text-[#002855] dark:text-blue-100">{activeScenario?.name || 'EVALUZ'}</h2>
+            <h2 className="text-3xl font-bold text-[#002855] dark:text-white">{activeScenario?.name || 'EVALUZ'}</h2>
 
             <p className="text-slate-500 dark:text-slate-400 mt-1">Hodnocení úředních záznamů dle precizovaných kritérií.</p>
           </div>
@@ -381,7 +381,7 @@ export default function EvaluzDashboard() {
               {/* Connecting Line */}
               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0"></div>
               <div
-                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-[#002855] rounded-full z-0 transition-all duration-300"
+                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-[#002855] dark:bg-[#D4AF37] rounded-full z-0 transition-all duration-300"
                 style={{ width: activeTab === 'criteria' ? '0%' : activeTab === 'evaluation' ? '50%' : '100%' }}
               ></div>
 
@@ -406,7 +406,7 @@ export default function EvaluzDashboard() {
                 const circleColorClass = isCompleted
                   ? `bg-[#D4AF37] text-white overflow-hidden transition-all duration-300 ${isActive ? 'ring-4 ring-[#D4AF37]/20 shadow-md' : ''}`
                   : isActive
-                    ? 'bg-[#002855] text-white ring-4 ring-[#002855]/20 shadow-md transition-all duration-300'
+                    ? 'bg-[#002855] dark:bg-[#D4AF37] text-white ring-4 ring-[#002855]/20 dark:ring-[#D4AF37]/20 shadow-md transition-all duration-300'
                     : 'bg-white dark:bg-slate-800 text-slate-400 border-2 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:border-slate-600 transition-all duration-300';
 
                 return (
@@ -418,7 +418,7 @@ export default function EvaluzDashboard() {
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${circleColorClass}`}>
                       {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.num}
                     </div>
-                    <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855]' : isCompleted ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400'
+                    <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855] dark:text-[#facc15]' : isCompleted ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400'
                       }`}>
                       {step.label}
                     </span>

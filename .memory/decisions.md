@@ -1,5 +1,21 @@
 # Architectural Decisions Log
 
+## 2026-03-18: Parallel processing bugfix & Dark Mode Overhaul (v3.2.5)
+
+**Status:** Decided & Implemented
+**Context:** In v3.2.4, batch evaluations were still processing sequentially despite the parallel queue worker. The issue was traced to a redundant `Semaphore(1)` in the `evaluate_batch` endpoint. Additionally, the Dark Mode was reported as unreadable due to low-contrast dark blue text on a dark background.
+
+**Decisions:**
+1. **Removed Redundant Locking:** Deleted `evaluate_semaphore = Semaphore(1)` from `backend/api/evaluate.py`. This ensures that multiple requests from the same batch are concurrently added to the global `EvaluationQueue`, which now correctly handles parallelism (concurrency=8).
+2. **Visual Contrast Overhaul:** Re-designed the Dark Mode color system. Switched from `text-[#002855]` to `dark:text-[#facc15]` (Gold) for all primary highlights, headings, and active states.
+3. **Dynamic Versioning:** Refactored `Header.tsx` to import the version directly from `package.json` using a side-channel import, eliminating the risk of version mismatch between the UI and the codebase.
+
+**Impact:**
+- **Performance:** Parallel evaluation on L40S is now fully unlocked (verified by backend logs showing simultaneous AI calls).
+- **Usability:** Significant improvement in readability and professional aesthetics in Dark Mode.
+- **Maintainability:** Simplified version management.
+
+
 ## 2026-03-17: vLLM Integration & Batch UI Stability
 
 **Status:** Decided & Implemented
