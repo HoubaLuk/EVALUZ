@@ -429,8 +429,8 @@ export default function EvaluzDashboard() {
           </div>
 
           {/* Tab Content Area */}
-          <div className="flex-1 overflow-y-auto p-8">
-            <div className={`${activeTab === 'criteria' ? 'block' : 'hidden'}`}>
+          <div className="flex-1 overflow-hidden p-8 flex flex-col">
+            <div className={`flex-1 ${activeTab === 'criteria' ? 'flex flex-col' : 'hidden'}`}>
               <TabCriteria
                 scenarioId={activeScenarioId}
                 scenarioName={activeScenario?.name || null}
@@ -438,7 +438,7 @@ export default function EvaluzDashboard() {
               />
             </div>
 
-            <div className={`${activeTab === 'evaluation' ? 'block' : 'hidden'}`}>
+            <div className={`flex-1 ${activeTab === 'evaluation' ? 'flex flex-col' : 'hidden'}`}>
               <TabEvaluation
                 selectedStudent={selectedStudent}
                 setSelectedStudent={setSelectedStudent}

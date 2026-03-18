@@ -1,4 +1,4 @@
-# EVALUZ (v3.2.3 - Air-Gap Robust)
+# EVALUZ (v3.2.4 - Air-Gap Robust)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
