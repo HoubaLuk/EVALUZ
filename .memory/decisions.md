@@ -108,3 +108,18 @@
 - **Security:** Complete data isolation between instructors. Users can no longer see, delete, or influence each other's data.
 - **Privacy:** Status updates via WebSockets are now private.
 - **Reliability:** Eliminated cache collisions where one instructor's analysis was overwritten by another.
+111: 
+112: ## 2026-03-18: WebSocket Fix & Auto-Migration (v3.3.1)
+113: 
+114: **Status:** Decided & Implemented
+115: **Context:** After deploying v3.3.0 to the production server, users reported 403 Forbidden errors on WebSockets and 500 Internal Server Errors in analytics. The causes were identified as (1) the frontend missing the mandatory `lecturer_id` in the WebSocket URL and (2) the PostgreSQL database lacking the new `lecturer_id` columns required by the code.
+116: 
+117: **Decisions:**
+118: 1. **Robust WebSocket Handshake:** Updated `App.tsx` and `TabEvaluation.tsx` to explicitly fetch the `lecturerId` from the authenticated profile and include it in the `/ws/{id}` path.
+119: 2. **In-App Schema Migration:** Integrated a `run_migrations(engine)` utility into the backend's `init_db()` sequence. This function uses raw SQL to "ADD COLUMN IF NOT EXISTS" for `lecturer_id` and other recent additions, ensuring that a simple code pull and restart fixes the database on the server without manual SQL intervention.
+120: 3. **Version Synchronization:** Unified all version labels (`package.json`, `main.py`, `README.md`, and technical docs) to `v3.3.1` to ensure consistency in logs and UI.
+121: 
+122: **Impact:**
+123: - **Maintenance:** "Zero-touch" updates for system administrators (database fixes itself on boot).
+124: - **Stability:** Fixed critical production crashes in analytics and real-time status tracking.
+125: - **Clarity:** Clear version tracking across the entire stack.

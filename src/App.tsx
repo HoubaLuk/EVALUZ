@@ -25,6 +25,7 @@ export default function EvaluzDashboard() {
   const [authState, setAuthState] = useState<'CHECKING' | 'RECOGNIZED_EMPTY_DB' | 'LOGIN_REQUIRED' | 'AUTHENTICATED' | 'FORCE_PASSWORD_CHANGE'>('CHECKING');
   const [token, setToken] = useState<string | null>(localStorage.getItem('upvsp_token'));
   const [lecturerName, setLecturerName] = useState<string>('Načítám profil...');
+  const [lecturerId, setLecturerId] = useState<number | null>(null);
 
   // Auth Form State (Login jen v App.tsx, zbytek v AdminModal)
   const [authEmail, setAuthEmail] = useState('');
@@ -152,6 +153,7 @@ export default function EvaluzDashboard() {
             const fullName = `${meData.rank_shortcut || ''} ${meData.title_before || ''} ${meData.first_name || ''} ${meData.last_name || ''}`;
             const displayRole = meData.funkcni_zarazeni ? ` - ${meData.funkcni_zarazeni}` : ' - Lektor';
             setLecturerName(fullName.replace(/\s+/g, ' ').trim() + displayRole);
+            setLecturerId(meData.id);
 
             if (meData.must_change_password) {
               setAuthState('FORCE_PASSWORD_CHANGE');
@@ -446,6 +448,7 @@ export default function EvaluzDashboard() {
                 className={activeClass?.name}
                 scenarioName={activeScenario?.name}
                 onEvaluatedChange={setHasEvaluations}
+                lecturerId={lecturerId}
               />
             </div>
 
