@@ -62,9 +62,19 @@ def run_migrations(engine):
                 END $$;
             """))
         else:
-            # SQLITE: lecturer_id (pridani sloupce v sqlite je omezené, ale pro vývoj postačí try/except)
+            # SQLITE: lecturer_id & class_id
             try:
                 conn.execute(text("ALTER TABLE class_analyses ADD COLUMN lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE class_analyses ADD COLUMN class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE;"))
+            except Exception:
+                pass
+            try:
+                # Remove unique index if exists (SQLite specific)
+                conn.execute(text("DROP INDEX IF EXISTS ix_class_analyses_scenario_id;"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_class_analyses_scenario_id ON class_analyses(scenario_id);"))
             except Exception:
                 pass
 

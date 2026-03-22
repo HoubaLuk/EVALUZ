@@ -24,6 +24,7 @@ class Lecturer(Base):
     school_location = Column(String, default="")
     funkcni_zarazeni = Column(String, default="")
     is_superadmin = Column(Boolean, default=False)
+    is_admin = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     must_change_password = Column(Boolean, default=False)
 
@@ -60,6 +61,7 @@ class StudentEvaluation(Base):
     student_identity = Column(Text) # JSON structure from LLM
     source_text = Column(Text) # Extracted text from the original document
     source_filename = Column(String) # Original filename
+    created_at = Column(String) # ISO 8601 timestamp
     
 class AppSettings(Base):
     __tablename__ = "app_settings"

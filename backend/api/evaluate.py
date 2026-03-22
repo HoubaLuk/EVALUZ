@@ -27,7 +27,7 @@ router = APIRouter(
     tags=["evaluation"]
 )
 
-@router.websocket("/ws/{lecturer_id}")
+@router.websocket("/ws")
 async def websocket_eval_status(websocket: WebSocket, lecturer_id: int):
     """
     WEBSOCKET ENDPOINT:
@@ -146,25 +146,42 @@ async def fast_scan_batch(
                     default_class = db.query(ClassRoom).filter(ClassRoom.lecturer_id == current_user.id).first()
 
             # 5. Zápis do databáze (nebo aktualizace existujícího záznamu)
-            new_eval = StudentEvaluation(
-                student_name=student_name,
-                cleaned_name=cleaned_display_name,
-                class_id=default_class.id if default_class else 1,
-                scenario_name=scenario_id,
-                source_text=extracted_text,
-                source_filename=student_name,
-                lecturer_id=current_user.id,
-                student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
-            )
+            class_id_to_use = default_class.id if default_class else 1
+            existing_eval = db.query(StudentEvaluation).filter(
+                StudentEvaluation.student_name == student_name,
+                StudentEvaluation.lecturer_id == current_user.id,
+                StudentEvaluation.scenario_name == scenario_id
+            ).first()
             
-            db.add(new_eval)
-            db.commit()
-            db.refresh(new_eval)
+            if existing_eval:
+                existing_eval.cleaned_name = cleaned_display_name
+                existing_eval.source_text = extracted_text
+                if identita:
+                    existing_eval.student_identity = json.dumps(identita, ensure_ascii=False)
+                db.commit()
+                db.refresh(existing_eval)
+                eval_to_return = existing_eval
+            else:
+                new_eval = StudentEvaluation(
+                    student_name=student_name,
+                    cleaned_name=cleaned_display_name,
+                    class_id=class_id_to_use,
+                    scenario_name=scenario_id,
+                    source_text=extracted_text,
+                    source_filename=student_name,
+                    lecturer_id=current_user.id,
+                    student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}",
+                    created_at=datetime.datetime.now().isoformat()
+                )
+                db.add(new_eval)
+                db.commit()
+                db.refresh(new_eval)
+                eval_to_return = new_eval
             
             return {
                 "filename": file.filename,
-                "id": new_eval.id,
-                "cleaned_name": new_eval.cleaned_name,
+                "id": eval_to_return.id,
+                "cleaned_name": eval_to_return.cleaned_name,
                 "identita": identita
             }
         except Exception as e:
@@ -288,6 +305,9 @@ async def evaluate_batch(
         # Otevření VLASTNÍ DB session, protože HTTP request už pravděpodobně skončil
         db_bg = SessionLocal()
         
+        start_time = datetime.datetime.now()
+        print(f">>> [QUEUE] Start vyhodnocování: {student_name} v {start_time.strftime('%H:%M:%S')}")
+        
         # Notifikace start
         await eval_queue.broadcast({
             "type": "EVAL_START",
@@ -373,6 +393,10 @@ async def evaluate_batch(
                     db_bg.add(eval_record)
                     
                 db_bg.commit()
+            
+            end_time = datetime.datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            print(f">>> [QUEUE] Vyhodnocení hotovo: {student_name} v {end_time.strftime('%H:%M:%S')} (trvalo {duration:.1f}s)")
             
             await eval_queue.broadcast({
                 "type": "EVAL_SUCCESS",

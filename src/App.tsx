@@ -9,6 +9,7 @@ import { AdminModal } from './components/AdminModal';
 import { TabCriteria } from './components/TabCriteria';
 import { TabEvaluation } from './components/TabEvaluation';
 import { TabAnalytics } from './components/TabAnalytics';
+import { TabMonitor } from './components/TabMonitor';
 
 import { API_BASE_URL } from './utils/api';
 
@@ -26,6 +27,7 @@ export default function EvaluzDashboard() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('upvsp_token'));
   const [lecturerName, setLecturerName] = useState<string>('Načítám profil...');
   const [lecturerId, setLecturerId] = useState<number | null>(null);
+  const [isAdminUser, setIsAdminUser] = useState<boolean>(false);
 
   // Auth Form State (Login jen v App.tsx, zbytek v AdminModal)
   const [authEmail, setAuthEmail] = useState('');
@@ -154,6 +156,7 @@ export default function EvaluzDashboard() {
             const displayRole = meData.funkcni_zarazeni ? ` - ${meData.funkcni_zarazeni}` : ' - Lektor';
             setLecturerName(fullName.replace(/\s+/g, ' ').trim() + displayRole);
             setLecturerId(meData.id);
+            setIsAdminUser(meData.is_superadmin || meData.is_admin);
 
             if (meData.must_change_password) {
               setAuthState('FORCE_PASSWORD_CHANGE');
@@ -352,83 +355,95 @@ export default function EvaluzDashboard() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans flex flex-col transition-colors duration-200">
-      <Header setIsAdminOpen={setIsAdminOpen} lecturerName={lecturerName} />
+      <Header 
+          setIsAdminOpen={setIsAdminOpen} 
+          lecturerName={lecturerName} 
+          isAdminUser={isAdminUser} 
+          activeTab={activeTab}
+          onOpenStatistics={() => setActiveTab(activeTab === 'statistics' ? 'evaluation' : 'statistics')} 
+      />
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          classes={classes}
-          setClasses={setClasses}
-          activeClassId={activeClassId}
-          activeScenarioId={activeScenarioId}
-          onSelectScenario={handleSelectScenario}
-        />
+        {activeTab !== 'statistics' && (
+          <Sidebar
+            classes={classes}
+            setClasses={setClasses}
+            activeClassId={activeClassId}
+            activeScenarioId={activeScenarioId}
+            onSelectScenario={handleSelectScenario}
+          />
+        )}
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Header */}
-          <div className="bg-white dark:bg-slate-800 px-8 py-6 border-b border-slate-200 dark:border-slate-700 transition-colors duration-200">
-            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-2">
-              <span>{activeClass?.name || 'Nevybráno'}</span>
-              <ChevronRight className="w-4 h-4" />
-              <span className="text-[#002855] dark:text-[#facc15] font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
-            </div>
-            <h2 className="text-3xl font-bold text-[#002855] dark:text-white">{activeScenario?.name || 'EVALUZ'}</h2>
+          {activeTab !== 'statistics' && (
+            <>
+              <div className="bg-white dark:bg-slate-800 px-8 py-6 border-b border-slate-200 dark:border-slate-700 transition-colors duration-200">
+                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-2">
+                  <span>{activeClass?.name || 'Nevybráno'}</span>
+                  <ChevronRight className="w-4 h-4" />
+                  <span className="text-[#002855] dark:text-[#facc15] font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
+                </div>
+                <h2 className="text-3xl font-bold text-[#002855] dark:text-white">{activeScenario?.name || 'EVALUZ'}</h2>
 
-            <p className="text-slate-500 dark:text-slate-400 mt-1">Hodnocení úředních záznamů dle precizovaných kritérií.</p>
-          </div>
+                <p className="text-slate-500 dark:text-slate-400 mt-1">Hodnocení úředních záznamů dle precizovaných kritérií.</p>
+              </div>
 
-          {/* Workflow Stepper */}
-          <div className="px-8 py-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
-            <div className="flex items-center justify-between max-w-4xl mx-auto relative">
-              {/* Connecting Line */}
-              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0"></div>
-              <div
-                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-[#002855] dark:bg-[#D4AF37] rounded-full z-0 transition-all duration-300"
-                style={{ width: activeTab === 'criteria' ? '0%' : activeTab === 'evaluation' ? '50%' : '100%' }}
-              ></div>
+              {/* Workflow Stepper */}
+              <div className="px-8 py-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center justify-between max-w-4xl mx-auto relative">
+                  {/* Connecting Line */}
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0"></div>
+                  <div
+                    className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-[#002855] dark:bg-[#D4AF37] rounded-full z-0 transition-all duration-300"
+                    style={{ width: activeTab === 'criteria' ? '0%' : activeTab === 'evaluation' ? '50%' : '100%' }}
+                  ></div>
 
-              {/* Steps */}
-              {[
-                { id: 'criteria', num: '1', label: 'Precizace kritérií' },
-                { id: 'evaluation', num: '2', label: 'Vyhodnocení ÚZ' },
-                { id: 'analytics', num: '3', label: 'Analýza třídy' }
-              ].map((step, index) => {
-                const isActive = activeTab === step.id;
-                let isCompleted = false;
-                const _hasAnalytics = !!(activeScenarioId && cachedAnalytics[activeScenarioId] && cachedAnalytics[activeScenarioId].stats?.length > 0);
+                  {/* Steps */}
+                  {[
+                    { id: 'criteria', num: '1', label: 'Precizace kritérií' },
+                    { id: 'evaluation', num: '2', label: 'Vyhodnocení ÚZ' },
+                    { id: 'analytics', num: '3', label: 'Analýza třídy' }
+                  ].map((step, index) => {
+                    const isActive = activeTab === step.id;
+                    let isCompleted = false;
+                    const _hasAnalytics = !!(activeScenarioId && cachedAnalytics[activeScenarioId] && cachedAnalytics[activeScenarioId].stats?.length > 0);
 
-                if (index === 0) {
-                  isCompleted = hasCriteria;
-                } else if (index === 1) {
-                  isCompleted = hasEvaluations || activeTab === 'analytics' || _hasAnalytics;
-                } else if (index === 2) {
-                  isCompleted = _hasAnalytics;
-                }
+                    if (index === 0) {
+                      isCompleted = hasCriteria;
+                    } else if (index === 1) {
+                      isCompleted = hasEvaluations || activeTab === 'analytics' || _hasAnalytics;
+                    } else if (index === 2) {
+                      isCompleted = _hasAnalytics;
+                    }
 
-                const circleColorClass = isCompleted
-                  ? `bg-[#D4AF37] text-white overflow-hidden transition-all duration-300 ${isActive ? 'ring-4 ring-[#D4AF37]/20 shadow-md' : ''}`
-                  : isActive
-                    ? 'bg-[#002855] dark:bg-[#D4AF37] text-white ring-4 ring-[#002855]/20 dark:ring-[#D4AF37]/20 shadow-md transition-all duration-300'
-                    : 'bg-white dark:bg-slate-800 text-slate-400 border-2 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:border-slate-600 transition-all duration-300';
+                    const circleColorClass = isCompleted
+                      ? `bg-[#D4AF37] text-white overflow-hidden transition-all duration-300 ${isActive ? 'ring-4 ring-[#D4AF37]/20 shadow-md' : ''}`
+                      : isActive
+                        ? 'bg-[#002855] dark:bg-[#D4AF37] text-white ring-4 ring-[#002855]/20 dark:ring-[#D4AF37]/20 shadow-md transition-all duration-300'
+                        : 'bg-white dark:bg-slate-800 text-slate-400 border-2 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:border-slate-600 transition-all duration-300';
 
-                return (
-                  <button
-                    key={step.id}
-                    onClick={() => setActiveTab(step.id as Tab)}
-                    className="relative z-10 flex flex-col items-center gap-2 group"
-                  >
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${circleColorClass}`}>
-                      {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.num}
-                    </div>
-                    <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855] dark:text-[#facc15]' : isCompleted ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400'
-                      }`}>
-                      {step.label}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                    return (
+                      <button
+                        key={step.id}
+                        onClick={() => setActiveTab(step.id as Tab)}
+                        className="relative z-10 flex flex-col items-center gap-2 group"
+                      >
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${circleColorClass}`}>
+                          {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.num}
+                        </div>
+                        <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855] dark:text-[#facc15]' : isCompleted ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400'
+                          }`}>
+                          {step.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Tab Content Area */}
           <div className="flex-1 overflow-hidden p-8 flex flex-col">
@@ -471,6 +486,10 @@ export default function EvaluzDashboard() {
                   setActiveTab('evaluation');
                 }}
               />
+            </div>
+
+            <div className={`${activeTab === 'statistics' ? 'block' : 'hidden'} h-full flex-1 overflow-visible`}>
+              <TabMonitor />
             </div>
           </div>
         </main>
