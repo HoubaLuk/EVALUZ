@@ -93,7 +93,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         let ws: WebSocket;
         const connectWs = () => {
             if (!lecturerId) return;
-            const wsUrl = API_BASE_URL.replace('http', 'ws') + `/evaluate/ws/${lecturerId}`;
+            const wsUrl = API_BASE_URL.replace('http', 'ws') + `/evaluate/ws?lecturer_id=${lecturerId}`;
             ws = new WebSocket(wsUrl);
             ws.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
@@ -152,7 +152,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
                 setStudents(currentList => {
                     const historyStudents: Student[] = data.map((evalRecord: any, index: number) => {
-                        const existing = currentList.find(s => s.id === evalRecord.id || s.name === evalRecord.jmeno_studenta);
+                        const existing = currentList.find(s => 
+                            s.id === evalRecord.id || 
+                            (s.name && evalRecord.jmeno_studenta && s.name.normalize('NFC') === evalRecord.jmeno_studenta.normalize('NFC'))
+                        );
                         let finalStatus: 'evaluated' | 'pending' | 'evaluating' = (evalRecord.vysledky && evalRecord.vysledky.length > 0) ? 'evaluated' : 'pending';
 
                         // Zachovat lokálně běžící status vyhodnocování, i když server ještě hlásí 'pending'
@@ -167,14 +170,16 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             identita: evalRecord.identita,
                             status: finalStatus,
                             score: evalRecord.celkove_skore,
-                            maxScore: 25,
+                            maxScore: evalRecord.vysledky ? evalRecord.vysledky.length : 0,
                             evaluationDetails: evalRecord.vysledky,
                             zpetna_vazba: evalRecord.zpetna_vazba
                         };
                     });
 
                     // Najít ty, co visí jen čistě lokálně a server o nich neví
-                    const offline = currentList.filter(curr => !historyStudents.some(hs => hs.name === curr.name));
+                    const offline = currentList.filter(curr => !historyStudents.some(hs => 
+                        hs.name && curr.name && hs.name.normalize('NFC') === curr.name.normalize('NFC')
+                    ));
 
                     const merged = [...historyStudents, ...offline];
 
@@ -256,7 +261,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 cleanedName: displayName,
                 status: 'pending',
                 score: 0,
-                maxScore: 25,
+                maxScore: 0,
             };
         });
         setStudents(prev => [...optimisticStudents, ...prev]);
@@ -943,7 +948,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
                                 <div className="p-4 border-b border-slate-100 bg-[#002855] text-white flex items-center gap-2">
                                     <Wand2 className="w-5 h-5 text-[#D4AF37]" />
-                                    <h3 className="font-semibold text-base tracking-wide">Výsledky AI Evaluace Serveru</h3>
+                                    <h3 className="font-semibold text-base tracking-wide">Výsledky hodnocení AI aplikací EVALUZ</h3>
                                 </div>
                                 <div className="flex-1 overflow-y-auto">
                                     <table className="w-full text-left border-collapse">

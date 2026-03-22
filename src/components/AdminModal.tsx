@@ -645,7 +645,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Školní útvar / Pracoviště</label>
+                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Organizační článek</label>
                                             <select
                                                 value={profile.school_location}
                                                 onChange={e => setProfile({ ...profile, school_location: e.target.value })}

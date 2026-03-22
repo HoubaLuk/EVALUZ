@@ -196,6 +196,7 @@ def read_users_me(current_user: Lecturer = Depends(get_current_lecturer)):
         "school_location": current_user.school_location,
         "funkcni_zarazeni": current_user.funkcni_zarazeni,
         "is_superadmin": current_user.is_superadmin,
+        "is_admin": current_user.is_admin,
         "must_change_password": current_user.must_change_password
     }
 

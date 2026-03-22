@@ -224,6 +224,8 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     ]
     
     try:
+        import time
+        start_t = time.time()
         from services.llm_engine import chat_completion
         ai_insight = await chat_completion(
             messages=messages,
@@ -232,6 +234,8 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             db=db,
             phase="phase3"
         )
+        end_t = time.time()
+        print(f">>> [ANALYTICS] Generování AI analýzy (phase3) trvalo {end_t - start_t:.1f} sekund.")
     except Exception as e:
         print(f"Failed to generate insight: {e}")
         ai_insight = "Nepodařilo se spojit s asistentem pro vygenerování analýzy. Zkontrolujte připojení k vLLM."
@@ -265,6 +269,14 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     
     cached_analysis.content_json = json.dumps(res, ensure_ascii=False)
     cached_analysis.created_at = datetime.datetime.now().isoformat()
-    db.commit()
+    
+    from sqlalchemy.exc import IntegrityError
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # V případě chyby unikátnosti prostě zkusíme update znova v nové session, 
+        # nebo to prostě ignorujeme, protože data už tam jsou od jiného requestu
+        print(f">>> [ANALYTICS] Ignoruji IntegrityError (race condition) pro scenario {scenario_id}")
  
     return res

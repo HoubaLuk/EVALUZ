@@ -124,10 +124,10 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
 
         # Pokud model podporuje JSON mode a není to LM Studio/Ollama (které mívají nestandardní implementaci),
         # můžeme ho zkusit aktivovat. Ale pro jistotu ho u local providerů vynecháme a spoléháme na prompt.
-        if platform == "vllm":
+        if platform == "vllm" and "openrouter.ai" not in api_url:
             kwargs["response_format"] = {"type": "json_object"}
-        elif platform in ["lmstudio", "ollama"]:
-            # LM Studio často hlásí chybu 400, pokud response_format není 'text' nebo 'json_schema'
+        elif platform in ["lmstudio", "ollama"] or "openrouter.ai" in api_url:
+            # LM Studio a OpenRouter modely často selhávají při vynuceném JSON mode
             pass 
         else:
             # Default pro OpenAI/ostatní
@@ -164,6 +164,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         end_idx = clean_text.rfind('}')
         
         if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
+            print(f"{prefix}CRITICAL ERROR: Odpověď LLM neobsahuje JSON (chybí {{ nebo }}). RAW RESPONSE:\n{raw_response}\n--- END RAW ---")
             raise ValueError("V odpovědi LLM nebyl nalezen žádný JSON objekt.")
             
         clean_response = clean_text[start_idx:end_idx+1]
@@ -266,7 +267,7 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
             "max_tokens": 1000 
         }
         
-        if platform == "vllm":
+        if platform == "vllm" and "openrouter.ai" not in api_url:
             kwargs["response_format"] = {"type": "json_object"}
         
         if platform == "vllm":
@@ -294,6 +295,7 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
         start_idx = clean_text.find('{')
         end_idx = clean_text.rfind('}')
         if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
+            print(f"[FAST-SCAN] Missing JSON object. RAW: {raw_response}")
             return {}
             
         clean_response = clean_text[start_idx:end_idx+1]

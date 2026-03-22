@@ -700,3 +700,102 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         print(">>> [PDF GEN ERROR] Chycena výjimka při generování třídního reportu:")
         traceback.print_exc()
         raise Exception(f"Failed to generate PDF: {str(e)}")
+
+def generate_dashboard_excel(data: dict) -> bytes:
+    """
+    Generuje vícestránkový Excel report ze statistik využití (dashboard).
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import datetime
+
+    wb = Workbook()
+    
+    header_fill = PatternFill(start_color="002855", end_color="002855", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    footer_text = "Generováno systémem EVALUZ - Vyvinuto na ÚPVSP"
+
+    # --- LIST 1: Celkové shrnutí ---
+    ws_summary = wb.active
+    ws_summary.title = "Základní přehled"
+    
+    ws_summary.merge_cells('A1:B1')
+    ws_summary['A1'] = "STATISTIKY VYUŽITÍ EVALUZ"
+    ws_summary['A1'].font = Font(size=14, bold=True, color="002855")
+    ws_summary['A1'].alignment = Alignment(horizontal="center")
+    
+    ws_summary.append(["Role:", str(data.get("role", "")).upper()])
+    ws_summary.append(["Organizační článek:", data.get("org_unit", "")])
+    ws_summary.append(["Datum exportu:", datetime.datetime.now().strftime("%d. %m. %Y %H:%M")])
+    ws_summary.append([]) # Mezera
+    
+    start_row = ws_summary.max_row + 1
+    ws_summary.append(["Metrika", "Hodnota"])
+    for cell in ws_summary[start_row]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    ws_summary.append(["Celkový počet hodnocených ÚZ", data.get("total_evaluations", 0)])
+    by_lec = data.get("by_lecturer", [])
+    ws_summary.append(["Počet aktivních lektorů", len(by_lec)])
+    
+    ws_summary.column_dimensions['A'].width = 35
+    ws_summary.column_dimensions['B'].width = 15
+    ws_summary.append([])
+    ws_summary.append([footer_text])
+
+    # --- LIST 2: Organizační články ---
+    if data.get("role") == "superadmin":
+        ws_org = wb.create_sheet(title="Organizační články")
+        ws_org.append(["Název článku", "Počet ÚZ"])
+        for cell in ws_org[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            
+        for row in data.get("by_org_unit", []):
+            ws_org.append([row.get("name"), row.get("count")])
+            
+        ws_org.column_dimensions['A'].width = 60
+        ws_org.column_dimensions['B'].width = 15
+        
+        ws_org.append([])
+        ws_org.append([footer_text])
+
+    # --- LIST 3: Lektoři ---
+    ws_lec = wb.create_sheet(title="Aktivita lektorů")
+    ws_lec.append(["Jméno lektora", "Počet vyhodnocených ÚZ"])
+    for cell in ws_lec[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        
+    for row in data.get("by_lecturer", []):
+        ws_lec.append([row.get("name"), row.get("count")])
+        
+    ws_lec.column_dimensions['A'].width = 40
+    ws_lec.column_dimensions['B'].width = 25
+    
+    ws_lec.append([])
+    ws_lec.append([footer_text])
+
+    # --- LIST 4: Časová osa ---
+    ws_time = wb.create_sheet(title="Časová osa")
+    ws_time.append(["Datum", "Počet vyhodnocených ÚZ"])
+    for cell in ws_time[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        
+    for row in data.get("timeline", []):
+        ws_time.append([row.get("date"), row.get("count")])
+        
+    ws_time.column_dimensions['A'].width = 20
+    ws_time.column_dimensions['B'].width = 25
+    
+    ws_time.append([])
+    ws_time.append([footer_text])
+
+    from io import BytesIO
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return output.getvalue()

@@ -55,6 +55,8 @@ app.include_router(criteria.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
+from api.statistics import router as statistics_router
+app.include_router(statistics_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

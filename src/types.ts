@@ -1,4 +1,4 @@
-export type Tab = 'criteria' | 'evaluation' | 'analytics';
+export type Tab = 'criteria' | 'evaluation' | 'analytics' | 'statistics';
 
 export interface Scenario {
   id: string;

@@ -1,13 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User, ChevronDown, Settings, LogOut, UserPen, Moon, Sun } from 'lucide-react';
+import { User, ChevronDown, Settings, LogOut, UserPen, Moon, Sun, BarChart3 } from 'lucide-react';
 import packageJson from '../../package.json';
+import { Tab } from '../types';
 
 interface HeaderProps {
     setIsAdminOpen: (isOpen: boolean) => void;
     lecturerName: string;
+    isAdminUser: boolean;
+    activeTab: Tab;
+    onOpenStatistics: () => void;
 }
 
-export function Header({ setIsAdminOpen, lecturerName }: HeaderProps) {
+export function Header({ setIsAdminOpen, lecturerName, isAdminUser, activeTab, onOpenStatistics }: HeaderProps) {
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -109,11 +113,24 @@ export function Header({ setIsAdminOpen, lecturerName }: HeaderProps) {
                     </button>
                     <button
                         onClick={() => setIsAdminOpen(true)}
-                        className="flex items-center gap-2 text-sm font-medium text-white transition-colors bg-[#004085] dark:bg-slate-700/80 hover:bg-[#0050a0] dark:hover:bg-slate-600 px-3 py-2 rounded-lg border border-[#004e9c] dark:border-slate-600"
+                        className="flex items-center gap-2 text-sm font-medium text-white transition-colors bg-[#004085] dark:bg-slate-700/80 hover:bg-[#0050a0] dark:hover:bg-slate-600 px-3 py-2 rounded-lg border border-[#004e9c] dark:border-slate-600 shadow-sm"
                     >
                         <Settings className="w-4 h-4" />
                         Administrace
                     </button>
+                    {isAdminUser && (
+                        <button
+                            onClick={onOpenStatistics}
+                            className={`flex items-center gap-2 text-sm font-medium transition-colors px-3 py-2 rounded-lg border shadow-sm ${
+                                activeTab === 'statistics'
+                                    ? 'bg-white text-[#002855] border-white hover:bg-slate-100 hover:text-[#001f44]'
+                                    : 'bg-[#D4AF37] dark:bg-yellow-600/80 text-white hover:bg-[#c2a033] dark:hover:bg-yellow-500 border-[#c2a033] dark:border-yellow-600'
+                            }`}
+                        >
+                            <BarChart3 className="w-4 h-4" />
+                            {activeTab === 'statistics' ? "Zpět k evaluacím" : "Statistiky evaluací"}
+                        </button>
+                    )}
                 </div>
             </div>
 
