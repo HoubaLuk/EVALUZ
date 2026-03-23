@@ -14,3 +14,8 @@
 
 ## LLM Robustnost
 - **Sanitizer:** Vlastní regex cleaning pro extract JSONu i z modelů s vnitřním uvažováním (Qwen, DeepSeek).
+
+## Klientská Synchronizace
+- **HDD Sync:** Využívá `File System Access API`. 
+- **Bezpečnost:** Vyžaduje tzv. **Secure Context** (HTTPS nebo localhost). Na běžném HTTP je funkce prohlížečem blokována.
+
