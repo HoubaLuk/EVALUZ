@@ -1,4 +1,4 @@
-# EVALUZ (v3.3.1 - Instructor Isolated & Auto-Migrate)
+# EVALUZ (v3.4.1 - Statistics Dashboard & Excel Export)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
@@ -9,18 +9,20 @@ EVALUZ je specializovaná platforma pro automatizovanou analýzu úředních zá
 ## 📖 Dokumentace
 
 Pro detailní pochopení systému, jeho architektury a historie vývoje navštivte:
-👉 **[Technická dokumentace (Enterprise-grade)](file:///Users/lukashribnak/Vyhodnocov%C3%A1n%C3%AD%20%C3%9AZ%20pomoc%C3%AD%20AI/Vyhodnocov-n-Z/docs/TECHNICAL_DOCUMENTATION.md)**
+👉 **[Technická dokumentace (Enterprise-grade)](file:///Users/lukashribnak/Vyhodnocov%C3%A1n%C3%AD%20%C3%9AZ%20pomoc%C3%AD%20AI/EVALUZ/docs/TECHNICAL_DOCUMENTATION.md)**
 
 ---
 
 ## 🏗 Architektura ve zkratce
 
-- **Frontend**: React + Vite + TypeScript. (Build: `npm run build`)
+- **Frontend**: React + Vite + TypeScript + Recharts. (Build: `npm run build`)
 - **Backend**: FastAPI (Python 3.10+). Asynchronní fronta úloh pro LLM evaluaci.
 - **Databáze**: PostgreSQL 17 (produkční) / SQLite (vývojová).
-- **AI Vrstva**: Podpora pro vLLM (OpenRouter), Reasoning modely (Qwen 3.5, DeepSeek).
+- **Exporty**: Excel (.xlsx via openpyxl) a PDF (fpdf2).
+- **AI Vrstva**: Podpora pro vLLM (OpenRouter), Reasoning modely (Qwen 2.5, DeepSeek).
 
 ---
+
 
 ## ❄️ Air-Gapped Instalace (Bez přístupu k internetu)
 
