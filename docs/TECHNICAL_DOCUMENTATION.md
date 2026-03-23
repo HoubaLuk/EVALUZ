@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.3.1 (Auto-Migrate & WebSocket Fix)
-**Poslední aktualizace:** 18. března 2026 (odpoledne)
+**Verze:** 3.4.1 (Statistics Dashboard & Excel Export)
+**Poslední aktualizace:** 23. března 2026 (ráno)
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -93,7 +93,15 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.3.1 (Aktuální) - Auto-Migration & WebSocket Fix
+### v3.4.1 (Aktuální) - Statistics Dashboard & Excel Export
+- **Statistiky (TabMonitor):** Implementace nové analytické karty pro Superadminy a Adminy. Využití knihovny **Recharts** pro vizualizaci aktivity napříč organizačními články.
+- **Excel Export:** Robustní generátor `.xlsx` souborů založený na `openpyxl`. Obsahuje sešity pro základní přehled, organizační články, aktivitu lektorů a časový monitoring.
+- **Backend API:** Nový router `api/statistics.py` s filtrem podle rolí (`is_superadmin`, `is_admin`) a organizačních článků (`school_location`).
+- **DB Schéma:** Přidány sloupce `Lecturer.is_admin` pro střední management a `StudentEvaluation.created_at` pro historický reporting.
+- **UI/UX:** Sjednocení designu akčních tlačítek (modrá pro globální dashboard dle logiky Administrace).
+- **Bezpečnost:** Dokumentace Secure Context (HTTPS/localhost) pro HDD Sync synchronizaci.
+
+### v3.3.1 - Auto-Migration & WebSocket Fix
 - **Fix:** Oprava kritické chyby `403 Forbidden` u WebSocketů. Frontend nyní správně posílá ID lektora v URL.
 - **DB Migrace:** Implementována funkce `run_migrations` v jádru backendu. Databáze se nyní při startu aplikace sama zkontroluje a přidá chybějící sloupce, což usnadňuje nasazování nových verzí na server.
 - **Robustnost:** Přidána granulární kontrola existence sloupců v tabulkách `class_analyses` (opraven chybějící `class_id`), `golden_examples` a `export_history` pro zamezení chyb `UndefinedColumn`.
