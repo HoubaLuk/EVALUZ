@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="EVALUZ Backend",
     description="Systém pro AI vyhodnocování modelových situací",
-    version="3.3.1",
+    version="3.4.1",
     lifespan=lifespan
 )
 
@@ -61,7 +61,7 @@ app.include_router(statistics_router, prefix="/api/v1")
 @app.get("/")
 async def root():
     """Základní kontrola, že server běží."""
-    return {"message": "EVALUZ API is running", "version": "3.3.1"}
+    return {"message": "EVALUZ API is running", "version": "3.4.1"}
 
 @app.get("/api/v1/health")
 async def health_check():

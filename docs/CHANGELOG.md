@@ -1,5 +1,10 @@
 # CHANGELOG - EVALUZ
 
+## [v3.4.1] - 2026-03-23
+### Změněno
+- **Hlavička:** Sjednocení designu tlačítka "Statistiky evaluací" (změna barvy ze zlaté na modrou dle Administrace).
+- **Synchronizace (HDD Sync):** Doplněno varování v nápovědě ohledně nutnosti protokolu HTTPS (bezpečnostní omezení prohlížeče pro File System Access API).
+
 ## [v3.4.0] - 2026-03-22
 ### Přidáno
 - **Dashboard Statistik (TabMonitor):** Nová analytická karta pro Superadminy a Adminy s vizualizací Recharts.
