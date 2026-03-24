@@ -716,7 +716,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
     return (
         <div
-            className={`h-full flex flex-col gap-6 max-w-[1400px] mx-auto relative transition-colors duration-200 ${isDragging ? 'bg-blue-50/50 rounded-2xl ring-4 ring-blue-500/20' : ''}`}
+            className={`h-full flex flex-col gap-6 max-w-[1500px] w-full mx-auto px-4 xl:px-8 relative transition-colors duration-200 ${isDragging ? 'bg-blue-50/50 rounded-2xl ring-4 ring-blue-500/20' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
