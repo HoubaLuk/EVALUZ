@@ -162,6 +162,60 @@ def run_migrations(engine):
                 END $$;
             """))
 
+        # 7. TABULKA: lecturers
+        if not is_sqlite:
+            conn.execute(text("""
+                DO $$ 
+                BEGIN 
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='lecturers') THEN
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='is_admin') THEN
+                            ALTER TABLE lecturers ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='is_superadmin') THEN
+                            ALTER TABLE lecturers ADD COLUMN is_superadmin BOOLEAN DEFAULT FALSE;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='is_active') THEN
+                            ALTER TABLE lecturers ADD COLUMN is_active BOOLEAN DEFAULT TRUE;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='must_change_password') THEN
+                            ALTER TABLE lecturers ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='title_after') THEN
+                            ALTER TABLE lecturers ADD COLUMN title_after VARCHAR DEFAULT '';
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='rank_shortcut') THEN
+                            ALTER TABLE lecturers ADD COLUMN rank_shortcut VARCHAR DEFAULT '';
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='rank_full') THEN
+                            ALTER TABLE lecturers ADD COLUMN rank_full VARCHAR DEFAULT '';
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='school_location') THEN
+                            ALTER TABLE lecturers ADD COLUMN school_location VARCHAR DEFAULT '';
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='lecturers' AND column_name='funkcni_zarazeni') THEN
+                            ALTER TABLE lecturers ADD COLUMN funkcni_zarazeni VARCHAR DEFAULT '';
+                        END IF;
+                    END IF;
+                END $$;
+            """))
+        else:
+            cols = [
+                ("is_admin", "BOOLEAN DEFAULT FALSE"),
+                ("is_superadmin", "BOOLEAN DEFAULT FALSE"),
+                ("is_active", "BOOLEAN DEFAULT TRUE"),
+                ("must_change_password", "BOOLEAN DEFAULT FALSE"),
+                ("title_after", "VARCHAR DEFAULT ''"),
+                ("rank_shortcut", "VARCHAR DEFAULT ''"),
+                ("rank_full", "VARCHAR DEFAULT ''"),
+                ("school_location", "VARCHAR DEFAULT ''"),
+                ("funkcni_zarazeni", "VARCHAR DEFAULT ''"),
+            ]
+            for c_name, c_type in cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE lecturers ADD COLUMN {c_name} {c_type};"))
+                except Exception:
+                    pass
+
         # Commit migrations
         conn.commit()
 
