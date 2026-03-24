@@ -126,21 +126,20 @@
 126: - **Stability:** Fixed critical production crashes (500 Internal Server Error) caused by missing `class_analyses.class_id`.
 127: - **Clarity:** Clear version tracking across the entire stack.
 
-## 2026-03-23: Statistics Dashboard & Excel Export (v3.4.1)
+## 2026-03-24: Database Resilience & UI Unification (v3.4.2)
 
 **Status:** Decided & Implemented
-**Context:** Management at UPVSP requested a global overview of AI utilization across different organizational units (school locations) and the ability to export this data for reporting. Previous versions only provided scenario-specific analytics.
+**Context:** Production deployment on server encountered multiple `psycopg2.errors.UndefinedColumn` errors (e.g., `is_admin`, `created_at`). These were caused by fragmented manual database interventions. Additionally, the UI layout suffered from horizontal "jitter" during tab switching due to mismatched maximum widths between components.
 
 **Decisions:**
-1. **Global Monitoring (TabMonitor):** Implemented a new "Statistics" dashboard accessible to Superadmins and Admins. It visualizes aggregate data across all scenarios and lecturers using **Recharts**.
-2. **Multi-Sheet Excel Export:** Developed a robust Excel generator using `openpyxl`. The exported file contains multiple sheets: "Základní přehled", "Organizační články", "Aktivita lektorů", and "Časová osa".
-3. **Role-Based Access Control (RBAC):** Added a new `is_admin` flag to the `Lecturer` model. Superadmins see global data, while Admins are restricted to their own `school_location`.
-4. **Data Persistence:** Added `created_at` timestamp to `StudentEvaluation` to enable timeline-based statistics (previously only scenario-based was available).
-5. **UI Consistency:** Standardized the color of the "Statistics" action button to blue (`#002855`) to match the Administration module's visual language, distinguishing it from scenario-specific "Gold" actions.
-6. **Secure Context Documentation:** Updated documentation to clarify that `File System Access API` (HDD Sync) requires a Secure Context (HTTPS or localhost) due to browser security restrictions.
+1. **Aggressive Auto-Migration:** Refactored `run_migrations` in `backend/core/database.py` to perform an exhaustive check of all critical columns across `lecturers`, `student_evaluations`, and `class_analyses`. Used `DO $$ BEGIN ... END $$` blocks to ensure the schema is always synchronized with the SQLAlchemy models on startup without manual SQL.
+2. **Layout Foundation Unification:** Standardized the maximum width of all main tab containers (`TabCriteria`, `TabEvaluation`, `TabAnalytics`) to `max-w-[1500px]`. This eliminates horizontal shifting when navigating the workflow and provides more horizontal space for the evaluation details panel. 
+3. **Identity Recovery:** Verified that the 403 Forbidden on WebSockets was a side-effect of the missing `is_admin` column (failed auth profile fetch). Restored full WebSocket functionality by ensuring the instructor's profile is correctly loaded.
 
 **Impact:**
-- **Management Visibility:** Provides leadership with clear insights into system adoption and effectiveness.
-- **Reporting Efficiency:** Automates the creation of complex Excel reports that previously required manual data aggregation.
-- **Security:** Enhanced data isolation with more granular roles.
-- **Reliability:** Improved database schema with audit timestamps.
+- **Stability:** Zero-touch recovery from inconsistent DB states on production servers.
+- **UX:** Smooth, professional transitions between application states.
+- **Maintainability:** Hardened the database initialization layer against future column additions.
+
+---
+*Archived by System Scribe ✍️*
