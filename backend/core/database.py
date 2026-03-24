@@ -55,6 +55,22 @@ def run_migrations(engine):
                         CREATE INDEX IF NOT EXISTS idx_class_analyses_class_id ON class_analyses(class_id);
                     END IF;
                     
+                    -- Add scenario_id
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='class_analyses') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='class_analyses' AND column_name='scenario_id') THEN
+                        ALTER TABLE class_analyses ADD COLUMN scenario_id VARCHAR;
+                        CREATE INDEX IF NOT EXISTS idx_class_analyses_scenario_id ON class_analyses(scenario_id);
+                    END IF;
+
+                    -- Add content_json
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='class_analyses') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='class_analyses' AND column_name='content_json') THEN
+                        ALTER TABLE class_analyses ADD COLUMN content_json TEXT;
+                    END IF;
+
+                    -- Add created_at
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='class_analyses') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='class_analyses' AND column_name='created_at') THEN
+                        ALTER TABLE class_analyses ADD COLUMN created_at VARCHAR;
+                    END IF;
+                    
                     -- Drop unique scenario_id
                     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'class_analyses_scenario_id_key') THEN
                         ALTER TABLE class_analyses DROP CONSTRAINT class_analyses_scenario_id_key;
@@ -83,18 +99,51 @@ def run_migrations(engine):
             conn.execute(text("""
                 DO $$ 
                 BEGIN 
-                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='lecturer_id') THEN
-                        ALTER TABLE student_evaluations ADD COLUMN lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE;
-                        CREATE INDEX IF NOT EXISTS idx_student_evaluations_lecturer_id ON student_evaluations(lecturer_id);
-                    END IF;
-                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='cleaned_name') THEN
-                        ALTER TABLE student_evaluations ADD COLUMN cleaned_name TEXT;
-                    END IF;
-                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='student_identity') THEN
-                        ALTER TABLE student_evaluations ADD COLUMN student_identity TEXT;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='student_evaluations') THEN
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='lecturer_id') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE;
+                            CREATE INDEX IF NOT EXISTS idx_student_evaluations_lecturer_id ON student_evaluations(lecturer_id);
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='cleaned_name') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN cleaned_name TEXT;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='student_identity') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN student_identity TEXT;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='source_text') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN source_text TEXT;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='source_filename') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN source_filename VARCHAR;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='created_at') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN created_at VARCHAR;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='class_id') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='scenario_name') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN scenario_name VARCHAR DEFAULT 'scen-1';
+                        END IF;
                     END IF;
                 END $$;
             """))
+        else:
+            cols = [
+                ("source_text", "TEXT"),
+                ("source_filename", "VARCHAR"),
+                ("created_at", "VARCHAR"),
+                ("class_id", "INTEGER REFERENCES classes(id) ON DELETE CASCADE"),
+                ("scenario_name", "VARCHAR DEFAULT 'scen-1'"),
+                ("cleaned_name", "TEXT"),
+                ("student_identity", "TEXT"),
+                ("lecturer_id", "INTEGER REFERENCES lecturers(id) ON DELETE CASCADE")
+            ]
+            for c_name, c_type in cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE student_evaluations ADD COLUMN {c_name} {c_type};"))
+                except Exception:
+                    pass
             
         # 3. TABULKA: classes
         if not is_sqlite:
