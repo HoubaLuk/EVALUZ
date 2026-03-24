@@ -1,9 +1,15 @@
 # CHANGELOG - EVALUZ
 
-## [v3.4.1] - 2026-03-23
+## [v3.4.2] - 2026-03-24
+### Přidáno
+- **Robustní DB migrace:** Implementován "kobercový nálet" (agresivní kontrola schématu) v `database.py`. Systém nyní při startu automaticky doplňuje všechny chybějící sloupce v tabulkách `lecturers`, `student_evaluations` a `class_analyses` (např. `is_admin`, `created_at`, `source_text`, `is_superadmin`).
+- **Resilience:** Oprava kritických chyb `UndefinedColumn` v PostgreSQL po neúplných manuálních zásazích v produkční DB.
+
 ### Změněno
-- **Hlavička:** Sjednocení designu tlačítka "Statistiky evaluací" (změna barvy ze zlaté na modrou dle Administrace).
-- **Synchronizace (HDD Sync):** Doplněno varování v nápovědě ohledně nutnosti protokolu HTTPS (bezpečnostní omezení prohlížeče pro File System Access API).
+- **UI Layout:** Sjednocení maximální šířky všech hlavních karet (`TabCriteria`, `TabEvaluation`, `TabAnalytics`) na sjednocených 1500px pro plynulé přechody a více prostoru pro detaily hodnocení.
+- **WebSocket:** Stabilizace spojení po opravě databázových profilů.
+
+## [v3.4.1] - 2026-03-23
 
 ## [v3.4.0] - 2026-03-22
 ### Přidáno

@@ -1,4 +1,4 @@
-# EVALUZ (v3.4.1 - Statistics Dashboard & Excel Export)
+# EVALUZ (v3.4.2 - Database Resilience & UI Unification)
 
 **Systém pro inteligentní vyhodnocování úředních záznamů pomocí AI**
 
