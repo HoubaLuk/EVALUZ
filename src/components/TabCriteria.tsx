@@ -261,7 +261,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
     };
 
     return (
-        <div className="h-full flex gap-6 max-w-7xl mx-auto overflow-hidden">
+        <div className="h-full flex gap-6 max-w-[1500px] w-full mx-auto overflow-hidden px-4 xl:px-8">
             {/* Left Column: Socratic AI Chat */}
             <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden max-w-[50%]">
                 <div className="p-4 border-b border-slate-100 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">

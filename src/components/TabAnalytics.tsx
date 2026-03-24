@@ -224,7 +224,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="max-w-[1500px] w-full mx-auto px-4 xl:px-8 space-y-6">
             {/* HLAVIČKA A EXPORTNÍ TLAČÍTKA */}
             <div className="flex items-center justify-between">
                 <div>
