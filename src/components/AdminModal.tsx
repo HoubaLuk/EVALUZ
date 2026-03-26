@@ -85,7 +85,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     const [usersList, setUsersList] = useState<any[]>([]);
     const [isUsersLoading, setIsUsersLoading] = useState(false);
     const [showAddUser, setShowAddUser] = useState(false);
-    const [newUser, setNewUser] = useState({ email: '', password: '', first_name: '', last_name: '', is_superadmin: false });
+    const [newUser, setNewUser] = useState({ email: '', password: '', first_name: '', last_name: '', role: 'vyucujici' });
 
     // History data
     const [exportsHistory, setExportsHistory] = useState<any[]>([]);
@@ -229,7 +229,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
             if (res.ok) {
                 showAlert("Uživatel úspěšně vytvořen.");
                 setShowAddUser(false);
-                setNewUser({ email: '', password: '', first_name: '', last_name: '', is_superadmin: false });
+                setNewUser({ email: '', password: '', first_name: '', last_name: '', role: 'vyucujici' });
                 fetchUsers();
             } else {
                 const err = await res.json();
@@ -249,6 +249,29 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
             if (res.ok) fetchUsers();
         } catch (e) {
             console.error(e);
+        }
+    };
+
+    const handleRoleChange = async (id: number, newRole: string) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/admin/users/${id}/role`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
+                body: JSON.stringify({ role: newRole })
+            });
+            if (res.ok) {
+                showAlert("Role úspěšně změněna.");
+                fetchUsers();
+            } else {
+                const err = await res.json();
+                showAlert(err.detail || "Chyba při změně role.");
+            }
+        } catch (e) {
+            console.error(e);
+            showAlert("Chyba spojení při změně role.");
         }
     };
 
@@ -433,7 +456,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     <div className="flex items-center gap-2">
                         <Settings className="w-5 h-5 text-[#D4AF37]" />
                         <h2 className="text-lg font-semibold tracking-wide">
-                            {isSetupMode ? "První spuštění: Vytvoření hlavního lektorského účtu" : "Administrace systému EVALUZ & Prompt Engineering"}
+                            {isSetupMode ? "První spuštění: Vytvoření hlavního účtu vyučujícího" : "Administrace systému EVALUZ & Prompt Engineering"}
                         </h2>
                     </div>
                     {!isSetupMode && (
@@ -451,7 +474,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     {/* Modal Sidebar */}
                     {!isSetupMode && (
                         <div className="w-64 bg-slate-50 dark:bg-slate-800/50 border-r border-slate-200 dark:border-slate-700 p-4 flex flex-col gap-1 overflow-y-auto">
-                            {(profile.is_superadmin || profile.funkcni_zarazeni === 'Metodik') && (
+                            {profile.is_superadmin && (
                                 <>
                                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">Kategorie promptů</h3>
                                     <button
@@ -556,7 +579,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                         ) : adminTab === 'profile' ? (
                             <div className="flex-1 flex flex-col overflow-y-auto pr-2">
                                 <div className="mb-6">
-                                    <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200 mb-1">Profil lektora a podpisová doložka</h3>
+                                    <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200 mb-1">Profil vyučujícího a podpisová doložka</h3>
                                     <p className="text-sm text-slate-500 dark:text-slate-400">Údaje zadané níže budou použity pro generování PDF a oddělení vašich dat.</p>
                                 </div>
 
@@ -639,7 +662,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                                 className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white dark:bg-slate-800"
                                             >
                                                 <option value="">Vyberte zařazení</option>
-                                                <option value="Lektor">Lektor</option>
+                                                <option value="Vyučující">Vyučující</option>
                                                 <option value="Metodik">Metodik</option>
                                                 <option value="Administrátor">Administrátor</option>
                                             </select>
@@ -736,7 +759,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                 <div className="flex justify-between items-center mb-6">
                                     <div>
                                         <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200 mb-1">Správa uživatelů</h3>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">Účty lektorů s přístupem do aplikace.</p>
+                                        <p className="text-sm text-slate-500 dark:text-slate-400">Účty uživatelů s přístupem do aplikace.</p>
                                     </div>
                                     <button onClick={() => setShowAddUser(!showAddUser)} className="flex items-center gap-1.5 px-3 py-2 bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold rounded-lg hover:bg-[#002855]/20 transition-colors text-sm">
                                         <UserPlus className="w-4 h-4" /> {showAddUser ? 'Zavřít' : 'Nový uživatel'}
@@ -763,9 +786,13 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                                 <input type="text" required value={newUser.last_name} onChange={e => setNewUser({ ...newUser, last_name: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm outline-none" />
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <input type="checkbox" id="is_superadmin" checked={newUser.is_superadmin} onChange={e => setNewUser({ ...newUser, is_superadmin: e.target.checked })} />
-                                            <label htmlFor="is_superadmin" className="text-sm font-medium text-slate-700 dark:text-slate-300">Je to SuperAdmin (může spravovat ostatní)</label>
+                                        <div className="flex gap-2 items-center">
+                                            <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Role:</label>
+                                            <select value={newUser.role || 'vyucujici'} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-sm outline-none bg-white dark:bg-slate-800">
+                                                <option value="vyucujici">Vyučující</option>
+                                                <option value="admin">Admin</option>
+                                                <option value="superadmin">SuperAdmin</option>
+                                            </select>
                                         </div>
                                         <button type="submit" className="w-full py-2 bg-[#002855] text-white font-semibold rounded-lg text-sm hover:bg-[#001f44]">Vytvořit účet</button>
                                     </form>
@@ -791,9 +818,21 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                                         <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{u.email}</td>
                                                         <td className="px-4 py-3">
                                                             <div className="flex gap-2 items-center">
-                                                                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${u.is_superadmin ? 'bg-blue-100 text-[#002855] dark:text-blue-300' : 'bg-slate-100 text-slate-600 dark:text-slate-300'}`}>
-                                                                    {u.is_superadmin ? 'SuperAdmin' : 'Lektor'}
-                                                                </span>
+                                                                <select
+                                                                    value={u.is_superadmin ? 'superadmin' : (u.is_admin ? 'admin' : 'vyucujici')}
+                                                                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                                                                    className={`px-2 py-1 rounded text-xs font-semibold outline-none border focus:ring-1 ${
+                                                                        u.is_superadmin 
+                                                                            ? 'bg-blue-100 text-[#002855] border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800' 
+                                                                            : u.is_admin
+                                                                                ? 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800'
+                                                                                : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                                                                    }`}
+                                                                >
+                                                                    <option value="vyucujici">Vyučující</option>
+                                                                    <option value="admin">Admin</option>
+                                                                    <option value="superadmin">SuperAdmin</option>
+                                                                </select>
                                                                 {!u.is_active && <span className="px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">Deaktivován</span>}
                                                             </div>
                                                         </td>
@@ -822,7 +861,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                     <p className="text-sm text-slate-500 dark:text-slate-400 flex items-start gap-1.5 mb-2">
                                         <AlertCircle className="w-4 h-4 text-[#D4AF37] mt-0.5 flex-shrink-0" />
                                         <span>
-                                            Zde můžete upravit chování AI. Změny se projeví u všech lektorů a uloží se do DB.
+                                            Zde můžete upravit chování AI. Změny se projeví u všech uživatelů a uloží se do DB.
                                             {adminTab === 'prompt3' && (
                                                 <span className="block mt-1 text-[#002855] dark:text-blue-300 font-medium">
                                                     Tip: V textu níže můžete libovolně upravit hranice pro hodnocení třídy (např. Vynikající 90-100% místo 80-100%). AI se těmito pásmy bude při analýze striktně řídit.
@@ -1087,7 +1126,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                                     Zapnout sdílenou paměť Zlatých příkladů (RAG)
                                                 </h4>
                                                 <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-xl">
-                                                    Pokud tuto funkci aktivujete, ukáže se lektorům u každé úspěšné evaluace tlačítko <strong className="text-yellow-600">"Uložit jako Zlatý příklad"</strong>. Pokud jej stisknou, jejich dokonale opravené hodnocení se propíše do sítě a pomůže modelu automaticky zlepšit odhady pro ostatní studenty v dané situaci (tzv. referenční etalon, Few-Shot RAG).
+                                                    Jazyk nebo pokyny pro doporučení studentovi (ukáže se vyučujícím u každé úspěšné evaluace jako návrh postupu).
                                                 </p>
                                             </div>
                                             <div className="shrink-0 pt-2">

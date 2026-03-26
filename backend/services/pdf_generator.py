@@ -263,7 +263,7 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     name_str = f"{lecturer.title_before + ' ' if lecturer.title_before else ''}{lecturer.first_name} {lecturer.last_name}{' ' + lecturer.title_after if lecturer.title_after else ''}".strip()
     rank_str = f"{lecturer.funkcni_zarazeni + ' ' if lecturer.funkcni_zarazeni else ''}{lecturer.rank_full or lecturer.rank_shortcut}".strip()
     if not rank_str:
-        rank_str = "Lektor"
+        rank_str = "Vyučující"
     
     pdf.cell(0, 8, safe_text(f"vytvořil: {name_str}, {rank_str}"), ln=1)
     
@@ -279,7 +279,7 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     return pdf.output(dest="S")
 
 
-def generate_class_excel(class_id: int, db: Session, lecturer_id: int, scenario_id: str = None) -> bytes:
+def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: str = None) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.chart import BarChart, Reference
@@ -289,10 +289,9 @@ def generate_class_excel(class_id: int, db: Session, lecturer_id: int, scenario_
     if scenario_id:
         cached_analysis = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == scenario_id).first()
 
-    evaluations = db.query(StudentEvaluation).filter(
-        StudentEvaluation.class_id == class_id,
-        StudentEvaluation.lecturer_id == lecturer_id
-    ).all()
+    from api.auth import apply_data_isolation
+    query = db.query(StudentEvaluation).filter(StudentEvaluation.class_id == class_id)
+    evaluations = apply_data_isolation(query, StudentEvaluation, current_user, db).all()
 
     valid_evaluations = []
     for e in evaluations:
@@ -580,9 +579,9 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         name_str = f"{lecturer.title_before + ' ' if lecturer.title_before else ''}{lecturer.first_name} {lecturer.last_name}{' ' + lecturer.title_after if lecturer.title_after else ''}".strip()
         rank_str = f"{lecturer.funkcni_zarazeni + ' ' if lecturer.funkcni_zarazeni else ''}{lecturer.rank_full or lecturer.rank_shortcut}".strip()
         if not rank_str:
-            rank_str = "Lektor"
+            rank_str = "Vyučující"
         
-        pdf.cell(40, 8, "Lektor:", border=1, fill=True)
+        pdf.cell(40, 8, "Vyučující:", border=1, fill=True)
         pdf.cell(0, 8, f"{name_str}, {rank_str}", border=1, ln=1)
         
         if lecturer.school_location:
@@ -737,7 +736,7 @@ def generate_dashboard_excel(data: dict) -> bytes:
 
     ws_summary.append(["Celkový počet hodnocených ÚZ", data.get("total_evaluations", 0)])
     by_lec = data.get("by_lecturer", [])
-    ws_summary.append(["Počet aktivních lektorů", len(by_lec)])
+    ws_summary.append(["Počet aktivních vyučujících", len(by_lec)])
     
     ws_summary.column_dimensions['A'].width = 35
     ws_summary.column_dimensions['B'].width = 15
@@ -762,8 +761,8 @@ def generate_dashboard_excel(data: dict) -> bytes:
         ws_org.append([footer_text])
 
     # --- LIST 3: Lektoři ---
-    ws_lec = wb.create_sheet(title="Aktivita lektorů")
-    ws_lec.append(["Jméno lektora", "Počet vyhodnocených ÚZ"])
+    ws_lec = wb.create_sheet(title="Aktivita vyučujících")
+    ws_lec.append(["Jméno vyučujícího", "Počet vyhodnocených ÚZ"])
     for cell in ws_lec[1]:
         cell.fill = header_fill
         cell.font = header_font

@@ -19,7 +19,7 @@ interface TabCriteriaProps {
 /**
  * KOMPONENTA: TAB CRITERIA (SPRÁVA KRITÉRIÍ)
  * Tato část aplikace slouží k definování hodnotících kritérií.
- * Lektor zde může využít AI asistenta (Phase 1) k vyladění kritérií před samotným hodnocením.
+ * Vyučující zde může využít AI asistenta (Phase 1) k vyladění kritérií před samotným hodnocením.
  */
 export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCriteriaProps) {
     const { showAlert } = useDialog();
@@ -35,6 +35,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [isFetchingCriteria, setIsFetchingCriteria] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
 
     const chatEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,7 +86,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
 
     /**
      * FUNKCE: NAHRÁNÍ METODIKY DO CHATU
-     * Umožňuje lektorovi nahrát soubor zadání, ze kterého si AI "vyčte" kontext
+     * Umožňuje vyučujícímu nahrát soubor zadání, ze kterého si AI "vyčte" kontext
      * a následně lépe pomůže s návrhem kritérií.
      */
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -232,6 +233,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
         if (!scenarioId) return;
         setIsSaving(true);
         setSaveSuccess(false);
+        setSaveError(null);
 
         try {
             const res = await fetch(`${API_BASE_URL}/criteria/save`, {
@@ -250,11 +252,13 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                 setSaveSuccess(true);
                 if (onCriteriaSaved) onCriteriaSaved();
                 fetchCriteria(); // Refresh the right column
-                setTimeout(() => setSaveSuccess(false), 3000);
+            } else {
+                const errorData = await res.json();
+                setSaveError(errorData.detail || "Nepodařilo se uložit kritéria.");
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            showAlert("Nepodařilo se uložit kritéria.");
+            setSaveError(error.message || "Chyba při komunikaci se serverem.");
         } finally {
             setIsSaving(false);
         }
@@ -364,7 +368,11 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                     </div>
                     <textarea
                         value={criteriaMarkdown}
-                        onChange={(e) => setCriteriaMarkdown(e.target.value)}
+                        onChange={(e) => {
+                            setCriteriaMarkdown(e.target.value);
+                            setSaveSuccess(false);
+                            setSaveError(null);
+                        }}
                         disabled={!scenarioId || isFetchingCriteria}
                         className={`flex-1 w-full p-4 resize-none outline-none font-sans text-sm text-slate-700 dark:text-slate-300 leading-relaxed overflow-y-auto ${(!scenarioId || isFetchingCriteria) ? 'bg-slate-50 dark:bg-slate-800/50 opacity-70 cursor-not-allowed' : ''}`}
                         placeholder={isFetchingCriteria ? "Načítám kritéria..." : "Zde pište svá kritéria..."}
@@ -374,18 +382,21 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
                 <button
                     onClick={handleSaveCriteria}
                     disabled={isSaving || isChatLoading || isUploading || isFetchingCriteria || !scenarioId}
-                    className={`w-full flex items-center justify-center gap-2 py-3.5 text-white rounded-xl hover:opacity-90 transition-opacity text-base font-bold shadow-md ${saveSuccess ? 'bg-emerald-600' : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028]'
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    className={`w-full flex items-center justify-center gap-2 py-3.5 text-white rounded-xl hover:opacity-90 transition-opacity text-base font-bold shadow-md ${
+                        saveError ? 'bg-red-600' : saveSuccess ? 'bg-emerald-600' : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028]'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                     {isSaving ? (
                         <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : saveError ? (
+                        <Shield className="w-5 h-5" />
                     ) : saveSuccess ? (
                         <CheckCircle2 className="w-5 h-5" />
                     ) : (
                         <Save className="w-5 h-5" />
                     )}
 
-                    {isSaving ? 'Ukládám...' : saveSuccess ? 'Kritéria uložena!' : '✨ Uložit chat jako finální kritéria do DB'}
+                    {isSaving ? 'Ukládám...' : saveError ? 'Chyba při ukládání' : saveSuccess ? 'Kritéria uložena!' : 'Uložit hodnotící kritéria'}
                 </button>
             </div>
         </div>

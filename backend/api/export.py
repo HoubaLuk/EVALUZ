@@ -8,7 +8,7 @@ import re
 from core.database import get_db
 from models.db_models import StudentEvaluation, Lecturer, ClassAnalysis, ExportHistory
 from services.pdf_generator import generate_student_pdf, generate_class_excel, generate_class_report_pdf
-from api.auth import get_current_lecturer, get_current_lecturer_export
+from api.auth import get_current_lecturer, get_current_lecturer_export, apply_data_isolation
 from pydantic import BaseModel
 from datetime import datetime
 import pytz
@@ -36,15 +36,14 @@ def export_student_pdf(
         
         
         # Bereme nejnovější evaluaci pro daného studenta
-        evaluation = db.query(StudentEvaluation).filter(
-            StudentEvaluation.student_name == normalized_name,
-            StudentEvaluation.lecturer_id == current_user.id
-        ).order_by(StudentEvaluation.id.desc()).first()
+        query = db.query(StudentEvaluation).filter(StudentEvaluation.student_name == normalized_name)
+        evaluation = apply_data_isolation(query, StudentEvaluation, current_user, db).order_by(StudentEvaluation.id.desc()).first()
         
         if not evaluation:
             # Zkusíme ještě jednu šanci: vyhledat všechny a normalizovat v Pythonu (pomalejší, ale jistota)
             
-            all_evals = db.query(StudentEvaluation).filter(StudentEvaluation.lecturer_id == current_user.id).all()
+            query = db.query(StudentEvaluation)
+            all_evals = apply_data_isolation(query, StudentEvaluation, current_user, db).all()
             for ev in all_evals:
                 if unicodedata.normalize('NFC', ev.student_name) == normalized_name:
                     evaluation = ev
@@ -88,11 +87,9 @@ def export_class_report_pdf(scenario_id: str, db: Session = Depends(get_db), cur
         if not decoded_id or decoded_id == "null":
             raise HTTPException(status_code=400, detail="Neplatné ID scénáře.")
         
-        # Extract from database cache (filtered by current lecturer)
-        cached_analysis = db.query(ClassAnalysis).filter(
-            ClassAnalysis.scenario_id == decoded_id,
-            ClassAnalysis.lecturer_id == current_user.id
-        ).first()
+        # Extract from database cache (filtered by role)
+        query = db.query(ClassAnalysis).filter(ClassAnalysis.scenario_id == decoded_id)
+        cached_analysis = apply_data_isolation(query, ClassAnalysis, current_user, db).first()
         if not cached_analysis:
             raise HTTPException(status_code=404, detail="Analýza pro toto téma zatím neexistuje. Obnovte a vygenerujte analýzu ve frontend aplikaci.")
             
@@ -134,10 +131,8 @@ def export_evaluation_pdf(
     try:
         print(f">>> EXPORT: Hledám vyhodnocení pro: {evaluation_id}")
         
-        evaluation = db.query(StudentEvaluation).filter(
-            StudentEvaluation.id == evaluation_id,
-            StudentEvaluation.lecturer_id == current_user.id
-        ).first()
+        query = db.query(StudentEvaluation).filter(StudentEvaluation.id == evaluation_id)
+        evaluation = apply_data_isolation(query, StudentEvaluation, current_user, db).first()
         
         if not evaluation:
             raise HTTPException(status_code=404, detail=f"Hodnocení s ID {evaluation_id} nebylo nalezeno.")
@@ -169,7 +164,7 @@ def export_class_excel(class_id: int, scenario_id: str = None, db: Session = Dep
     Vygeneruje a vrátí XLSX sešit výsledků celé třídy.
     """
     try:
-        excel_bytes = generate_class_excel(class_id, db, current_user.id, scenario_id)
+        excel_bytes = generate_class_excel(class_id, db, current_user, scenario_id)
         
         headers = {
             'Content-Disposition': f'attachment; filename="vysledky_trida_{class_id}.xlsx"'

@@ -216,10 +216,9 @@ async def evaluate_batch(
     # Přidání formátovacích pravidel pro textové výstupy (zpetna_vazba a oduvodneni) kvůli PDF kompatibilitě
     system_prompt_str = f"{db_system_prompt_str}\n\nDŮLEŽITÉ POKYNY K FORMÁTOVÁNÍ TEXTOVÝCH POLÍ:\n1. NIKDY nepoužívej Markdown tabulky (v PDF se rozpadají a přetékají okraje).\n2. Strukturu tvoř výhradně pomocí nadpisů třetí úrovně (### Nadpis), tučného písma (**text**) a standardních odrážek (- text)."
     
-    criteria_record = db.query(EvaluationCriteria).filter(
-        EvaluationCriteria.scenario_name == scenario_id,
-        EvaluationCriteria.lecturer_id == current_user.id
-    ).first()
+    from api.auth import apply_data_isolation
+    query = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id)
+    criteria_record = apply_data_isolation(query, EvaluationCriteria, current_user, db).first()
     
     if not criteria_record or not criteria_record.markdown_content.strip():
         print(f">>> BATCH ERROR: Nebyla nalezena kritéria v tabulce 'EvaluationCriteria' pro scenario: '{scenario_id}', lecturer_id: {current_user.id}")
@@ -267,10 +266,9 @@ async def evaluate_batch(
     if student_ids:
         try:
             id_list = [int(x.strip()) for x in student_ids.split(",") if x.strip()]
-            records = db.query(StudentEvaluation).filter(
-                StudentEvaluation.id.in_(id_list),
-                StudentEvaluation.lecturer_id == current_user.id
-            ).all()
+            from api.auth import apply_data_isolation
+            query = db.query(StudentEvaluation).filter(StudentEvaluation.id.in_(id_list))
+            records = apply_data_isolation(query, StudentEvaluation, current_user, db).all()
             for rec in records:
                 if rec.source_text:
                     files_data.append({
