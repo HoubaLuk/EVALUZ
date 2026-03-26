@@ -153,7 +153,7 @@ export default function EvaluzDashboard() {
           } else {
             const meData = await meRes.json();
             const fullName = `${meData.rank_shortcut || ''} ${meData.title_before || ''} ${meData.first_name || ''} ${meData.last_name || ''}`;
-            const displayRole = meData.funkcni_zarazeni ? ` - ${meData.funkcni_zarazeni}` : ' - Lektor';
+            const displayRole = meData.funkcni_zarazeni ? ` - ${meData.funkcni_zarazeni}` : ' - Vyučující';
             setLecturerName(fullName.replace(/\s+/g, ' ').trim() + displayRole);
             setLecturerId(meData.id);
             setIsAdminUser(meData.is_superadmin || meData.is_admin);
@@ -248,7 +248,7 @@ export default function EvaluzDashboard() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">E-mail lektora</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">E-mail vyučujícího</label>
                 <input type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent" />
               </div>

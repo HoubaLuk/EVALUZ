@@ -15,6 +15,10 @@ router = APIRouter(
     tags=["admin"]
 )
 
+def verify_superadmin(current_user: Lecturer):
+    if not getattr(current_user, 'is_superadmin', False):
+        raise HTTPException(status_code=403, detail="Nedostatečná oprávnění. Tato sekce vyžaduje roli SuperAdmin.")
+
 # --- Pydantic Schemas for Admin ---
 
 class PromptUpdateInfo(BaseModel):
@@ -35,8 +39,11 @@ class UserCreateRequest(BaseModel):
     email: str
     first_name: str
     last_name: str
-    is_superadmin: bool = False
     password: str
+    role: str = "vyucujici"
+
+class UserRoleUpdateRequest(BaseModel):
+    role: str
 
 class UserResponse(BaseModel):
     id: int
@@ -44,6 +51,7 @@ class UserResponse(BaseModel):
     first_name: str
     last_name: str
     is_superadmin: bool
+    is_admin: bool
     is_active: bool
     must_change_password: bool
 
@@ -52,6 +60,7 @@ class UserResponse(BaseModel):
 @router.get("/prompts", response_model=List[PromptUpdateInfo])
 def get_all_prompts(db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """Fetch all system prompts."""
+    verify_superadmin(current_user)
     prompts = db.query(SystemPrompt).all()
     return [{"phase_name": p.phase_name, "content": p.content, "temperature": p.temperature} for p in prompts]
 
@@ -59,6 +68,7 @@ def get_all_prompts(db: Session = Depends(get_db), current_user: Lecturer = Depe
 @router.put("/prompts")
 def update_prompts(updates: List[PromptUpdateInfo], db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """Update multiple system prompts."""
+    verify_superadmin(current_user)
     for update in updates:
         prompt = db.query(SystemPrompt).filter(SystemPrompt.phase_name == update.phase_name).first()
         if prompt:
@@ -74,6 +84,7 @@ def update_prompts(updates: List[PromptUpdateInfo], db: Session = Depends(get_db
 @router.get("/settings", response_model=List[AppSettingUpdateInfo])
 def get_all_settings(db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """Fetch all App settings (e.g., vLLM configuration)."""
+    verify_superadmin(current_user)
     settings_list = db.query(AppSettings).all()
     return [{"key": s.key, "value": s.value} for s in settings_list]
 
@@ -81,6 +92,7 @@ def get_all_settings(db: Session = Depends(get_db), current_user: Lecturer = Dep
 @router.put("/settings")
 def update_settings(updates: List[AppSettingUpdateInfo], db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """Update multiple app settings."""
+    verify_superadmin(current_user)
     for update in updates:
         setting = db.query(AppSettings).filter(AppSettings.key == update.key).first()
         if setting:
@@ -136,10 +148,6 @@ async def test_connection(config: TestConfigRequest, current_user: Lecturer = De
 
 # --- User Management (SuperAdmin Only) ---
 
-def verify_superadmin(current_user: Lecturer):
-    if not getattr(current_user, 'is_superadmin', False):
-        raise HTTPException(status_code=403, detail="Nedostatečná oprávnění. Pouze SuperAdmin může spravovat uživatele.")
-
 @router.get("/users", response_model=List[UserResponse])
 def get_users(db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     verify_superadmin(current_user)
@@ -159,7 +167,8 @@ def create_user(user_data: UserCreateRequest, db: Session = Depends(get_db), cur
         password_hash=get_password_hash(user_data.password.strip()),
         first_name=user_data.first_name,
         last_name=user_data.last_name,
-        is_superadmin=user_data.is_superadmin,
+        is_superadmin=(user_data.role == "superadmin"),
+        is_admin=(user_data.role == "admin" or user_data.role == "superadmin"),
         is_active=True,
         must_change_password=True # Donutíme ho změnit si heslo při prvním přihlášení
     )
@@ -181,6 +190,29 @@ def toggle_user_active(user_id: int, db: Session = Depends(get_db), current_user
     user.is_active = not user.is_active
     db.commit()
     return {"status": "success", "is_active": user.is_active}
+
+@router.put("/users/{user_id}/role")
+def update_user_role(user_id: int, request: UserRoleUpdateRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+    verify_superadmin(current_user)
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Nemůžete změnit roli sami sobě.")
+    
+    user = db.query(Lecturer).filter(Lecturer.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Uživatel nenalezen.")
+        
+    if request.role == "superadmin":
+        user.is_superadmin = True
+        user.is_admin = True
+    elif request.role == "admin":
+        user.is_superadmin = False
+        user.is_admin = True
+    else:  # vyucujici anebo cokoli jiného
+        user.is_superadmin = False
+        user.is_admin = False
+        
+    db.commit()
+    return {"status": "success", "message": "Role úspěšně změněna."}
 
 @router.put("/users/{user_id}/reset-password")
 def reset_user_password_endpoint(user_id: int, passwords: dict, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):

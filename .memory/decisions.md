@@ -126,20 +126,36 @@
 126: - **Stability:** Fixed critical production crashes (500 Internal Server Error) caused by missing `class_analyses.class_id`.
 127: - **Clarity:** Clear version tracking across the entire stack.
 
-## 2026-03-24: Database Resilience & UI Unification (v3.4.2)
+## 2026-03-26: RBAC, Data Isolation & UX Refinement (v3.5.0)
 
 **Status:** Decided & Implemented
-**Context:** Production deployment on server encountered multiple `psycopg2.errors.UndefinedColumn` errors (e.g., `is_admin`, `created_at`). These were caused by fragmented manual database interventions. Additionally, the UI layout suffered from horizontal "jitter" during tab switching due to mismatched maximum widths between components.
+**Context:** The system required a transition from a single-user prototype to a multi-role enterprise application. This involved renaming terminology for better organizational fit, implementing strict Role-Based Access Control (RBAC), and ensuring data privacy through role-based isolation. Additionally, user feedback highlighted critical UX flaws in the criteria and evaluation tabs.
 
 **Decisions:**
-1. **Aggressive Auto-Migration:** Refactored `run_migrations` in `backend/core/database.py` to perform an exhaustive check of all critical columns across `lecturers`, `student_evaluations`, and `class_analyses`. Used `DO $$ BEGIN ... END $$` blocks to ensure the schema is always synchronized with the SQLAlchemy models on startup without manual SQL.
-2. **Layout Foundation Unification:** Standardized the maximum width of all main tab containers (`TabCriteria`, `TabEvaluation`, `TabAnalytics`) to `max-w-[1500px]`. This eliminates horizontal shifting when navigating the workflow and provides more horizontal space for the evaluation details panel. 
-3. **Identity Recovery:** Verified that the 403 Forbidden on WebSockets was a side-effect of the missing `is_admin` column (failed auth profile fetch). Restored full WebSocket functionality by ensuring the instructor's profile is correctly loaded.
+1. **Terminology Standardization:** Renamed visual instances of "Lektor" to "Vyučující" (Instructor) across the UI and PDF exports. Database schema names (`Lecturer`, `lecturer_id`) remain unchanged to preserve system stability and backward compatibility.
+2. **Multi-Role RBAC:** 
+    - Introduced three distinct roles: `Vyučující` (Standard), `Admin` (Departmental), and `SuperAdmin` (System).
+    - Secured prompts and system settings via `verify_superadmin` middleware in `backend/api/admin.py`.
+    - Implemented a role-management interface in `AdminModal.tsx` for SuperAdmins.
+3. **Dynamic Data Isolation:** 
+    - Implemented `apply_data_isolation` helper in `backend/api/auth.py`.
+    - `Vyučující` only see their own records.
+    - `Admin` see all records within their `school_location`.
+    - `SuperAdmin` have global visibility.
+    - Isolation is enforced across analytics, evaluations, and exports.
+4. **Criteria UX Hardening:** 
+    - Refactored `TabCriteria.tsx` to include a persistent "Save success" state that only resets on manual input (`onChange`).
+    - Added `try...catch` blocks to prevent "White Screen of Death" during DB operations, providing visual error feedback on the button.
+5. **Evaluation UX & State Stability:**
+    - **Dynamic Empty States:** Replaced static "Upload UI" with contextual guidance (empty vs. uploaded vs. selected).
+    - **Determinstic Selection Logic:** Removed redundant `selectAll` state in `TabEvaluation.tsx`. Checkbox counters and "Select All" status are now derived directly from the `selectedIds` array, eliminating desynchronization bugs.
+    - **Renamed Action Button:** Changed mass evaluation button to "Vyhodnotit označené ÚZ" for clarity.
 
 **Impact:**
-- **Stability:** Zero-touch recovery from inconsistent DB states on production servers.
-- **UX:** Smooth, professional transitions between application states.
-- **Maintainability:** Hardened the database initialization layer against future column additions.
+- **Security:** Strict departmental data silos prevent unauthorized data access.
+- **Scalability:** The system is now ready for multi-department deployment with centralized management.
+- **Stability:** Significant reduction in UI crashes and logical desyncs in the evaluation workflow.
+- **Usability:** Improved user guidance through the evaluation funnel.
 
 ---
 *Archived by System Scribe ✍️*

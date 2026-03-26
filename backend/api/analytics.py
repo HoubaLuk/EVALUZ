@@ -9,7 +9,7 @@ from models.evaluation import EvaluationResponse
 from services.analytics import generate_class_summary
 from services.analytics import generate_class_summary
 from utils.sorting import sort_evaluations_by_surname
-from api.auth import get_current_lecturer
+from api.auth import get_current_lecturer, apply_data_isolation
 from pydantic import BaseModel
 
 
@@ -32,9 +32,9 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
     Parses the JSON strings from the DB and returns them as structured Pydantic models.
     """
     query = db.query(StudentEvaluation).filter(
-        StudentEvaluation.class_id == class_id,
-        StudentEvaluation.lecturer_id == current_user.id
+        StudentEvaluation.class_id == class_id
     )
+    query = apply_data_isolation(query, StudentEvaluation, current_user, db)
     
     if scenario_id:
         query = query.filter(StudentEvaluation.scenario_name == scenario_id)
@@ -85,17 +85,16 @@ async def get_class_summary(class_id: int, scenario_id: str = "default", force: 
     an AI pedagogical insight from the vLLM engine based on Phase 3 prompt
     and context. Checks db for cached analysis first unless forced.
     """
-    return await generate_class_summary(class_id, scenario_id, force, db, current_user.id)
+    return await generate_class_summary(class_id, scenario_id, force, db, current_user)
 
 @router.delete("/evaluation/{evaluation_id}")
 def delete_evaluation(evaluation_id: int, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
     """
     Permanently deletes a student evaluation record from the database.
     """
-    eval_record = db.query(StudentEvaluation).filter(
-        StudentEvaluation.id == evaluation_id,
-        StudentEvaluation.lecturer_id == current_user.id
-    ).first()
+    query = db.query(StudentEvaluation).filter(StudentEvaluation.id == evaluation_id)
+    query = apply_data_isolation(query, StudentEvaluation, current_user, db)
+    eval_record = query.first()
     if not eval_record:
         raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
     
@@ -109,10 +108,9 @@ def patch_evaluation_score(evaluation_id: int, request: EvaluationPatchRequest, 
     Overwrites the JSON result of an existing evaluation with manually corrected scores from the UI.
     Invalidates the analytics cache for the affected scenario.
     """
-    eval_record = db.query(StudentEvaluation).filter(
-        StudentEvaluation.id == evaluation_id,
-        StudentEvaluation.lecturer_id == current_user.id
-    ).first()
+    query = db.query(StudentEvaluation).filter(StudentEvaluation.id == evaluation_id)
+    query = apply_data_isolation(query, StudentEvaluation, current_user, db)
+    eval_record = query.first()
     
     if not eval_record:
         raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
@@ -136,10 +134,9 @@ def patch_evaluation_name(evaluation_id: int, request: NamePatchRequest, db: Ses
     """
     Ručně upraví extrahovanou identitu/jméno studenta.
     """
-    eval_record = db.query(StudentEvaluation).filter(
-        StudentEvaluation.id == evaluation_id,
-        StudentEvaluation.lecturer_id == current_user.id
-    ).first()
+    query = db.query(StudentEvaluation).filter(StudentEvaluation.id == evaluation_id)
+    query = apply_data_isolation(query, StudentEvaluation, current_user, db)
+    eval_record = query.first()
     
     if not eval_record:
         raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
@@ -156,8 +153,7 @@ def get_class_analysis_status(class_id: int, db: Session = Depends(get_db), curr
     Vrátí seznam scenario_id, pro které již existuje uložená globální analýza.
     Slouží pro UI (zlatá fajfka ve Stepperu), aniž by se musela tahat/generovat velká data.
     """
-    analyses = db.query(ClassAnalysis.scenario_id).filter(
-        ClassAnalysis.lecturer_id == current_user.id,
-        ClassAnalysis.class_id == class_id
-    ).all()
+    query = db.query(ClassAnalysis.scenario_id).filter(ClassAnalysis.class_id == class_id)
+    query = apply_data_isolation(query, ClassAnalysis, current_user, db)
+    analyses = query.all()
     return [a[0] for a in analyses]

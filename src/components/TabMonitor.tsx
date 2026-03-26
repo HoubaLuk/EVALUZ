@@ -140,7 +140,7 @@ export function TabMonitor() {
                 </div>
                 
                 <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm flex flex-col print:border-gray-300">
-                    <span className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Aktivních lektorů</span>
+                    <span className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Aktivních vyučujících</span>
                     <div className="flex items-baseline gap-2">
                         <span className="text-4xl font-black text-[#002855] dark:text-white">{data.by_lecturer.length}</span>
                     </div>
@@ -245,14 +245,14 @@ export function TabMonitor() {
                 <div className="p-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex justify-between items-center">
                     <h3 className="font-semibold text-slate-800 dark:text-white flex items-center gap-2">
                         <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                        Tabulka Lektorů (Garantů)
+                        Vyučující (Garanti)
                     </h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
                         <thead>
                             <tr className="border-b border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                <th className="p-4">Jméno lektora</th>
+                                <th className="p-4">Jméno vyučujícího</th>
                                 <th className="p-4 text-right">Vyhodnocených ÚZ</th>
                             </tr>
                         </thead>

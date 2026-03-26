@@ -87,6 +87,26 @@ def get_current_lecturer_export(token: str, db: Session = Depends(get_db)):
 
 # --- Endpoints ---
 
+def apply_data_isolation(query, entity_class, current_user: Lecturer, db: Session):
+    """
+    Applies data isolation rules based on the user's role:
+    - Superadmin: sees all records.
+    - Admin: sees records created by users in the same school_location.
+    - Vyucujici: sees only their own records.
+    """
+    if getattr(current_user, 'is_superadmin', False):
+        return query
+        
+    if getattr(current_user, 'is_admin', False) and getattr(current_user, 'school_location', None):
+        # Admin vidí záznamy všech lektorů ze stejné lokality
+        lecturer_ids = [
+            l.id for l in db.query(Lecturer).filter(Lecturer.school_location == current_user.school_location).all()
+        ]
+        return query.filter(entity_class.lecturer_id.in_(lecturer_ids))
+        
+    # Základní Vyučující vidí pouze svoje záznamy
+    return query.filter(entity_class.lecturer_id == current_user.id)
+
 @router.get("/check")
 def check_if_setup_needed(db: Session = Depends(get_db)):
     """

@@ -12,8 +12,14 @@
 - **PDF:** FPDF generátor (student reporty, class reporty).
 - **Excel:** Openpyxl (.xlsx) pro vícestránkové statistické přehledy.
 
+## Řízení Přístupu (RBAC) & Izolace Dat [v3.5.0+]
+- **Role:** `Vyučující`, `Admin`, `SuperAdmin`.
+- **Zabezpečení:** Middleware `verify_superadmin` chrání citlivé systémové operace (prompty, vLLM settings).
+- **Izolace:** Helper `apply_data_isolation` vynucuje filtraci dotazů na úrovni DB. Standardní uživatel (Vyučující) nikdy nevidí data z jiných `lecturer_id`. Administrátor vidí data v rámci `school_location`.
+
 ## LLM Robustnost
 - **Sanitizer:** Vlastní regex cleaning pro extract JSONu i z modelů s vnitřním uvažováním (Qwen, DeepSeek).
+- **vLLM Integration:** Přímé napojení na OpenAI-compatible API s dynamickým managementem tokenů a parametrů v DB.
 
 ## Klientská Synchronizace
 - **HDD Sync:** Využívá `File System Access API`. 

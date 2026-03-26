@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { API_BASE_URL } from '../utils/api';
 
-import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass, FileText, Upload } from 'lucide-react';
+import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass, FileText, Upload, CheckSquare, PlayCircle } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Student } from '../types';
 import { useDialog } from '../contexts/DialogContext';
@@ -38,13 +38,12 @@ interface TabEvaluationProps {
 
 /**
  * KOMPONENTA: TAB EVALUATION (VYHODNOCOVÁNÍ)
- * Tato komponenta je srdcem aplikace pro lektora. Umožňuje nahrávat soubory studentů, 
+ * Tato komponenta je srdcem aplikace pro vyučujícího. Umožňuje nahrávat soubory studentů, 
  * spouštět AI analýzu a sledovat výsledky v reálném čase.
  */
 export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange, lecturerId }: TabEvaluationProps) {
     const { showAlert, showConfirm, showPrompt } = useDialog();
     const [students, setStudents] = useState<Student[]>([]);
-    const [selectAll, setSelectAll] = useState(false);
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
     const [activeSourceQuote, setActiveSourceQuote] = useState<string | null>(null);
@@ -183,11 +182,16 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
                     const merged = [...historyStudents, ...offline];
 
-                    return merged.sort((a, b) => {
+                    const sorted = merged.sort((a, b) => {
                         const nameA = a.cleanedName || a.name;
                         const nameB = b.cleanedName || b.name;
                         return nameA.localeCompare(nameB, 'cs');
                     });
+
+                    // Cleanup selectedIds - remove IDs that are no longer in students list
+                    setSelectedIds(prev => prev.filter(id => sorted.some(s => s.id === id)));
+
+                    return sorted;
                 });
 
                 if (data.length > 0 && !selectedStudent) {
@@ -213,13 +217,14 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
 
+    const isAllSelected = students.length > 0 && selectedIds.length === students.length;
+
     const handleSelectAll = () => {
-        if (selectAll) {
+        if (isAllSelected) {
             setSelectedIds([]);
         } else {
             setSelectedIds(students.map(s => s.id));
         }
-        setSelectAll(!selectAll);
     };
 
     const openSourceModal = (quote: string) => {
@@ -538,7 +543,6 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
             setStudents(prev => prev.filter(s => !idsToDelete.includes(s.id)));
             setSelectedIds([]);
-            setSelectAll(false);
             if (idsToDelete.includes(selectedStudent as number)) {
                 setSelectedStudent(null);
             }
@@ -768,7 +772,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     >
                         <input
                             type="checkbox"
-                            checked={selectAll && students.length > 0}
+                            checked={isAllSelected}
                             onChange={handleSelectAll}
                             disabled={students.length === 0}
                             className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#002855] focus:ring-[#002855] disabled:opacity-50"
@@ -798,7 +802,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                         <div className="flex items-center gap-2 relative z-10">
                             {(isEvaluating && canEvaluate) ? <Wand2 className="w-4 h-4" /> : isEvaluating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                             <span>
-                                {(isEvaluating && canEvaluate) ? 'Přidat do fronty AI' : isEvaluating ? 'Hromadně AI...' : 'Hromadně vyhodnotit (AI)'}
+                                {(isEvaluating && canEvaluate) ? 'Přidat do fronty AI' : isEvaluating ? 'Hromadně AI...' : 'Vyhodnotit označené ÚZ'}
                             </span>
                         </div>
                         {isEvaluating && (
@@ -856,7 +860,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim()}
                                         </p>
                                         {!student.identita && student.status === 'evaluated' && (
-                                            <Tooltip content="Identita studenta byla manuálně ověřena lektorem.">
+                                            <Tooltip content="Identita studenta byla manuálně ověřena vyučujícím.">
                                                 <UserCheck className="w-4 h-4 text-blue-500 flex-shrink-0" />
                                             </Tooltip>
                                         )}
@@ -927,7 +931,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         <h2 className="text-xl font-bold text-[#002855] dark:text-[#facc15] flex items-center gap-2">
                                             Hodnocení: {activeStudentData.identita?.prijmeni ? `${activeStudentData.identita.prijmeni.toUpperCase()} ${activeStudentData.identita.jmeno || ''}, ${activeStudentData.identita.hodnost || ''}` : activeStudentData.cleanedName || activeStudentData.name}
                                             {(!activeStudentData.identita && activeStudentData.status === 'evaluated') && (
-                                                <Tooltip content="Identita studenta byla manuálně ověřena lektorem.">
+                                                <Tooltip content="Identita studenta byla manuálně ověřena vyučujícím.">
                                                     <UserCheck className="w-5 h-5 text-blue-500" />
                                                 </Tooltip>
                                             )}
@@ -980,7 +984,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                                 </span>
                                                             )}
                                                             {detail.upraveno_lektorem && (
-                                                                <span title="Lektorský zásah" className="inline-flex items-center justify-center relative">
+                                                                <span title="Zásah vyučujícího" className="inline-flex items-center justify-center relative">
                                                                     <User className="w-5 h-5 text-blue-500 opacity-80" />
                                                                     <GraduationCap className="w-3.5 h-3.5 text-blue-700 absolute -bottom-1 -right-1 drop-shadow-sm" />
                                                                 </span>
@@ -1022,7 +1026,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-4">
                                 <div>
                                     <label className="block text-xs font-bold text-[#002855] dark:text-[#facc15] uppercase tracking-wider mb-2">
-                                        Zpětná vazba lektora
+                                        Zpětná vazba vyučujícího
                                     </label>
                                     <textarea
                                         className="w-full border border-slate-300 dark:border-slate-600 rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-40 bg-slate-50 dark:bg-slate-800/50 leading-relaxed shadow-inner"
@@ -1105,13 +1109,25 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                 <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
                                     <Hourglass className="w-16 h-16 text-slate-200" />
                                     <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Čeká se na zahájení evaluace...</h3>
-                                    <p className="text-sm">Vyberte studenty a klikněte na "Hromadně vyhodnotit (AI)".</p>
+                                    <p className="text-sm">Vyberte studenty a klikněte na "Vyhodnotit označené ÚZ".</p>
+                                </div>
+                            ) : students.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
+                                    <FileText className="w-16 h-16 text-slate-200" />
+                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Nahrajte úřední záznamy k vyhodnocení</h3>
+                                    <p className="text-sm max-w-md">Přetáhněte soubory (.docx, .pdf) do tohoto okna nebo použijte tlačítko 'Nahrát ÚZ' vlevo nahoře.</p>
+                                </div>
+                            ) : selectedIds.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
+                                    <CheckSquare className="w-16 h-16 text-slate-200" />
+                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Záznamy nahrány. Nyní je vyberte.</h3>
+                                    <p className="text-sm max-w-md">Zaškrtněte políčka u studentů v levém sloupci, které chcete aktuálně vyhodnotit. Můžete nahrát i další záznamy.</p>
                                 </div>
                             ) : (
                                 <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
-                                    <FileText className="w-16 h-16 text-slate-200" />
-                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Nahrajte úřední záznamy a vyberte ty, které chcete vyhodnotit</h3>
-                                    <p className="text-sm max-w-md">Klikněte na tlačítko &quot;Nahrát ÚZ&quot;, nebo soubory prostě na tlačítko přetáhněte (drag &amp; drop). Pokud chcete, můžete využít synchronizaci celého lokálního adresáře — pozor na adresářovou strukturu, viz nápověda ❓ v postranním panelu.</p>
+                                    <PlayCircle className="w-16 h-16 text-slate-200" />
+                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Připraveno k AI vyhodnocení</h3>
+                                    <p className="text-sm max-w-md">Klikněte na zlaté tlačítko 'Vyhodnotit označené ÚZ' v horní liště, nebo vyhodnoťte záznamy jednotlivě.</p>
                                 </div>
                             )}
                         </div>

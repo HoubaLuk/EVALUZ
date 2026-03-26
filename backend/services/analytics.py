@@ -10,31 +10,33 @@ import json
 from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, ClassAnalysis
 from services.llm_engine import chat_completion
 
-async def generate_class_summary(class_id: int, scenario_id: str, force: bool, db: Session, lecturer_id: int) -> dict:
+async def generate_class_summary(class_id: int, scenario_id: str, force: bool, db: Session, current_user) -> dict:
     """
     HLAVNÍ FUNKCE ANALÝZY.
     Agreguje data z hodnocení všech studentů v dané třídě a modelové situaci pro konkrétního lektora.
     """
     
+    from api.auth import apply_data_isolation
+
     # 1. CACHE: Pokud už analýza existuje a uživatel si nevynutil novou (force=True), vrátíme tu uloženou.
     if not force:
-        cached_analysis = db.query(ClassAnalysis).filter(
+        q = db.query(ClassAnalysis).filter(
             ClassAnalysis.scenario_id == scenario_id,
-            ClassAnalysis.lecturer_id == lecturer_id,
             ClassAnalysis.class_id == class_id
-        ).first()
+        )
+        cached_analysis = apply_data_isolation(q, ClassAnalysis, current_user, db).first()
         if cached_analysis:
             try:
                 return json.loads(cached_analysis.content_json)
             except Exception:
                 pass
                 
-    # Načteme všechna vyhodnocení pro tuto třídu a situaci, VÝHRADNĚ pro tohoto lektora.
-    raw_evals = db.query(StudentEvaluation).filter(
+    # Načteme všechna vyhodnocení pro tuto třídu a situaci
+    q2 = db.query(StudentEvaluation).filter(
         StudentEvaluation.class_id == class_id,
-        StudentEvaluation.scenario_name == scenario_id,
-        StudentEvaluation.lecturer_id == lecturer_id
-    ).all()
+        StudentEvaluation.scenario_name == scenario_id
+    )
+    raw_evals = apply_data_isolation(q2, StudentEvaluation, current_user, db).all()
     
     # Odfiltrujeme záznamy, které ještě nejsou vyhodnocené (nemají json_result).
     evaluations = []
@@ -46,11 +48,9 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         except:
             pass
     
-    # Získání definic kritérií z DB VÝHRADNĚ pro tohoto lektora.
-    criteria_record = db.query(EvaluationCriteria).filter(
-        EvaluationCriteria.scenario_name == scenario_id,
-        EvaluationCriteria.lecturer_id == lecturer_id
-    ).first()
+    # Získání definic kritérií z DB VÝHRADNĚ pro aktuálního uživatele dle role.
+    q3 = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id)
+    criteria_record = apply_data_isolation(q3, EvaluationCriteria, current_user, db).first()
     
     db_criteria = []
     if criteria_record:
@@ -253,16 +253,16 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     }
  
     import datetime
-    cached_analysis = db.query(ClassAnalysis).filter(
+    q_cache = db.query(ClassAnalysis).filter(
         ClassAnalysis.scenario_id == scenario_id,
-        ClassAnalysis.lecturer_id == lecturer_id,
         ClassAnalysis.class_id == class_id
-    ).first()
+    )
+    cached_analysis = apply_data_isolation(q_cache, ClassAnalysis, current_user, db).first()
     
     if not cached_analysis:
         cached_analysis = ClassAnalysis(
             scenario_id=scenario_id,
-            lecturer_id=lecturer_id,
+            lecturer_id=current_user.id,
             class_id=class_id
         )
         db.add(cached_analysis)
