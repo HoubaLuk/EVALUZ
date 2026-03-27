@@ -157,7 +157,7 @@ async def fast_scan_batch(
                 existing_eval.cleaned_name = cleaned_display_name
                 existing_eval.source_text = extracted_text
                 if identita:
-                    existing_eval.student_identity = json.dumps(identita, ensure_ascii=False)
+                    existing_eval.student_identity = identita
                 db.commit()
                 db.refresh(existing_eval)
                 eval_to_return = existing_eval
@@ -170,7 +170,7 @@ async def fast_scan_batch(
                     source_text=extracted_text,
                     source_filename=student_name,
                     lecturer_id=current_user.id,
-                    student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}",
+                    student_identity=identita if identita else {},
                     created_at=datetime.datetime.utcnow()
                 )
                 db.add(new_eval)
@@ -358,9 +358,9 @@ async def evaluate_batch(
                     cleaned_eval_name = re.sub(r'\s+', ' ', clean_base).strip()
                 
                 if existing_eval:
-                    existing_eval.json_result = json.dumps(llm_result_dict, ensure_ascii=False)
-                    if existing_eval.student_identity and existing_eval.student_identity != "None" and identita and not "prijmeni" in json.loads(existing_eval.student_identity or "{}"):
-                         existing_eval.student_identity = json.dumps(identita, ensure_ascii=False)
+                    existing_eval.json_result = llm_result_dict
+                    if existing_eval.student_identity and identita and not "prijmeni" in (existing_eval.student_identity or {}):
+                         existing_eval.student_identity = identita
                          existing_eval.cleaned_name = cleaned_eval_name
                 if not existing_eval:
                     # Pojistka pro asynchronní worker - třída 'Základní kurz' MUSÍ existovat pro lektora.
@@ -384,9 +384,9 @@ async def evaluate_batch(
                         class_id=default_class.id if default_class else 1,
                         scenario_name=scen_id,
                         lecturer_id=current_user_id,
-                        json_result=json.dumps(llm_result_dict, ensure_ascii=False),
+                        json_result=llm_result_dict,
                         cleaned_name=cleaned_eval_name,
-                        student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}"
+                        student_identity=identita if identita else {}
                     )
                     db_bg.add(eval_record)
                     

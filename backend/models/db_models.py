@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import declarative_base
+from models.types import JSONType
 
 Base = declarative_base()
 
@@ -56,9 +57,9 @@ class StudentEvaluation(Base):
     student_name = Column(String, index=True)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"))
     scenario_name = Column(String, index=True, default="scen-1")
-    json_result = Column(Text) # Store output as JSON string
+    json_result = Column(JSONType)
     cleaned_name = Column(String, index=True) # "Příjmení Jméno, hodnost"
-    student_identity = Column(Text) # JSON structure from LLM
+    student_identity = Column(JSONType) # JSON structure from LLM
     source_text = Column(Text) # Extracted text from the original document
     source_filename = Column(String) # Original filename
     created_at = Column(DateTime)
@@ -75,7 +76,7 @@ class ClassAnalysis(Base):
     lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), index=True)
     scenario_id = Column(String, index=True) # REMOVED unique=True to allow different lecturers to have their own analysis for the same scenario
-    content_json = Column(Text)
+    content_json = Column(JSONType)
     created_at = Column(DateTime)
 
 class ExportHistory(Base):
@@ -93,6 +94,6 @@ class GoldenExample(Base):
     lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
     scenario_id = Column(String, index=True)
     source_text = Column(Text)
-    perfect_json = Column(Text)
+    perfect_json = Column(JSONType)
     created_at = Column(DateTime)
 
