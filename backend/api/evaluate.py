@@ -69,7 +69,7 @@ def save_golden_example(request: GoldenExampleRequest, db: Session = Depends(get
         lecturer_id=current_user.id, # Isolate golden examples per lecturer
         source_text=request.source_text,
         perfect_json=request.perfect_json,
-        created_at=datetime.datetime.now().isoformat()
+        created_at=datetime.datetime.utcnow()
     )
     db.add(new_example)
     db.commit()
@@ -171,7 +171,7 @@ async def fast_scan_batch(
                     source_filename=student_name,
                     lecturer_id=current_user.id,
                     student_identity=json.dumps(identita, ensure_ascii=False) if identita else "{}",
-                    created_at=datetime.datetime.now().isoformat()
+                    created_at=datetime.datetime.utcnow()
                 )
                 db.add(new_eval)
                 db.commit()

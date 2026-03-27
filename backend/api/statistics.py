@@ -52,7 +52,7 @@ def get_statistics_dashboard(db: Session = Depends(get_db), current_user: Lectur
         
         # Timeline stats (Group by YYYY-MM-DD or YYYY-WW)
         if eval_record.created_at:
-            date_prefix = eval_record.created_at[:10] # "YYYY-MM-DD"
+            date_prefix = eval_record.created_at.strftime('%Y-%m-%d')
         else:
             date_prefix = "Archiv"
         timeline[date_prefix] = timeline.get(date_prefix, 0) + 1

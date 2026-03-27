@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -61,8 +61,8 @@ class StudentEvaluation(Base):
     student_identity = Column(Text) # JSON structure from LLM
     source_text = Column(Text) # Extracted text from the original document
     source_filename = Column(String) # Original filename
-    created_at = Column(String) # ISO 8601 timestamp
-    
+    created_at = Column(DateTime)
+
 class AppSettings(Base):
     __tablename__ = "app_settings"
     id = Column(Integer, primary_key=True, index=True)
@@ -76,7 +76,7 @@ class ClassAnalysis(Base):
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), index=True)
     scenario_id = Column(String, index=True) # REMOVED unique=True to allow different lecturers to have their own analysis for the same scenario
     content_json = Column(Text)
-    created_at = Column(String)
+    created_at = Column(DateTime)
 
 class ExportHistory(Base):
     __tablename__ = "export_history"
@@ -85,7 +85,7 @@ class ExportHistory(Base):
     scenario_name = Column(String)
     type = Column(String)
     download_url = Column(String)
-    created_at = Column(String, index=True)
+    created_at = Column(DateTime, index=True)
 
 class GoldenExample(Base):
     __tablename__ = "golden_examples"
@@ -94,5 +94,5 @@ class GoldenExample(Base):
     scenario_id = Column(String, index=True)
     source_text = Column(Text)
     perfect_json = Column(Text)
-    created_at = Column(String)
+    created_at = Column(DateTime)
 
