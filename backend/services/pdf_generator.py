@@ -91,16 +91,10 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
         if not txt: return ""
         return str(txt)
 
-    # Parsování JSON výsledků z AI modelu
-    data = json.loads(evaluation.json_result)
-    if isinstance(data, str):
-        try:
-            data = json.loads(data)
-        except json.JSONDecodeError:
-            pass
-
-    if not isinstance(data, dict):
-        data = {"celkove_skore": 0, "zpetna_vazba": f"Chyba formátu dat v databázi: {data}", "vysledky": []}
+    # JSONType vrací dict přímo; fallback pro případ None
+    data = evaluation.json_result if isinstance(evaluation.json_result, dict) else {}
+    if not data:
+        data = {"celkove_skore": 0, "zpetna_vazba": "Chyba formátu dat v databázi.", "vysledky": []}
     
     pdf = PDFReport(
         title="Hodnotící list vypracovaného úředního záznamu",
@@ -297,12 +291,9 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
     for e in evaluations:
         if scenario_id and e.scenario_name != scenario_id:
             continue
-        try:
-            data = json.loads(e.json_result) if e.json_result else {}
-            if data and data.get("vysledky"):
-                valid_evaluations.append(e)
-        except:
-            pass
+        data = e.json_result if e.json_result else {}
+        if data and data.get("vysledky"):
+            valid_evaluations.append(e)
             
     evaluations = sort_evaluations_by_surname(valid_evaluations)
 
@@ -321,7 +312,7 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
     if not criteria_names:
         for eval_record in evaluations:
             try:
-                data = json.loads(eval_record.json_result)
+                data = eval_record.json_result or {}
                 if "vysledky" in data and isinstance(data["vysledky"], list):
                     for item in data["vysledky"]:
                         if "nazev" in item and item["nazev"] not in criteria_names:
@@ -363,7 +354,7 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
 
     for eval_record in evaluations:
         try:
-            data = json.loads(eval_record.json_result)
+            data = eval_record.json_result or {}
             score = data.get('celkove_skore', 0)
             total_score_sum += score
             if max_pts > 0:
@@ -408,7 +399,7 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
     
     for eval_record in evaluations:
         try:
-            data = json.loads(eval_record.json_result)
+            data = eval_record.json_result or {}
         except Exception:
             data = {}
         
@@ -498,7 +489,7 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
             cell.font = header_font
         
         try:
-            analysis_data = json.loads(cached_analysis.content_json)
+            analysis_data = cached_analysis.content_json or {}
             ai_insight = analysis_data.get("ai_insight", "")
             blocks = ai_insight.split("###")
             for block in blocks:

@@ -47,19 +47,16 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
     for eval_record in evaluations:
         try:
             # Reconstruct the dict from stored JSON so it matches EvaluationResponse
-            data = json.loads(eval_record.json_result) if eval_record.json_result else {}
+            data = eval_record.json_result if eval_record.json_result else {}
             # Make sure we inject the student_name and ID into the payload just like the frontend expects it
             data["jmeno_studenta"] = eval_record.student_name
             data["id"] = eval_record.id
             data["cleaned_name"] = eval_record.cleaned_name
             # Inject raw json_result so frontend quickview can access original splneno values
             data["json_result"] = eval_record.json_result
-            
-            if eval_record.student_identity and eval_record.student_identity != "None":
-                try:
-                    data["identita"] = json.loads(eval_record.student_identity)
-                except:
-                    data["identita"] = None
+
+            if eval_record.student_identity:
+                data["identita"] = eval_record.student_identity
             else:
                 data["identita"] = None
                 
@@ -115,8 +112,8 @@ def patch_evaluation_score(evaluation_id: int, request: EvaluationPatchRequest, 
     if not eval_record:
         raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
         
-    # Uložení nového JSON z frontendu
-    eval_record.json_result = json.dumps(request.json_result, ensure_ascii=False)
+    # Uložení nového JSON z frontendu (JSONType přijímá dict přímo)
+    eval_record.json_result = request.json_result
     
     # Invalidation of cache (only for the current lecturer)
     if eval_record.scenario_name:

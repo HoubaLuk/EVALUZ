@@ -93,7 +93,7 @@ def export_class_report_pdf(scenario_id: str, db: Session = Depends(get_db), cur
         if not cached_analysis:
             raise HTTPException(status_code=404, detail="Analýza pro toto téma zatím neexistuje. Obnovte a vygenerujte analýzu ve frontend aplikaci.")
             
-        data = json.loads(cached_analysis.content_json)
+        data = cached_analysis.content_json
         
         pdf_bytes = generate_class_report_pdf(data, decoded_id, current_user)
         

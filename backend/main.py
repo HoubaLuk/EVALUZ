@@ -5,6 +5,7 @@ import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from api import evaluate, admin, criteria, analytics, export, auth
 from core.database import init_db, get_db
+from core.config import settings
 from core.seeder import seed_database
 
 # Initialize database
@@ -41,7 +42,7 @@ app = FastAPI(
 # Povoluje komunikaci mezi frontendem (běžícím na jiném portu/doméně) a tímto API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # V produkci by mělo být omezeno na konkrétní doménu.
+    allow_origins=settings.cors_origins_list,  # Nastavit CORS_ORIGINS v .env pro produkci
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,8 +66,16 @@ async def root():
 
 @app.get("/api/v1/health")
 async def health_check():
-    """Endpoint pro monitoring zdraví systému."""
-    return {"status": "healthy"}
+    """Endpoint pro monitoring zdraví systému — ověří i DB připojení."""
+    from sqlalchemy import text as sa_text
+    from core.database import engine
+    try:
+        with engine.connect() as conn:
+            conn.execute(sa_text("SELECT 1"))
+        db_status = "ok"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    return {"status": "healthy" if db_status == "ok" else "degraded", "db": db_status}
 
 if __name__ == "__main__":
     import uvicorn
