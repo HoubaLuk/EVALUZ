@@ -22,12 +22,9 @@ def get_surname_from_evaluation(eval_record) -> str:
 
     # If it's an SQLAlchemy object
     if hasattr(eval_record, 'student_identity') and eval_record.student_identity:
-        try:
-            identita = json.loads(eval_record.student_identity)
-            if identita.get('prijmeni'):
-                return identita.get('prijmeni').upper()
-        except Exception:
-            pass
+        identita = eval_record.student_identity
+        if isinstance(identita, dict) and identita.get('prijmeni'):
+            return identita.get('prijmeni').upper()
             
     # Fallback to cleaned_name
     if hasattr(eval_record, 'cleaned_name') and eval_record.cleaned_name:
