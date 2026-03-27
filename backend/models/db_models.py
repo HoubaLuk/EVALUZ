@@ -78,6 +78,8 @@ class ClassAnalysis(Base):
     scenario_id = Column(String, index=True) # REMOVED unique=True to allow different lecturers to have their own analysis for the same scenario
     content_json = Column(JSONType)
     created_at = Column(DateTime)
+    computed_at = Column(DateTime)       # Kdy byla AI analýza naposledy vypočítána
+    version = Column(Integer, default=1) # Inkrementuje se při každé regeneraci
 
 class ExportHistory(Base):
     __tablename__ = "export_history"
