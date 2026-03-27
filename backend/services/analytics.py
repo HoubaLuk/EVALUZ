@@ -262,7 +262,10 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         db.add(cached_analysis)
     
     cached_analysis.content_json = res
-    cached_analysis.created_at = datetime.datetime.utcnow()
+    cached_analysis.computed_at = datetime.datetime.utcnow()
+    cached_analysis.version = (cached_analysis.version or 0) + 1
+    if not cached_analysis.created_at:
+        cached_analysis.created_at = cached_analysis.computed_at
     
     from sqlalchemy.exc import IntegrityError
     try:
