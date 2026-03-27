@@ -268,7 +268,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         db.add(cached_analysis)
     
     cached_analysis.content_json = json.dumps(res, ensure_ascii=False)
-    cached_analysis.created_at = datetime.datetime.now().isoformat()
+    cached_analysis.created_at = datetime.datetime.utcnow()
     
     from sqlalchemy.exc import IntegrityError
     try:
