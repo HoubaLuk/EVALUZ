@@ -49,35 +49,18 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
 
     for eval_record in evaluations:
         try:
-            # json_result je uložen jako TEXT (JSON string) — explicitně parsujeme
-            raw = eval_record.json_result
-            if isinstance(raw, str):
-                try:
-                    data = json.loads(raw)
-                except Exception:
-                    data = {}
-            elif isinstance(raw, dict):
-                data = raw
-            else:
-                data = {}
-
+            # Reconstruct the dict from stored JSON so it matches EvaluationResponse
+            data = eval_record.json_result if eval_record.json_result else {}
+            # Make sure we inject the student_name and ID into the payload just like the frontend expects it
             data["jmeno_studenta"] = eval_record.student_name
             data["id"] = eval_record.id
             data["cleaned_name"] = eval_record.cleaned_name
-            # Inject raw json_result jako string pro frontend quickview (parsuje JSON.parse)
-            data["json_result"] = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+            # Inject raw json_result so frontend quickview can access original splneno values
+            data["json_result"] = eval_record.json_result
             data["is_approved"] = eval_record.is_approved or False
 
-            # student_identity je uložen jako TEXT (JSON string) — explicitně parsujeme
             if eval_record.student_identity:
-                si = eval_record.student_identity
-                if isinstance(si, str):
-                    try:
-                        data["identita"] = json.loads(si)
-                    except Exception:
-                        data["identita"] = None
-                else:
-                    data["identita"] = si
+                data["identita"] = eval_record.student_identity
             else:
                 data["identita"] = None
                 
