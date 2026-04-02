@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.4.1 (Statistics Dashboard & Excel Export)
-**Poslední aktualizace:** 23. března 2026 (ráno)
+**Verze:** 3.6.0 (Man-in-the-Loop + PDF/Excel Professional Refactor)
+**Poslední aktualizace:** 2. dubna 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)

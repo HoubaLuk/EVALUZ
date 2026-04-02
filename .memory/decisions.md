@@ -1,5 +1,21 @@
 # Architectural Decisions Log
 
+## 2026-04-02: Man-in-the-Loop + PDF/Excel refactor (v3.6.0)
+
+**Status:** Decided & Implemented
+
+**Context:** PDF exporty zobrazovaly zastaralá data (třída "Základní kurz", modelová situace "scen-2") protože DB záznamy měly stará `class_id` a prázdný `scenario_display_name`. JSON výsledky byly double-encoded (TEXT v SQLite), způsobovaly "Chyba formátu dat".
+
+**Decisions:**
+1. **Frontend jako source of truth pro PDF/Excel context:** `TabAnalytics` přijímá `className` + `scenarioName` props z `App.tsx` (aktivní sidebar výběr) a posílá je jako query params do export endpointů. Backend je použije s nejvyšší prioritou před DB lookupy. Důvod: DB záznamy mohou být stale (starý `class_id`), frontend vždy zná aktuální kontext.
+2. **`_parse_json_field()` centrální helper:** Všechny přístupy k `json_result` / `content_json` TEXT sloupcům jdou přes tuto funkci (safe double-decode). Přidána do `pdf_generator.py`.
+3. **Man-in-the-Loop gate:** Analýza třídy zahrnuje pouze `is_approved=True` záznamy. Lektor schvaluje explicitně po review — analytics nejsou ovlivněny nevyhodnocenými nebo chybnými záznamy.
+4. **`c.nazev` vs `c.popis` v PDF:** Sloupec "Definice kritéria" v Protokolu skupiny zobrazuje `c.nazev` (krátký název kritéria). `c.popis` (AI instrukce pro vyhodnocení) je interní — nesmí se zobrazovat v PDF.
+
+**Impact:** PDF a Excel exporty vždy zobrazují správnou třídu a modelovou situaci. Eliminovány 500 errory z double-encoded JSON.
+
+---
+
 ## 2026-03-18: Parallel processing bugfix & Dark Mode Overhaul (v3.2.5)
 
 **Status:** Decided & Implemented
