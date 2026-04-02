@@ -53,6 +53,30 @@ class FastScanResponseItem(BaseModel):
 class FastScanResponse(BaseModel):
     results: List[FastScanResponseItem]
 
+class EnsureClassRequest(BaseModel):
+    name: str
+
+@router.post("/classes/ensure")
+def ensure_class(
+    req: EnsureClassRequest,
+    db: Session = Depends(get_db),
+    current_user: Lecturer = Depends(get_current_lecturer)
+):
+    """Vytvoří třídu v DB pokud neexistuje, vrátí její DB ID. Idempotentní."""
+    name = req.name.strip() or "Základní kurz"
+    existing = db.query(ClassRoom).filter(
+        ClassRoom.name == name,
+        ClassRoom.lecturer_id == current_user.id
+    ).first()
+    if existing:
+        return {"id": existing.id, "name": existing.name}
+    new_class = ClassRoom(name=name, lecturer_id=current_user.id)
+    db.add(new_class)
+    db.commit()
+    db.refresh(new_class)
+    return {"id": new_class.id, "name": new_class.name}
+
+
 class GoldenExampleRequest(BaseModel):
     scenario_id: str
     source_text: str
@@ -77,9 +101,11 @@ def save_golden_example(request: GoldenExampleRequest, db: Session = Depends(get
 
 @router.post("/fast-scan", response_model=FastScanResponse)
 async def fast_scan_batch(
-    files: List[UploadFile] = File(...), 
+    files: List[UploadFile] = File(...),
     scenario_id: str = Form(...),
-    db: Session = Depends(get_db), 
+    scenario_display_name: str = Form(""),
+    class_name: str = Form("Základní kurz"),
+    db: Session = Depends(get_db),
     current_user: Lecturer = Depends(get_current_lecturer)
 ):
     """
@@ -129,20 +155,20 @@ async def fast_scan_batch(
                 # Pokud AI jméno nenašla, použijeme název souboru
                 cleaned_display_name = file.filename.rsplit('.', 1)[0]
             
-            # Ochrana proti selhání Foreign Key (isoloaná třída pro konkrétního lektora).
+            # Najít nebo vytvořit třídu dle jména poslaného z frontendu.
+            target_name = class_name.strip() or "Základní kurz"
             default_class = db.query(ClassRoom).filter(
-                ClassRoom.name == "Základní kurz",
+                ClassRoom.name == target_name,
                 ClassRoom.lecturer_id == current_user.id
             ).first()
             if not default_class:
-                default_class = ClassRoom(name="Základní kurz", lecturer_id=current_user.id)
+                default_class = ClassRoom(name=target_name, lecturer_id=current_user.id)
                 db.add(default_class)
                 try:
                     db.commit()
                     db.refresh(default_class)
                 except Exception:
                     db.rollback()
-                    # Pokud se nepodaří vytvořit, zkusíme najít jakoukoli třídu lektora nebo id=1 jako nouzovku
                     default_class = db.query(ClassRoom).filter(ClassRoom.lecturer_id == current_user.id).first()
 
             # 5. Zápis do databáze (nebo aktualizace existujícího záznamu)
@@ -156,6 +182,8 @@ async def fast_scan_batch(
             if existing_eval:
                 existing_eval.cleaned_name = cleaned_display_name
                 existing_eval.source_text = extracted_text
+                if scenario_display_name:
+                    existing_eval.scenario_display_name = scenario_display_name
                 if identita:
                     existing_eval.student_identity = identita
                 db.commit()
@@ -167,6 +195,7 @@ async def fast_scan_batch(
                     cleaned_name=cleaned_display_name,
                     class_id=class_id_to_use,
                     scenario_name=scenario_id,
+                    scenario_display_name=scenario_display_name,
                     source_text=extracted_text,
                     source_filename=student_name,
                     lecturer_id=current_user.id,

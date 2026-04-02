@@ -7,6 +7,7 @@ from api import evaluate, admin, criteria, analytics, export, auth
 from core.database import init_db, get_db
 from core.config import settings
 from core.seeder import seed_database
+from __version__ import __version__
 
 # Initialize database
 init_db()
@@ -34,7 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="EVALUZ Backend",
     description="Systém pro AI vyhodnocování modelových situací",
-    version="3.4.1",
+    version=__version__,
     lifespan=lifespan
 )
 
@@ -62,7 +63,12 @@ app.include_router(statistics_router, prefix="/api/v1")
 @app.get("/")
 async def root():
     """Základní kontrola, že server běží."""
-    return {"message": "EVALUZ API is running", "version": "3.4.1"}
+    return {"message": "EVALUZ API is running", "version": __version__}
+
+@app.get("/api/v1/version")
+async def get_version():
+    """Vrátí aktuální verzi aplikace."""
+    return {"version": __version__}
 
 @app.get("/api/v1/health")
 async def health_check():

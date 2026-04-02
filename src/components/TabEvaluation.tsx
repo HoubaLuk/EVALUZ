@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { API_BASE_URL } from '../utils/api';
 
-import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass, FileText, Upload, CheckSquare, PlayCircle } from 'lucide-react';
+import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass, FileText, Upload, CheckSquare, PlayCircle, Clock, ShieldCheck } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Student } from '../types';
 import { useDialog } from '../contexts/DialogContext';
@@ -171,7 +171,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             score: evalRecord.celkove_skore,
                             maxScore: evalRecord.vysledky ? evalRecord.vysledky.length : 0,
                             evaluationDetails: evalRecord.vysledky,
-                            zpetna_vazba: evalRecord.zpetna_vazba
+                            zpetna_vazba: evalRecord.zpetna_vazba,
+                            is_approved: evalRecord.is_approved ?? false
                         };
                     });
 
@@ -852,7 +853,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     checked={selectedIds.includes(student.id)}
                                     onChange={() => toggleStudent(student.id)}
                                     onClick={(e) => e.stopPropagation()}
-                                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#002855] focus:ring-[#002855]"
+                                    disabled={student.is_approved === true}
+                                    className={`w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#002855] focus:ring-[#002855] ${student.is_approved ? 'opacity-30 cursor-not-allowed' : ''}`}
                                 />
                                 <div className="flex-1 min-w-0 flex items-center justify-between group-inner">
                                     <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
@@ -866,9 +868,13 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         )}
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        {student.status === 'evaluated' ? (
+                                        {student.status === 'evaluated' && !student.is_approved ? (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                                <Clock className="w-3 h-3" /> K revizi
+                                            </span>
+                                        ) : student.status === 'evaluated' && student.is_approved ? (
                                             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                                <CheckCircle2 className="w-3 h-3" /> Zpracováno
+                                                <CheckCircle2 className="w-3 h-3" /> Schváleno
                                             </span>
                                         ) : student.status === 'evaluating' ? (
                                             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-orange-50 text-orange-700 border border-orange-200 animate-pulse transition-all">
@@ -1011,7 +1017,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                                 type="number"
                                                                 value={detail.body}
                                                                 onChange={(e) => handleScoreChange(idx, parseInt(e.target.value, 10) || 0)}
-                                                                className={`w-14 text-center border rounded-md py-1 text-sm font-medium focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37] outline-none ${detail.upraveno_lektorem ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-300 dark:border-slate-600'}`}
+                                                                disabled={!!activeStudentData.is_approved}
+                                                                className={`w-14 text-center border rounded-md py-1 text-sm font-medium focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37] outline-none ${activeStudentData.is_approved ? 'bg-slate-50 cursor-not-allowed text-slate-400 border-slate-200' : detail.upraveno_lektorem ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-300 dark:border-slate-600'}`}
                                                             />
                                                         </div>
                                                     </td>
@@ -1029,9 +1036,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         Zpětná vazba vyučujícího
                                     </label>
                                     <textarea
-                                        className="w-full border border-slate-300 dark:border-slate-600 rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-40 bg-slate-50 dark:bg-slate-800/50 leading-relaxed shadow-inner"
+                                        className={`w-full border rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-40 leading-relaxed shadow-inner ${activeStudentData.is_approved ? 'bg-slate-50 cursor-not-allowed text-slate-400 border-slate-200' : 'border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/50'}`}
                                         value={activeStudentData.zpetna_vazba || ""}
                                         onChange={(e) => handleFeedbackChange(e.target.value)}
+                                        disabled={!!activeStudentData.is_approved}
                                         placeholder="Zde uveďte celkové shrnutí a doporučení pro studenta..."
                                     />
                                 </div>
@@ -1057,49 +1065,102 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             Uložit jako Zlatý příklad
                                         </button>
                                     )}
-                                    <button
-                                        onClick={async () => {
-                                            if (activeStudentData) {
-                                                try {
-                                                    const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
-                                                    const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
-                                                        headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
-                                                    });
-                                                    if (!res.ok) throw new Error('PDF Export selhal');
-                                                    const blob = await res.blob();
-                                                    const url = window.URL.createObjectURL(blob);
-                                                    const a = document.createElement('a');
-                                                    a.href = url;
-                                                    a.download = `hodnoceni_${activeStudentData.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-                                                    document.body.appendChild(a);
-                                                    a.click();
-                                                    window.URL.revokeObjectURL(url);
-                                                    document.body.removeChild(a);
+                                    {!activeStudentData.is_approved ? (
+                                        <button
+                                            onClick={async () => {
+                                                if (activeStudentData) {
+                                                    try {
+                                                        // 1. Schválit hodnocení
+                                                        const approveRes = await fetch(`${API_BASE_URL}/analytics/evaluation/${activeStudentData.id}/approve`, {
+                                                            method: 'PATCH',
+                                                            headers: {
+                                                                'Content-Type': 'application/json',
+                                                                'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                                                            },
+                                                            body: JSON.stringify({ approved: true })
+                                                        });
+                                                        if (!approveRes.ok) throw new Error('Schválení selhalo');
 
-                                                    // Uložení záznamu do historie
-                                                    await fetch(`${API_BASE_URL}/export/history`, {
-                                                        method: 'POST',
-                                                        headers: {
-                                                            'Content-Type': 'application/json',
-                                                            'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
-                                                        },
-                                                        body: JSON.stringify({
-                                                            scenario_name: scenarioId || 'Neznámý scénář',
-                                                            type: `PDF Hodnocení (${activeStudentData.name})`,
-                                                            download_url: `/api/v1/export/evaluation/${activeStudentData.id}/pdf`
-                                                        })
-                                                    });
-                                                } catch (e: any) {
-                                                    console.error("Zápis manuálního hodnocení selhal:", e);
-                                                    showAlert(e.message);
+                                                        // 2. Aktualizovat lokální stav
+                                                        setStudents(prev => prev.map(s => s.id === activeStudentData.id ? { ...s, is_approved: true } : s));
+                                                        setToastMessage("Hodnocení schváleno.");
+                                                        setTimeout(() => setToastMessage(null), 3000);
+
+                                                        // 3. Stáhnout PDF
+                                                        const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
+                                                        const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
+                                                            headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                                                        });
+                                                        if (!res.ok) throw new Error('PDF Export selhal');
+                                                        const blob = await res.blob();
+                                                        const url = window.URL.createObjectURL(blob);
+                                                        const a = document.createElement('a');
+                                                        a.href = url;
+                                                        a.download = `hodnoceni_${activeStudentData.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                                                        document.body.appendChild(a);
+                                                        a.click();
+                                                        window.URL.revokeObjectURL(url);
+                                                        document.body.removeChild(a);
+
+                                                        await fetch(`${API_BASE_URL}/export/history`, {
+                                                            method: 'POST',
+                                                            headers: {
+                                                                'Content-Type': 'application/json',
+                                                                'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                                                            },
+                                                            body: JSON.stringify({
+                                                                scenario_name: scenarioId || 'Neznámý scénář',
+                                                                type: `PDF Hodnocení (${activeStudentData.name})`,
+                                                                download_url: `/api/v1/export/evaluation/${activeStudentData.id}/pdf`
+                                                            })
+                                                        });
+                                                    } catch (e: any) {
+                                                        console.error("Schválení nebo export selhal:", e);
+                                                        showAlert(e.message);
+                                                    }
                                                 }
-                                            }
-                                        }}
-                                        className="flex items-center gap-2 px-6 py-3 bg-[#002855] text-white rounded-xl hover:bg-[#002855]/90 transition-colors text-sm font-bold shadow-md"
-                                    >
-                                        <Download className="w-5 h-5 text-[#D4AF37]" />
-                                        Uložit a Exportovat PDF
-                                    </button>
+                                            }}
+                                            className="flex items-center gap-2 px-6 py-3 bg-[#002855] text-white rounded-xl hover:bg-[#002855]/90 transition-colors text-sm font-bold shadow-md"
+                                        >
+                                            <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />
+                                            Schválit a uložit jako PDF
+                                        </button>
+                                    ) : (
+                                        <div className="flex flex-col items-end gap-1">
+                                            <div className="flex items-center gap-2 px-6 py-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                                <span className="text-sm font-bold text-emerald-700">Evaluace validována</span>
+                                            </div>
+                                            <button
+                                                onClick={async () => {
+                                                    if (activeStudentData) {
+                                                        try {
+                                                            const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
+                                                            const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
+                                                                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                                                            });
+                                                            if (!res.ok) throw new Error('PDF Export selhal');
+                                                            const blob = await res.blob();
+                                                            const url = window.URL.createObjectURL(blob);
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = `hodnoceni_${activeStudentData.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                                                            document.body.appendChild(a);
+                                                            a.click();
+                                                            window.URL.revokeObjectURL(url);
+                                                            document.body.removeChild(a);
+                                                        } catch (e: any) {
+                                                            console.error("PDF export selhal:", e);
+                                                            showAlert(e.message);
+                                                        }
+                                                    }
+                                                }}
+                                                className="text-xs text-slate-400 hover:text-slate-600 underline transition-colors"
+                                            >
+                                                Stáhnout PDF znovu
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </>

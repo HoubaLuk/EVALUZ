@@ -19,6 +19,7 @@ class EvaluationResponse(BaseModel):
     zpetna_vazba: Optional[str] = ""
     identita: Optional[dict] = None
     json_result: Optional[str] = None
+    is_approved: bool = False
 
 class BatchEvaluationResponse(BaseModel):
     results: List[EvaluationResponse]

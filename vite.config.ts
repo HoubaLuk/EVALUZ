@@ -16,6 +16,14 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
+      proxy: {
+        // Forward /api/ requests to backend in local dev (mirrors Nginx proxy in production)
+        '/api': {
+          target: 'http://localhost:8001',
+          changeOrigin: true,
+          ws: true, // WebSocket proxy support
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

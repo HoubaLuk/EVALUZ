@@ -56,6 +56,15 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                 scenarios: []
             };
             saveClasses([...classes, newClass]);
+            // Synchronizovat novou třídu do DB (fire-and-forget)
+            fetch(`${API_BASE_URL}/evaluate/classes/ensure`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
+                },
+                body: JSON.stringify({ name: val })
+            }).catch(() => {});
         } else if (editMode.type === 'new_scenario' && val) {
             const newClasses = classes.map(c => c.id === editMode.classId ? {
                 ...c,
@@ -190,6 +199,8 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
                         const formData = new FormData();
                         validFiles.forEach(f => formData.append('files', f));
                         formData.append('scenario_id', scen.id);
+                        formData.append('scenario_display_name', scen.name);
+                        formData.append('class_name', cls.name);
 
                         await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
                             method: 'POST',

@@ -10,6 +10,20 @@ import json
 from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, ClassAnalysis
 from services.llm_engine import chat_completion
 
+
+def _parse_json_field(value):
+    """Bezpečně parsuje TEXT sloupec uložený jako JSON string nebo vrátí dict přímo."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return {}
+    return {}
+
 async def generate_class_summary(class_id: int, scenario_id: str, force: bool, db: Session, current_user) -> dict:
     """
     HLAVNÍ FUNKCE ANALÝZY.
@@ -17,6 +31,21 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     """
     
     from api.auth import apply_data_isolation
+
+    # 0. Man-in-the-Loop: blokace analytiky pokud existují neschválené záznamy
+    q0 = db.query(StudentEvaluation).filter(
+        StudentEvaluation.class_id == class_id,
+        StudentEvaluation.scenario_name == scenario_id
+    )
+    raw_check = apply_data_isolation(q0, StudentEvaluation, current_user, db).all()
+    evaluated_check = [e for e in raw_check if _parse_json_field(e.json_result).get("vysledky")]
+    unapproved = [e for e in evaluated_check if not e.is_approved]
+    if unapproved:
+        return {
+            "error": "pending_approvals",
+            "pending_count": len(unapproved),
+            "total_evaluated": len(evaluated_check)
+        }
 
     # 1. CACHE: Pokud už analýza existuje a uživatel si nevynutil novou (force=True), vrátíme tu uloženou.
     if not force:
@@ -26,7 +55,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         )
         cached_analysis = apply_data_isolation(q, ClassAnalysis, current_user, db).first()
         if cached_analysis and cached_analysis.content_json:
-            return cached_analysis.content_json
+            return _parse_json_field(cached_analysis.content_json)
                 
     # Načteme všechna vyhodnocení pro tuto třídu a situaci
     q2 = db.query(StudentEvaluation).filter(
@@ -38,7 +67,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     # Odfiltrujeme záznamy, které ještě nejsou vyhodnocené (nemají json_result).
     evaluations = []
     for e in raw_evals:
-        data = e.json_result if e.json_result else {}
+        data = _parse_json_field(e.json_result)
         if data and data.get("vysledky"):
             evaluations.append(e)
     
@@ -62,7 +91,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         crit_maxes = {}
         for eval_record in evaluations:
             try:
-                data = eval_record.json_result or {}
+                data = _parse_json_field(eval_record.json_result)
                 for crit in data.get("vysledky", []):
                     name = crit.get("nazev", "Neznámé")
                     pts = crit.get("body", 0)
@@ -110,7 +139,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     # Procházíme JSON výsledek každého studenta a sčítáme úspěšnost per kritérium.
     for eval_record in evaluations:
         try:
-            data = eval_record.json_result or {}
+            data = _parse_json_field(eval_record.json_result)
             total_score = data.get("celkove_skore", 0)
             student_scores.append(total_score)
             
@@ -186,7 +215,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     # Seznam studentů, kteří potřebují doučování (úspěšnost pod 50 %).
     for eval_record in evaluations:
         try:
-            data = eval_record.json_result or {}
+            data = _parse_json_field(eval_record.json_result)
             percent = (data.get("celkove_skore", 0) / max_possible_sc) * 100
             if percent < 50:
                 needs_help.append((eval_record.cleaned_name if eval_record.cleaned_name else eval_record.student_name).replace(',', ''))
@@ -261,11 +290,10 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         )
         db.add(cached_analysis)
     
-    cached_analysis.content_json = res
-    cached_analysis.computed_at = datetime.datetime.utcnow()
-    cached_analysis.version = (cached_analysis.version or 0) + 1
+    # content_json je TEXT sloupec — serializujeme jako JSON string
+    cached_analysis.content_json = json.dumps(res, ensure_ascii=False)
     if not cached_analysis.created_at:
-        cached_analysis.created_at = cached_analysis.computed_at
+        cached_analysis.created_at = datetime.datetime.utcnow()
     
     from sqlalchemy.exc import IntegrityError
     try:

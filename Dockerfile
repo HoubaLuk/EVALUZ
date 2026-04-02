@@ -1,4 +1,4 @@
-# Fáze 1: Build
+# Fáze 1: Build React aplikace
 FROM node:20-alpine AS builder
 
 WORKDIR /app
@@ -8,21 +8,14 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Fáze 2: Nginx server pro statické assety
+# Fáze 2: Nginx server pro statické soubory + reverse proxy na backend
 FROM nginx:alpine
 
-# Kopírování buildnutých React souborů z předchozího kroku
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Přepsání default konfigu pro fallback na index.html (React Router)
-RUN echo "server { \
-    listen 80; \
-    location / { \
-    root /usr/share/nginx/html; \
-    index index.html index.htm; \
-    try_files \$uri \$uri/ /index.html; \
-    } \
-    }" > /etc/nginx/conf.d/default.conf
+# Adresář pro SSL certifikát (montovaný jako volume z hostitele)
+RUN mkdir -p /etc/nginx/ssl
 
-EXPOSE 80
+EXPOSE 80 443
 CMD ["nginx", "-g", "daemon off;"]

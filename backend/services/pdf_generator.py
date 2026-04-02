@@ -15,6 +15,21 @@ PUBLIC_DIR = os.path.join(os.path.dirname(BASE_DIR), "public")
 FONTS_DIR = os.path.join(BASE_DIR, "static", "fonts")
 LOGO_PATH = os.path.join(PUBLIC_DIR, "ÚPVSP bez okrajů.jpg")
 
+def _parse_json_field(raw) -> dict:
+    """Bezpečně parsuje JSON pole z DB (TEXT, může být double-encoded)."""
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        result = json.loads(raw)
+        if isinstance(result, str):
+            result = json.loads(result)
+        return result if isinstance(result, dict) else {}
+    except Exception:
+        return {}
+
+
 # Pomocná funkce pro převod plného názvu hodnosti na zkratku
 def get_rank_abbr(full_rank: str) -> str:
     """
@@ -70,7 +85,7 @@ class PDFReport(FPDF):
         self.set_y(-15)
         self.set_font("DejaVu", "", 8)
         self.set_text_color(100, 116, 139) # #64748b - břidlicově šedá
-        self.cell(0, 5, "Generováno s využitím systému EVALUZ vyvinutého na Útvaru policejního vzdělávání a služební přípravy", align="C", ln=1)
+        self.cell(0, 5, "Generováno systémem EVALUZ vyvinutým Útvarem policejního vzdělávání a služební přípravy.", align="C", ln=1)
         self.cell(0, 5, f"Strana {self.page_no()}/{{nb}}", align="C", ln=1)
         self.set_text_color(0, 0, 0) # reset barvy na černou
 
@@ -91,8 +106,16 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
         if not txt: return ""
         return str(txt)
 
-    # JSONType vrací dict přímo; fallback pro případ None
-    data = evaluation.json_result if isinstance(evaluation.json_result, dict) else {}
+    # json_result je uložen jako TEXT — potřebujeme json.loads (ochrana před double-encoding)
+    _raw = evaluation.json_result
+    if isinstance(_raw, str):
+        try:
+            _raw = json.loads(_raw)
+            if isinstance(_raw, str):
+                _raw = json.loads(_raw)
+        except Exception:
+            _raw = {}
+    data = _raw if isinstance(_raw, dict) else {}
     if not data:
         data = {"celkove_skore": 0, "zpetna_vazba": "Chyba formátu dat v databázi.", "vysledky": []}
     
@@ -120,10 +143,27 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     pdf.add_page()
     
     # --- Sekce HLAVIČKA (Identifikace studenta) ---
+    # Jméno: student_identity → cleaned_name → student_name (= název souboru, jen fallback)
+    _student_display = ""
+    if evaluation.student_identity:
+        try:
+            _id = evaluation.student_identity
+            if isinstance(_id, str):
+                _id = json.loads(_id)
+            if isinstance(_id, str):
+                _id = json.loads(_id)
+            if isinstance(_id, dict) and _id.get("prijmeni"):
+                _parts = [_id.get("hodnost", ""), _id.get("prijmeni", "").upper(), _id.get("jmeno", "")]
+                _student_display = " ".join(p for p in _parts if p)
+        except Exception:
+            pass
+    if not _student_display:
+        _student_display = evaluation.cleaned_name or evaluation.student_name or ""
+
     pdf.set_font("DejaVu", "B", 12)
     pdf.cell(35, 8, "Student:", 0, 0)
     pdf.set_font("DejaVu", "", 12)
-    pdf.cell(0, 8, safe_text(evaluation.student_name), 0, 1)
+    pdf.cell(0, 8, safe_text(_student_display), 0, 1)
     
     pdf.ln(5)
     
@@ -163,8 +203,8 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     pdf.set_text_color(255, 255, 255)
     
     # Definice šířek sloupců pro A4
-    col_kriterium = 45
-    col_splneno = 20
+    col_kriterium = 51
+    col_splneno = 14
     col_body = 10
     col_oduv = 115
     
@@ -180,7 +220,6 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     
     for item in data.get("vysledky", []):
         nazev = safe_text(item.get("nazev", ""))
-        if len(nazev) > 45: nazev = nazev[:42] + "..."
             
         splneno = "ANO" if item.get("splneno", False) else "NE"
         body = str(item.get("body", 0))
@@ -253,13 +292,16 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     pdf.ln(12)
     pdf.set_font("DejaVu", "", 11)
     
-    # Sestavení celého jména lektora dle požadavku
-    name_str = f"{lecturer.title_before + ' ' if lecturer.title_before else ''}{lecturer.first_name} {lecturer.last_name}{' ' + lecturer.title_after if lecturer.title_after else ''}".strip()
-    rank_str = f"{lecturer.funkcni_zarazeni + ' ' if lecturer.funkcni_zarazeni else ''}{lecturer.rank_full or lecturer.rank_shortcut}".strip()
-    if not rank_str:
-        rank_str = "Vyučující"
-    
-    pdf.cell(0, 8, safe_text(f"vytvořil: {name_str}, {rank_str}"), ln=1)
+    # Formát podpisové doložky: "Vyučující: kpt. Mgr. Lukáš Hřibňák, Ph.D." — bez funkcni_zarazeni
+    _rank = (lecturer.rank_shortcut or "").strip()
+    _tb = (lecturer.title_before or "").strip()
+    _ta = (lecturer.title_after or "").strip()
+    _fn = f"{lecturer.first_name} {lecturer.last_name}".strip()
+    name_str = " ".join(filter(None, [_rank, _tb, _fn]))
+    if _ta:
+        name_str = f"{name_str}, {_ta}"
+
+    pdf.cell(0, 8, safe_text(f"Vyučující: {name_str}"), ln=1)
     
     if lecturer.school_location:
         pdf.cell(0, 8, safe_text(lecturer.school_location), ln=1)
@@ -273,7 +315,7 @@ def generate_student_pdf(evaluation: StudentEvaluation, lecturer: Lecturer, db: 
     return pdf.output(dest="S")
 
 
-def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: str = None) -> bytes:
+def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: str = None, class_name: str = "", scenario_display_name: str = "") -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.chart import BarChart, Reference
@@ -291,7 +333,7 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
     for e in evaluations:
         if scenario_id and e.scenario_name != scenario_id:
             continue
-        data = e.json_result if e.json_result else {}
+        data = _parse_json_field(e.json_result)
         if data and data.get("vysledky"):
             valid_evaluations.append(e)
             
@@ -336,8 +378,15 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
     ws_summary['A1'].font = Font(size=14, bold=True, color="002855")
     ws_summary['A1'].alignment = Alignment(horizontal="center")
     
-    ws_summary.append(["Třída:", db.query(ClassRoom).filter(ClassRoom.id == class_id).first().name if db.query(ClassRoom).filter(ClassRoom.id == class_id).first() else "Neznámá"])
-    ws_summary.append(["Modelová situace:", scenario_id if scenario_id else "Neznámá"])
+    # Třída: query param má prioritu, fallback na DB
+    _trida = class_name
+    if not _trida:
+        _cr = db.query(ClassRoom).filter(ClassRoom.id == class_id).first()
+        _trida = _cr.name if _cr else "Neznámá"
+    # Modelová situace: query param má prioritu, fallback na scenario_id
+    _situace = scenario_display_name or scenario_id or "Neznámá"
+    ws_summary.append(["Třída:", _trida])
+    ws_summary.append(["Modelová situace:", _situace])
     ws_summary.append(["Datum exportu:", datetime.now().strftime("%d. %m. %Y %H:%M")])
     ws_summary.append([]) # Mezera
     
@@ -354,7 +403,7 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
 
     for eval_record in evaluations:
         try:
-            data = eval_record.json_result or {}
+            data = _parse_json_field(eval_record.json_result)
             score = data.get('celkove_skore', 0)
             total_score_sum += score
             if max_pts > 0:
@@ -398,11 +447,8 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
     crit_totals = {name: {"passes": 0, "pts": 0} for name in criteria_names}
     
     for eval_record in evaluations:
-        try:
-            data = eval_record.json_result or {}
-        except Exception:
-            data = {}
-        
+        data = _parse_json_field(eval_record.json_result)
+
         # Priorita: cleaned_name -> student_name
         student_display_name = eval_record.cleaned_name if eval_record.cleaned_name else eval_record.student_name
         total_score = data.get('celkove_skore', 0)
@@ -442,9 +488,6 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
             except: pass
         ws_results.column_dimensions[column].width = (max_length + 2) * 1.2
     
-    ws_results.append([])
-    ws_results.append([footer_text])
-
     # --- LIST 3: Analýza ---
     ws_analysis = wb.create_sheet(title="Analýza")
     ws_analysis.append(["Kód", "Znění Kritéria", "Úspěšnost (%)"])
@@ -477,9 +520,6 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
         chart.shape = 4
         ws_analysis.add_chart(chart, "E2")
     
-    ws_analysis.append([])
-    ws_analysis.append([footer_text])
-
     # --- LIST 4: Metodika (Odstraníme nebo ponecháme jen pokud je obsah) ---
     if cached_analysis and cached_analysis.content_json:
         ws_methodology = wb.create_sheet(title="Metodika")
@@ -489,8 +529,10 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
             cell.font = header_font
         
         try:
-            analysis_data = cached_analysis.content_json or {}
+            analysis_data = _parse_json_field(cached_analysis.content_json)
             ai_insight = analysis_data.get("ai_insight", "")
+            if not ai_insight:
+                raise ValueError("Chybí ai_insight")
             blocks = ai_insight.split("###")
             for block in blocks:
                 block = block.strip()
@@ -503,14 +545,11 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
                     ws_methodology.append([content])
                     ws_methodology.append([])
         except Exception:
-            ws_methodology.append(["Nepodařilo se načíst zprávu."])
-            
+            ws_methodology.append(["Shrnutí není k dispozici — nejprve vygenerujte analýzu ve frontendu."])
+
         ws_methodology.column_dimensions['A'].width = 100
         for cell in ws_methodology['A']:
             cell.alignment = Alignment(wrap_text=True)
-            
-        ws_methodology.append([])
-        ws_methodology.append([footer_text])
 
 
     from io import BytesIO
@@ -521,7 +560,14 @@ def generate_class_excel(class_id: int, db: Session, current_user, scenario_id: 
     return output.getvalue()
 
 
-def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: Lecturer) -> bytes:
+def generate_class_report_pdf(
+    analysis_data: dict,
+    scenario_id: str,
+    lecturer: Lecturer,
+    scenario_display_name: str = "",
+    class_name: str = "",
+    criteria_descriptions: dict = None
+) -> bytes:
     """
     Generuje komplexní PDF report s globální analýzou celé třídy.
     Obsahuje KPI karty, tabulku úspěšnosti kritérií s barevným kódováním
@@ -532,8 +578,7 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         scenario_name = f"Zvolený scénář (ID: {final_scenario_id})"
 
         pdf = PDFReport(
-            title="Globální analýza třídy - EVALUZ",
-            subtitle=f"Modelová situace: {scenario_name}",
+            title="Protokol o hodnocení studijní skupiny - EVALUZ",
             unit="mm", format="A4"
         )
 
@@ -558,29 +603,42 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         pdf.set_fill_color(30, 41, 59)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("DejaVu", "B", 18)
-        pdf.cell(0, 16, "  EVALUZ - Globální Analýza Třídy", border=0, ln=1, align="L", fill=True)
+        pdf.cell(0, 16, "  Protokol o hodnocení studijní skupiny", border=0, ln=1, align="L", fill=True)
         pdf.set_text_color(0, 0, 0)
         pdf.set_font("DejaVu", "", 10)
         pdf.set_draw_color(0, 0, 0)
         pdf.ln(6)
         
-        # Hlavička informací
+        # Hlavička informací — 5 polí
         pdf.set_fill_color(240, 245, 250)
-        # Sestavení celého jména lektora bez "None" řetězců
-        name_str = f"{lecturer.title_before + ' ' if lecturer.title_before else ''}{lecturer.first_name} {lecturer.last_name}{' ' + lecturer.title_after if lecturer.title_after else ''}".strip()
-        rank_str = f"{lecturer.funkcni_zarazeni + ' ' if lecturer.funkcni_zarazeni else ''}{lecturer.rank_full or lecturer.rank_shortcut}".strip()
-        if not rank_str:
-            rank_str = "Vyučující"
-        
-        pdf.cell(40, 8, "Vyučující:", border=1, fill=True)
-        pdf.cell(0, 8, f"{name_str}, {rank_str}", border=1, ln=1)
-        
-        if lecturer.school_location:
-             pdf.cell(40, 8, "Školní útvar:", border=1, fill=True)
-             pdf.cell(0, 8, lecturer.school_location, border=1, ln=1)
-             
-        pdf.cell(40, 8, "Modelová situace:", border=1, fill=True)
-        pdf.cell(0, 8, scenario_name, border=1, ln=1)
+        import datetime
+        now_str = datetime.datetime.now().strftime("%d. %m. %Y %H:%M")
+
+        # Formát: "kpt. Mgr. Lukáš Hřibňák, Ph.D." — bez funkcni_zarazeni
+        rank_part = (lecturer.rank_shortcut or "").strip()
+        title_before = (lecturer.title_before or "").strip()
+        title_after = (lecturer.title_after or "").strip()
+        full_name = f"{lecturer.first_name} {lecturer.last_name}".strip()
+        name_str = " ".join(filter(None, [rank_part, title_before, full_name]))
+        if title_after:
+            name_str = f"{name_str}, {title_after}"
+
+        label_w = 50  # šířka popisku
+
+        pdf.cell(label_w, 8, "Vzdělávací zařízení:", border=1, fill=True)
+        pdf.cell(0, 8, lecturer.school_location or "—", border=1, ln=1)
+
+        pdf.cell(label_w, 8, "Studijní skupina:", border=1, fill=True)
+        pdf.cell(0, 8, class_name or "—", border=1, ln=1)
+
+        pdf.cell(label_w, 8, "Modelová situace:", border=1, fill=True)
+        pdf.cell(0, 8, scenario_display_name or scenario_name, border=1, ln=1)
+
+        pdf.cell(label_w, 8, "Vyučující:", border=1, fill=True)
+        pdf.cell(0, 8, name_str or "—", border=1, ln=1)
+
+        pdf.cell(label_w, 8, "Datum exportu:", border=1, fill=True)
+        pdf.cell(0, 8, now_str, border=1, ln=1)
     
         # KPI Card
         pdf.ln(6)
@@ -597,64 +655,93 @@ def generate_class_report_pdf(analysis_data: dict, scenario_id: str, lecturer: L
         # Shrnutí tabulky K1-K25
         pdf.ln(10)
         pdf.set_font("DejaVu", "B", 12)
-        pdf.cell(0, 8, "Úspěšnost v jednotlivých kritériích:", ln=1)
-        
+        pdf.cell(0, 8, "Úspěšnost plnění kritérií", ln=1)
+
+        # Pomocná funkce pro výpočet výšky řádku
+        def calc_row_height(pdf_ref, text, col_w, line_h=5):
+            """Vypočítá potřebnou výšku řádku dle délky textu."""
+            words = text.split()
+            current_w = 0
+            lines = 1
+            for word in words:
+                w = pdf_ref.get_string_width(word + ' ')
+                if current_w + w > col_w - 2:
+                    lines += 1
+                    current_w = w
+                else:
+                    current_w += w
+            return max(line_h, lines * line_h)
+
+        total_students = sum(analysis_data.get("score_distribution", {}).values()) or 1
+
         pdf.set_font("DejaVu", "B", 9)
-        pdf.set_draw_color(100, 116, 139) # slate-500
-        pdf.set_fill_color(241, 245, 249) # slate-100
-        pdf.cell(15, 8, "Kód", border=1, fill=True, align="C")
-        pdf.cell(145, 8, "Název kritéria", border=1, fill=True)
-        pdf.cell(0, 8, "Úspěšnost", border=1, ln=1, align="C", fill=True)
-        
+        pdf.set_draw_color(100, 116, 139)  # slate-500
+        pdf.set_fill_color(241, 245, 249)  # slate-100
+        pdf.cell(22, 8, "Kritérium č.", border=1, fill=True, align="C")
+        pdf.cell(130, 8, "Definice kritéria", border=1, fill=True)
+        pdf.cell(0, 8, "Splnilo", border=1, ln=1, align="C", fill=True)
+
         pdf.set_font("DejaVu", "", 8)
-        pdf.set_draw_color(203, 213, 225) # slate-300 for rows
+        pdf.set_draw_color(203, 213, 225)  # slate-300 for rows
         stats = analysis_data.get("stats", [])
-        # Limit to 25 strictly
+        remaining_w = pdf.w - pdf.l_margin - pdf.r_margin - 22 - 130
+
         for i, stat in enumerate(stats):
             success_rate = stat.get('success_rate', 0)
-            
-            # Color coding success block
-            if success_rate < 50:
-                pdf.set_text_color(220, 38, 38) # Red
-            elif success_rate < 80:
-                pdf.set_text_color(217, 119, 6) # Amber
-            else:
-                pdf.set_text_color(16, 185, 129) # Green
-                
-            pdf.cell(15, 6, f"K{i+1}", border=1, align="C")
-            
-            # We must change text color to black for the name
-            pdf.set_text_color(0, 0, 0)
-            name = str(stat.get('name', '') or '')
-            if len(name) > 85: name = name[:82] + "..."
-            pdf.cell(145, 6, name, border=1)
-            
-            # Paint the success_rate % with Traffic Light System
-            if success_rate < 50:
-                pdf.set_fill_color(254, 226, 226) # Red fill
-                pdf.set_text_color(153, 27, 27)   # Red text
-                pdf.set_font("DejaVu", "B", 8)
-            elif success_rate < 80:
-                pdf.set_fill_color(254, 243, 199) # Amber fill
-                pdf.set_text_color(146, 64, 14)   # Amber text
-                pdf.set_font("DejaVu", "B", 8)
-            else:
-                pdf.set_fill_color(220, 252, 231) # Green fill
-                pdf.set_text_color(22, 101, 52)   # Green text
-                pdf.set_font("DejaVu", "B", 8)
-                
-            pdf.cell(0, 6, f"{success_rate} %", border=1, ln=1, align="C", fill=True)
-            pdf.set_text_color(0, 0, 0) # Reset color
-            pdf.set_font("DejaVu", "", 8)
-            pdf.set_fill_color(255, 255, 255) # Reset fill
+            passes = round(success_rate / 100 * total_students)
+            splnilo = f"{passes} ({success_rate} %)"
 
-        # AI Pedagogické shrnutí
-        pdf.add_page()
+            full_name = stat.get('full_name', stat.get('name', ''))
+            description = full_name  # krátký název kritéria (c.nazev)
+
+            row_h = calc_row_height(pdf, description, 130)
+            x0, y0 = pdf.get_x(), pdf.get_y()
+
+            # Kontrola konce stránky
+            if y0 + row_h > pdf.h - pdf.b_margin - 10:
+                pdf.add_page()
+                x0, y0 = pdf.get_x(), pdf.get_y()
+
+            # Policejní 5-stupňová škála (barvy sloupce "Splnilo")
+            if success_rate >= 80:
+                fill_rgb = (220, 252, 231); text_rgb = (22, 101, 52)    # 1 — zelená
+            elif success_rate >= 60:
+                fill_rgb = (187, 247, 208); text_rgb = (21, 128, 61)    # 2 — světle zelená
+            elif success_rate >= 40:
+                fill_rgb = (254, 243, 199); text_rgb = (146, 64, 14)    # 3 — amber
+            elif success_rate >= 20:
+                fill_rgb = (254, 215, 170); text_rgb = (154, 52, 18)    # 4 — oranžová
+            else:
+                fill_rgb = (254, 226, 226); text_rgb = (153, 27, 27)    # 5 — červená
+
+            # Sloupec 1: Kritérium č.
+            pdf.set_xy(x0, y0)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(22, row_h, f"K{i+1}", border=1, align="C")
+
+            # Sloupec 2: Definice kritéria (multi_cell – zalamuje text)
+            pdf.set_xy(x0 + 22, y0)
+            pdf.multi_cell(130, 5, description, border=1)
+
+            # Sloupec 3: Splnilo — umístit na správnou pozici se správnou výškou
+            pdf.set_xy(x0 + 22 + 130, y0)
+            pdf.set_fill_color(*fill_rgb)
+            pdf.set_text_color(*text_rgb)
+            pdf.set_font("DejaVu", "B", 8)
+            pdf.cell(remaining_w, row_h, splnilo, border=1, ln=0, align="C", fill=True)
+
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font("DejaVu", "", 8)
+            pdf.set_fill_color(255, 255, 255)
+            pdf.set_y(y0 + row_h)
+
+        # AI Pedagogické shrnutí — bez velké mezery, rovnou pokračuje
+        pdf.ln(4)
         pdf.set_font("DejaVu", "B", 14)
         pdf.set_text_color(0, 40, 85)
         pdf.cell(0, 10, "PEDAGOGICKÉ SHRNUTÍ (AI ASISTENT)", border=0, ln=1, align="L")
         pdf.set_text_color(0, 0, 0)
-        pdf.ln(5)
+        pdf.ln(3)
         
         pdf.set_font("DejaVu", "", 10)
         ai_insight = analysis_data.get("ai_insight", "")

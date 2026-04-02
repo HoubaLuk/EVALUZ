@@ -470,6 +470,8 @@ export default function EvaluzDashboard() {
             <div className={`${activeTab === 'analytics' ? 'block' : 'hidden'}`}>
               <TabAnalytics
                 scenarioId={activeScenarioId}
+                className={activeClass?.name}
+                scenarioName={activeScenario?.name}
                 cachedData={activeScenarioId ? cachedAnalytics[activeScenarioId] : null}
                 onCacheData={(data) => {
                   if (activeScenarioId) {
@@ -489,7 +491,7 @@ export default function EvaluzDashboard() {
             </div>
 
             <div className={`${activeTab === 'statistics' ? 'block' : 'hidden'} h-full flex-1 overflow-visible`}>
-              <TabMonitor />
+              <TabMonitor classes={classes} />
             </div>
           </div>
         </main>

@@ -39,6 +39,10 @@ const PIE_COLORS = ['#ef4444', '#f59e0b', '#10b981'];
 interface TabAnalyticsProps {
     /** ID aktuálně vybrané modelové situace (scénáře) */
     scenarioId: string | null;
+    /** Zobrazovaný název studijní skupiny (pro PDF) */
+    className?: string;
+    /** Zobrazovaný název modelové situace (pro PDF) */
+    scenarioName?: string;
     /** Případná nacachovaná data pro okamžité zobrazení */
     cachedData?: any | null;
     /** Callback pro uložení dat do cache rodiče */
@@ -51,11 +55,12 @@ interface TabAnalyticsProps {
  * Komponenta pro zobrazení globální analýzy výsledků celé třídy.
  * Obsahuje interaktivní grafy (Recharts), AI doporučení a seznam studentů vyžadujících pomoc.
  */
-export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
+export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
     const { showAlert } = useDialog();
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [pendingApprovals, setPendingApprovals] = useState<{ count: number; total: number } | null>(null);
     const [selectedCriterion, setSelectedCriterion] = useState<string | null>(null);
     const [previewStudentId, setPreviewStudentId] = useState<number | null>(null);
     const [previewStudentData, setPreviewStudentData] = useState<any>(null);
@@ -83,11 +88,18 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
             if (!res.ok) throw new Error("Chyba při stahování analytiky");
 
             const json = await res.json();
-            setData(json);
 
-            // Uložení do cache pro plynulejší UX při přepínání tabů
-            if (onCacheData) {
-                onCacheData(json);
+            // Man-in-the-Loop: backend vrací chybu pokud existují neschválené záznamy
+            if (json.error === 'pending_approvals') {
+                setData(null);
+                setPendingApprovals({ count: json.pending_count, total: json.total_evaluated });
+            } else {
+                setData(json);
+                setPendingApprovals(null);
+                // Uložení do cache pro plynulejší UX při přepínání tabů
+                if (onCacheData) {
+                    onCacheData(json);
+                }
             }
         } catch (e: any) {
             setError(e.message);
@@ -113,9 +125,11 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
      */
     const handleExportExcel = async () => {
         try {
-            const url = scenarioId
-                ? `${API_BASE_URL}/export/class/1/excel?scenario_id=${scenarioId}`
-                : `${API_BASE_URL}/export/class/1/excel`;
+            const excelParams = new URLSearchParams();
+            if (scenarioId) excelParams.set('scenario_id', scenarioId);
+            if (className) excelParams.set('class_name', className);
+            if (scenarioName) excelParams.set('scenario_display_name', scenarioName);
+            const url = `${API_BASE_URL}/export/class/1/excel?${excelParams.toString()}`;
 
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
@@ -156,7 +170,10 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
     const handleExportPDF = async () => {
         const token = localStorage.getItem('upvsp_token');
         const finalScenarioId = data?.scenario_id || scenarioId || 'Neznámý_scénář';
-        const url = `${API_BASE_URL}/export/class-report/${finalScenarioId}?token=${token}`;
+        const params = new URLSearchParams({ token: token || '' });
+        if (className) params.set('class_name', className);
+        if (scenarioName) params.set('scenario_display_name', scenarioName);
+        const url = `${API_BASE_URL}/export/class-report/${finalScenarioId}?${params.toString()}`;
         window.open(url, '_blank');
 
         // Zápis exportu do historie
@@ -225,6 +242,26 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
 
     return (
         <div className="max-w-[1500px] w-full mx-auto px-4 xl:px-8 space-y-6">
+            {/* Man-in-the-Loop: Warning Banner — blokace analytiky dokud nejsou všechny záznamy schváleny */}
+            {pendingApprovals ? (
+                <div className="flex flex-col items-center justify-center min-h-[400px] bg-amber-50 border border-amber-200 rounded-xl p-10 text-center gap-4">
+                    <AlertTriangle className="w-16 h-16 text-amber-500" />
+                    <h2 className="text-xl font-bold text-amber-800">Analytika není dostupná</h2>
+                    <p className="text-amber-700 text-base max-w-lg">
+                        Analytika a exporty budou dostupné až po schválení všech záznamů ve studijní skupině.
+                    </p>
+                    <div className="bg-amber-100 border border-amber-300 rounded-lg px-6 py-3">
+                        <span className="text-2xl font-bold text-amber-800">{pendingApprovals.count}</span>
+                        <span className="text-amber-700 ml-2">
+                            {pendingApprovals.count === 1 ? 'záznam čeká' : pendingApprovals.count < 5 ? 'záznamy čekají' : 'záznamů čeká'} na schválení
+                            <span className="text-amber-500 ml-1">(z {pendingApprovals.total} vyhodnocených)</span>
+                        </span>
+                    </div>
+                    <p className="text-amber-600 text-sm">
+                        Přejděte na kartu <strong>Vyhodnocení ÚZ</strong> a schvalte jednotlivá hodnocení.
+                    </p>
+                </div>
+            ) : (<>
             {/* HLAVIČKA A EXPORTNÍ TLAČÍTKA */}
             <div className="flex items-center justify-between">
                 <div>
@@ -559,6 +596,7 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
                     </div>
                 </div>
             )}
+            </>)}
         </div>
     );
 }

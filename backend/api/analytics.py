@@ -19,6 +19,9 @@ class EvaluationPatchRequest(BaseModel):
 class NamePatchRequest(BaseModel):
     name: str
 
+class ApproveRequest(BaseModel):
+    approved: bool = True
+
 
 router = APIRouter(
     prefix="/analytics",
@@ -46,17 +49,35 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
 
     for eval_record in evaluations:
         try:
-            # Reconstruct the dict from stored JSON so it matches EvaluationResponse
-            data = eval_record.json_result if eval_record.json_result else {}
-            # Make sure we inject the student_name and ID into the payload just like the frontend expects it
+            # json_result je uložen jako TEXT (JSON string) — explicitně parsujeme
+            raw = eval_record.json_result
+            if isinstance(raw, str):
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    data = {}
+            elif isinstance(raw, dict):
+                data = raw
+            else:
+                data = {}
+
             data["jmeno_studenta"] = eval_record.student_name
             data["id"] = eval_record.id
             data["cleaned_name"] = eval_record.cleaned_name
-            # Inject raw json_result so frontend quickview can access original splneno values
-            data["json_result"] = eval_record.json_result
+            # Inject raw json_result jako string pro frontend quickview (parsuje JSON.parse)
+            data["json_result"] = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+            data["is_approved"] = eval_record.is_approved or False
 
+            # student_identity je uložen jako TEXT (JSON string) — explicitně parsujeme
             if eval_record.student_identity:
-                data["identita"] = eval_record.student_identity
+                si = eval_record.student_identity
+                if isinstance(si, str):
+                    try:
+                        data["identita"] = json.loads(si)
+                    except Exception:
+                        data["identita"] = None
+                else:
+                    data["identita"] = si
             else:
                 data["identita"] = None
                 
@@ -125,6 +146,33 @@ def patch_evaluation_score(evaluation_id: int, request: EvaluationPatchRequest, 
         
     db.commit()
     return {"status": "success", "message": "Hodnocení manuálně upraveno. Analytika bude při příštím zobrazení přepočítána."}
+
+@router.patch("/evaluation/{evaluation_id}/approve")
+def approve_evaluation(evaluation_id: int, request: ApproveRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+    """
+    Schválí nebo odvolá schválení záznamu hodnocení lektorem (Man-in-the-Loop).
+    Schválené záznamy jsou zahrnuty do analytiky, neschválené blokují výpočet.
+    """
+    query = db.query(StudentEvaluation).filter(StudentEvaluation.id == evaluation_id)
+    query = apply_data_isolation(query, StudentEvaluation, current_user, db)
+    eval_record = query.first()
+
+    if not eval_record:
+        raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
+
+    eval_record.is_approved = request.approved
+
+    # Invalidace cache analytiky (stejný pattern jako patch_evaluation_score)
+    if eval_record.scenario_name:
+        db.query(ClassAnalysis).filter(
+            ClassAnalysis.scenario_id == eval_record.scenario_name,
+            ClassAnalysis.lecturer_id == current_user.id,
+            ClassAnalysis.class_id == eval_record.class_id
+        ).delete()
+
+    db.commit()
+    return {"status": "success", "is_approved": eval_record.is_approved}
+
 
 @router.patch("/evaluation/{evaluation_id}/name")
 def patch_evaluation_name(evaluation_id: int, request: NamePatchRequest, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):

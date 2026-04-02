@@ -90,6 +90,9 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     // History data
     const [exportsHistory, setExportsHistory] = useState<any[]>([]);
 
+    // School locations
+    const [schoolLocations, setSchoolLocations] = useState<string[]>([]);
+
     useEffect(() => {
         const handleOpenProfileTab = () => setAdminTab('profile');
         window.addEventListener('openProfileTab', handleOpenProfileTab);
@@ -180,6 +183,15 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     password: '',
                     is_superadmin: meData.is_superadmin || false
                 });
+            }
+
+            // Načtení seznamu útvarů
+            const locRes = await fetch(`${API_BASE_URL}/auth/school-locations`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+            });
+            if (locRes.ok) {
+                const locData = await locRes.json();
+                setSchoolLocations(locData.locations || []);
             }
 
             // Načtení historie exportů
@@ -675,12 +687,9 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                                 className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white dark:bg-slate-800"
                                             >
                                                 <option value="">Vyberte útvar...</option>
-                                                <option value="ÚPVSP">ÚPVSP</option>
-                                                <option value="VZ Holešov">VZ Holešov</option>
-                                                <option value="VZ Brno">VZ Brno</option>
-                                                <option value="VZ Hrdlořezy">VZ Hrdlořezy</option>
-                                                <option value="VZ Pardubice">VZ Pardubice</option>
-                                                <option value="VZ Jihlava">VZ Jihlava</option>
+                                                {schoolLocations.map(loc => (
+                                                    <option key={loc} value={loc}>{loc}</option>
+                                                ))}
                                             </select>
                                         </div>
                                     </div>

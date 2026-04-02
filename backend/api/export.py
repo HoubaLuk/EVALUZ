@@ -75,7 +75,13 @@ def export_student_pdf(
         raise HTTPException(status_code=500, detail="Chyba při generování PDF.")
 
 @router.get("/class-report/{scenario_id}", response_class=Response)
-def export_class_report_pdf(scenario_id: str, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer_export)):
+def export_class_report_pdf(
+    scenario_id: str,
+    class_name: str = "",
+    scenario_display_name: str = "",
+    db: Session = Depends(get_db),
+    current_user: Lecturer = Depends(get_current_lecturer_export)
+):
     """
     Vygeneruje a vrátí PDF globální analýzy třídy pro danou modelovou situaci.
     """
@@ -93,9 +99,83 @@ def export_class_report_pdf(scenario_id: str, db: Session = Depends(get_db), cur
         if not cached_analysis:
             raise HTTPException(status_code=404, detail="Analýza pro toto téma zatím neexistuje. Obnovte a vygenerujte analýzu ve frontend aplikaci.")
             
-        data = cached_analysis.content_json
-        
-        pdf_bytes = generate_class_report_pdf(data, decoded_id, current_user)
+        data = json.loads(cached_analysis.content_json)
+        # Oprava double-encoded JSON (content_json může být string místo dict)
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        from models.db_models import ClassRoom, EvaluationCriteria, Criterion
+        import re as _re_strip
+
+        def _strip_markdown(text: str) -> str:
+            """Odstraní markdown formátování z textu pro čistý výstup v PDF."""
+            if not text:
+                return text
+            # Odstraní **tučné** a *kurzíva* markery
+            text = _re_strip.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+            # Odstraní odrážky "* text" na začátku řádku
+            text = _re_strip.sub(r'^\s*\*\s+', '', text, flags=_re_strip.MULTILINE)
+            # Odstraní ###/##/# nadpisy
+            text = _re_strip.sub(r'^#{1,6}\s+', '', text, flags=_re_strip.MULTILINE)
+            return text.strip()
+
+        # Fetch full criterion descriptions {nazev: popis} — popis očištěn od markdown
+        criteria_descriptions = {}
+        criteria_q = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == decoded_id)
+        criteria_record = apply_data_isolation(criteria_q, EvaluationCriteria, current_user, db).first()
+        if criteria_record:
+            for c in db.query(Criterion).filter(Criterion.evaluation_criteria_id == criteria_record.id).all():
+                criteria_descriptions[c.nazev] = _strip_markdown(c.popis) or c.nazev
+
+        # class_name: query param má nejvyšší prioritu (frontend posílá aktuální výběr)
+        if not class_name:
+            _eval_class_q = db.query(StudentEvaluation).filter(
+                StudentEvaluation.scenario_name == decoded_id,
+                StudentEvaluation.class_id != None
+            )
+            _eval_class = apply_data_isolation(_eval_class_q, StudentEvaluation, current_user, db).first()
+            if _eval_class and _eval_class.class_id:
+                _cr = db.query(ClassRoom).filter(ClassRoom.id == _eval_class.class_id).first()
+                if _cr:
+                    class_name = _cr.name
+            if not class_name and cached_analysis.class_id:
+                _cr2 = db.query(ClassRoom).filter(ClassRoom.id == cached_analysis.class_id).first()
+                if _cr2:
+                    class_name = _cr2.name
+
+        # scenario_display_name: query param má nejvyšší prioritu
+        scenario_display = scenario_display_name  # z query param
+        if not scenario_display:
+            _eval_q = db.query(StudentEvaluation).filter(
+                StudentEvaluation.scenario_name == decoded_id,
+                StudentEvaluation.scenario_display_name != None,
+                StudentEvaluation.scenario_display_name != ""
+            )
+            _eval_sample = apply_data_isolation(_eval_q, StudentEvaluation, current_user, db).first()
+            if _eval_sample and _eval_sample.scenario_display_name:
+                scenario_display = _eval_sample.scenario_display_name
+
+        # Fallback: parse markdown_content for first ## heading
+        if not scenario_display and criteria_record and criteria_record.markdown_content:
+            for _line in criteria_record.markdown_content.strip().split('\n'):
+                _line = _line.strip()
+                if _line.startswith('## '):
+                    scenario_display = _line[3:].strip()
+                    break
+                elif _line.startswith('# '):
+                    scenario_display = _line[2:].strip()
+                    break
+
+        # Last fallback: raw scenario ID
+        if not scenario_display:
+            scenario_display = decoded_id
+
+        pdf_bytes = generate_class_report_pdf(
+            data, decoded_id, current_user,
+            scenario_display_name=scenario_display,
+            class_name=class_name,
+            criteria_descriptions=criteria_descriptions
+        )
         
         # Slugify
         slug = unicodedata.normalize('NFKD', decoded_id).encode('ascii', 'ignore').decode('ascii')
@@ -159,12 +239,19 @@ def export_evaluation_pdf(
         raise HTTPException(status_code=500, detail="Chyba při generování PDF.")
 
 @router.get("/class/{class_id}/excel", response_class=Response)
-def export_class_excel(class_id: int, scenario_id: str = None, db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+def export_class_excel(
+    class_id: int,
+    scenario_id: str = None,
+    class_name: str = "",
+    scenario_display_name: str = "",
+    db: Session = Depends(get_db),
+    current_user: Lecturer = Depends(get_current_lecturer)
+):
     """
     Vygeneruje a vrátí XLSX sešit výsledků celé třídy.
     """
     try:
-        excel_bytes = generate_class_excel(class_id, db, current_user, scenario_id)
+        excel_bytes = generate_class_excel(class_id, db, current_user, scenario_id, class_name, scenario_display_name)
         
         headers = {
             'Content-Disposition': f'attachment; filename="vysledky_trida_{class_id}.xlsx"'

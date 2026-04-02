@@ -1,1 +1,3 @@
-export const API_BASE_URL = `http://${window.location.hostname}:8000/api/v1`;
+// Relativní cesta — funguje za Nginx reverse proxy (produkce) i za Vite proxy (dev).
+// Nezávisí na protokolu (http/https) ani portu → žádné mixed-content problémy.
+export const API_BASE_URL = '/api/v1';

@@ -1,6 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey
 from sqlalchemy.orm import declarative_base
-from models.types import JSONType
 
 Base = declarative_base()
 
@@ -57,12 +56,14 @@ class StudentEvaluation(Base):
     student_name = Column(String, index=True)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"))
     scenario_name = Column(String, index=True, default="scen-1")
-    json_result = Column(JSONType)
+    scenario_display_name = Column(String, default="")
+    json_result = Column(Text)
     cleaned_name = Column(String, index=True) # "Příjmení Jméno, hodnost"
-    student_identity = Column(JSONType) # JSON structure from LLM
+    student_identity = Column(Text) # JSON structure from LLM
     source_text = Column(Text) # Extracted text from the original document
     source_filename = Column(String) # Original filename
-    created_at = Column(DateTime)
+    created_at = Column(String)
+    is_approved = Column(Boolean, default=False)
 
 class AppSettings(Base):
     __tablename__ = "app_settings"
@@ -76,10 +77,8 @@ class ClassAnalysis(Base):
     lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), index=True)
     scenario_id = Column(String, index=True) # REMOVED unique=True to allow different lecturers to have their own analysis for the same scenario
-    content_json = Column(JSONType)
-    created_at = Column(DateTime)
-    computed_at = Column(DateTime)       # Kdy byla AI analýza naposledy vypočítána
-    version = Column(Integer, default=1) # Inkrementuje se při každé regeneraci
+    content_json = Column(Text)
+    created_at = Column(String)
 
 class ExportHistory(Base):
     __tablename__ = "export_history"
@@ -88,7 +87,7 @@ class ExportHistory(Base):
     scenario_name = Column(String)
     type = Column(String)
     download_url = Column(String)
-    created_at = Column(DateTime, index=True)
+    created_at = Column(String, index=True)
 
 class GoldenExample(Base):
     __tablename__ = "golden_examples"
@@ -96,6 +95,6 @@ class GoldenExample(Base):
     lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
     scenario_id = Column(String, index=True)
     source_text = Column(Text)
-    perfect_json = Column(JSONType)
-    created_at = Column(DateTime)
+    perfect_json = Column(Text)
+    created_at = Column(String)
 

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from core.database import get_db
 from core.security import verify_password, get_password_hash, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM
-from models.db_models import Lecturer
+from models.db_models import Lecturer, AppSettings
 from jose import jwt, JWTError
 
 router = APIRouter(
@@ -252,4 +252,17 @@ def update_password(data: PasswordUpdate, db: Session = Depends(get_db), current
     current_user.must_change_password = False
     db.commit()
     return {"status": "success", "message": "Heslo bylo úspěšně změněno."}
+
+
+@router.get("/school-locations")
+def get_school_locations(db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
+    """Returns the list of available school locations from AppSettings."""
+    import json as _json
+    setting = db.query(AppSettings).filter(AppSettings.key == "SCHOOL_LOCATIONS").first()
+    if setting and setting.value:
+        try:
+            return {"locations": _json.loads(setting.value)}
+        except Exception:
+            pass
+    return {"locations": []}
 

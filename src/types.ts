@@ -52,6 +52,7 @@ export interface Student {
   };
   zpetna_vazba?: string;
   isDirty?: boolean;
+  is_approved?: boolean;
 }
 
 

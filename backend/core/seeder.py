@@ -64,4 +64,7 @@ def seed_database(db: Session):
     if not db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first():
         db.add(AppSettings(key="VLLM_MODEL_NAME", value=settings.VLLM_MODEL_NAME))
 
+    if not db.query(AppSettings).filter(AppSettings.key == "SCHOOL_LOCATIONS").first():
+        db.add(AppSettings(key="SCHOOL_LOCATIONS", value='["ÚPVSP","VZ Holešov","VZ Brno","VZ Hrdlořezy","VZ Pardubice","VZ Jihlava"]'))
+
     db.commit()
