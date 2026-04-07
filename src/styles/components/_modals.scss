@@ -1,0 +1,151 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Modální okna
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--bg-surface);
+  border-radius: $radius-lg;
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  &--lg  { max-width: 860px; }
+  &--xl  { max-width: 1100px; }
+  &--sm  { max-width: 440px; }
+
+  &__header {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+    font-weight: 600;
+    font-size: 1rem;
+
+    &--primary   { background: $primary-color;   color: $text-on-dark; }
+    &--secondary { background: $secondary-color; color: $text-on-dark; }
+    &--positive  { background: $positive-color;  color: $text-on-dark; }
+    &--warning   { background: $warning-color;   color: $text-on-dark; }
+    &--negative  { background: $negative-color;  color: $text-on-dark; }
+  }
+
+  &__close {
+    background: transparent;
+    border: none;
+    color: inherit;
+    opacity: 0.8;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    border-radius: $radius-sm;
+    @include transition(opacity, background-color);
+
+    &:hover {
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.15);
+    }
+  }
+
+  &__body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  &__footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+    background: var(--bg-surface-2);
+  }
+
+  // Záložky uvnitř modalu (admin panel)
+  &__tabs {
+    display: flex;
+    border-bottom: 2px solid var(--border-color);
+    gap: 0;
+    padding: 0 20px;
+    background: var(--bg-surface-2);
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+
+  &__tab {
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    @include transition(color, border-color);
+
+    &:hover {
+      color: var(--text-primary);
+    }
+
+    &--active {
+      color: $primary-color;
+      border-bottom-color: $primary-color;
+    }
+  }
+}
+
+// Dialog (alert / confirm / prompt) — jednoduchý
+.dialog {
+  background: var(--bg-surface);
+  border-radius: $radius-lg;
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+
+  &__title {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+  }
+
+  &__message {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+}

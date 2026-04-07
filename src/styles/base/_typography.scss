@@ -1,0 +1,55 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Typografie
+// Font: Exo 2 (Google Fonts, Open Font License)
+// Řezy: Thin(100), Light(200), Regular(400), Bold(600), Black(900)
+// Fallback: systémová písma
+// ============================================================
+
+body {
+  font-family: 'Exo 2', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// Nadpisy
+h1, h2, h3, h4, h5, h6 {
+  font-family: inherit;
+  line-height: 1.25;
+  margin-top: 0;
+  color: var(--text-primary);
+}
+
+h1 { font-size: 2rem;    font-weight: 600; }
+h2 { font-size: 1.5rem;  font-weight: 600; }
+h3 { font-size: 1.25rem; font-weight: 600; }
+h4 { font-size: 1.125rem; font-weight: 600; }
+h5 { font-size: 1rem;    font-weight: 600; }
+h6 { font-size: 0.875rem; font-weight: 600; }
+
+// Odstavce
+p {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+// Pomocné třídy pro font-weight
+.fw-thin    { font-weight: 100; }
+.fw-light   { font-weight: 200; }
+.fw-regular { font-weight: 400; }
+.fw-bold    { font-weight: 600; }
+.fw-black   { font-weight: 900; }
+
+// Textové utility
+.text-primary-color { color: var(--color-primary); }
+.text-positive      { color: var(--color-positive); }
+.text-warning       { color: var(--color-warning); }
+.text-negative      { color: var(--color-negative); }
+.text-muted         { color: var(--text-muted); }
+.text-sm            { font-size: 0.875rem; }
+.text-xs            { font-size: 0.75rem; }
+.text-lg            { font-size: 1.125rem; }
+.text-xl            { font-size: 1.25rem; }

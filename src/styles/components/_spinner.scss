@@ -1,0 +1,80 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Spinner / Loading
+// ============================================================
+@use '../base/colors' as *;
+
+@keyframes ncikt-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ncikt-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+// Základní spinner
+.spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba($primary-color, 0.2);
+  border-top-color: $primary-color;
+  border-radius: 50%;
+  animation: ncikt-spin 0.8s linear infinite;
+  flex-shrink: 0;
+
+  &--sm {
+    width: 16px;
+    height: 16px;
+    border-width: 2px;
+  }
+
+  &--lg {
+    width: 40px;
+    height: 40px;
+    border-width: 4px;
+  }
+
+  &--white {
+    border-color: rgba(255, 255, 255, 0.3);
+    border-top-color: #ffffff;
+  }
+
+  &--positive {
+    border-color: rgba($positive-color, 0.2);
+    border-top-color: $positive-color;
+  }
+}
+
+// Stav načítání (overlay)
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(var(--bg-page), 0.7);
+  z-index: 10;
+  border-radius: inherit;
+
+  &__text {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+}
+
+// Skeleton loading
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-surface-2) 25%, var(--border-color) 50%, var(--bg-surface-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-wave 1.5s infinite;
+  border-radius: 4px;
+
+  @keyframes skeleton-wave {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+}

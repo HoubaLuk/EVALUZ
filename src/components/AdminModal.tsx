@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../utils/api';
 
-import { Settings, X, SlidersHorizontal, AlertCircle, Save, Loader2, CheckCircle2, UserPen, Download, History, Users, UserPlus, Key, Power } from 'lucide-react';
+import {
+    faGear, faXmark, faSliders, faCircleExclamation, faFloppyDisk, faCircleCheck,
+    faUserPen, faDownload, faClockRotateLeft, faUsers, faUserPlus, faKey, faPowerOff,
+} from '@fortawesome/free-solid-svg-icons';
+import { Icon } from './Icon';
 import { useDialog } from '../contexts/DialogContext';
 
 /**
@@ -461,231 +465,117 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     const setPromptTemp = adminTab === 'prompt1' ? setTemp1 : adminTab === 'prompt2' ? setTemp2 : setTemp3;
 
     return (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="modal-overlay">
+            <div className="modal" style={{ maxWidth: 960, height: '85vh', display: 'flex', flexDirection: 'column' }}>
                 {/* Modal Header */}
-                <div className="px-6 py-4 bg-[#002855] text-white flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Settings className="w-5 h-5 text-[#D4AF37]" />
-                        <h2 className="text-lg font-semibold tracking-wide">
-                            {isSetupMode ? "První spuštění: Vytvoření hlavního účtu vyučujícího" : "Administrace systému EVALUZ & Prompt Engineering"}
-                        </h2>
-                    </div>
+                <div className="modal__header modal__header--primary">
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Icon icon={faGear} /> {isSetupMode ? "První spuštění: Vytvoření hlavního účtu vyučujícího" : "Administrace systému EVALUZ & Prompt Engineering"}
+                    </span>
                     {!isSetupMode && (
-                        <button
-                            onClick={onClose}
-                            className="p-1.5 hover:bg-white dark:bg-slate-800/20 rounded-lg transition-colors"
-                        >
-                            <X className="w-5 h-5" />
+                        <button className="btn btn--sm btn--icon-only" style={{ background: 'transparent', border: 'none', color: '#fff' }} onClick={onClose}>
+                            <Icon icon={faXmark} />
                         </button>
                     )}
                 </div>
 
                 {/* Modal Body */}
-                <div className="flex-1 flex overflow-hidden relative">
-                    {/* Modal Sidebar */}
+                <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+                    {/* Sidebar */}
                     {!isSetupMode && (
-                        <div className="w-64 bg-slate-50 dark:bg-slate-800/50 border-r border-slate-200 dark:border-slate-700 p-4 flex flex-col gap-1 overflow-y-auto">
+                        <div style={{ width: 220, background: 'var(--bg-surface-2)', borderRight: '1px solid var(--border-color)', padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto', flexShrink: 0 }}>
                             {profile.is_superadmin && (
                                 <>
-                                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">Kategorie promptů</h3>
-                                    <button
-                                        onClick={() => setAdminTab('prompt1')}
-                                        className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt1'
-                                            ? 'bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold border-l-4 border-[#002855]'
-                                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-                                            }`}
-                                    >
-                                        Fáze 1: Precizace kritérií
+                                    <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 2px' }}>Kategorie promptů</span>
+                                    {(['prompt1', 'prompt2', 'prompt3'] as const).map((tab, i) => (
+                                        <button key={tab} onClick={() => setAdminTab(tab)} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === tab ? 700 : 500, background: adminTab === tab ? 'var(--color-primary-light, rgba(15,82,125,0.1))' : 'transparent', color: adminTab === tab ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === tab ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === tab ? `3px solid var(--color-primary)` : '3px solid transparent', cursor: 'pointer' }}>
+                                            Fáze {i + 1}: {['Precizace kritérií', 'Evaluace ÚZ (JSON)', 'Globální analýza'][i]}
+                                        </button>
+                                    ))}
+                                    <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />
+                                    <button onClick={() => setAdminTab('vllm')} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === 'vllm' ? 700 : 500, background: adminTab === 'vllm' ? 'rgba(15,82,125,0.1)' : 'transparent', color: adminTab === 'vllm' ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === 'vllm' ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === 'vllm' ? '3px solid var(--color-primary)' : '3px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Icon icon={faSliders} size="xs" /> Napojení na vLLM (API)
                                     </button>
-                                    <button
-                                        onClick={() => setAdminTab('prompt2')}
-                                        className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt2'
-                                            ? 'bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold border-l-4 border-[#002855]'
-                                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-                                            }`}
-                                    >
-                                        Fáze 2: Evaluace ÚZ (JSON)
+                                    <button onClick={() => setAdminTab('rag')} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === 'rag' ? 700 : 500, background: adminTab === 'rag' ? 'rgba(15,82,125,0.1)' : 'transparent', color: adminTab === 'rag' ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === 'rag' ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === 'rag' ? '3px solid var(--color-primary)' : '3px solid transparent', cursor: 'pointer' }}>
+                                        AI Laboratoř & MLOps
                                     </button>
-                                    <button
-                                        onClick={() => setAdminTab('prompt3')}
-                                        className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${adminTab === 'prompt3'
-                                            ? 'bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold border-l-4 border-[#002855]'
-                                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-                                            }`}
-                                    >
-                                        Fáze 3: Globální analýza
-                                    </button>
-                                    <div className="my-2 border-t border-slate-200 dark:border-slate-700"></div>
+                                    <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />
                                 </>
                             )}
-
-                            {profile.is_superadmin && (
-                                <>
-                                    <button
-                                        onClick={() => setAdminTab('vllm')}
-                                        className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${adminTab === 'vllm'
-                                            ? 'bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold border-l-4 border-[#002855]'
-                                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-                                            }`}
-                                    >
-                                        <SlidersHorizontal className="w-4 h-4" />
-                                        Napojení na vLLM (API)
-                                    </button>
-
-                                    <button
-                                        onClick={() => setAdminTab('rag')}
-                                        className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${adminTab === 'rag'
-                                            ? 'bg-purple-100/50 text-purple-700 font-semibold border-l-4 border-purple-500'
-                                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-                                            }`}
-                                    >
-                                        <div className="w-4 h-4 bg-gradient-to-tr from-purple-600 to-fuchsia-500 rounded-sm flex items-center justify-center">
-                                            <span className="text-[10px] text-white font-black">AI</span>
-                                        </div>
-                                        Laboratoř & MLOps
-                                    </button>
-
-                                    <div className="my-2 border-t border-slate-200 dark:border-slate-700"></div>
-                                </>
-                            )}
-
-                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 mt-2">Uživatelský účet</h3>
-                            <button
-                                onClick={() => setAdminTab('profile')}
-                                className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${adminTab === 'profile'
-                                    ? 'bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold border-l-4 border-[#002855]'
-                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-                                    }`}
-                            >
-                                <UserPen className="w-4 h-4" />
-                                Profil a podpisová doložka
+                            <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 2px' }}>Uživatelský účet</span>
+                            <button onClick={() => setAdminTab('profile')} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === 'profile' ? 700 : 500, background: adminTab === 'profile' ? 'rgba(15,82,125,0.1)' : 'transparent', color: adminTab === 'profile' ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === 'profile' ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === 'profile' ? '3px solid var(--color-primary)' : '3px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Icon icon={faUserPen} size="xs" /> Profil a podpisová doložka
                             </button>
-
                             {profile.is_superadmin && (
                                 <>
-                                    <div className="my-2 border-t border-slate-200 dark:border-slate-700"></div>
-                                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 mt-2">Pokročilá správa</h3>
-                                    <button
-                                        onClick={() => { setAdminTab('users'); fetchUsers(); }}
-                                        className={`w-full text-left px-3 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${adminTab === 'users'
-                                            ? 'bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold border-l-4 border-[#002855]'
-                                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-                                            }`}
-                                    >
-                                        <Users className="w-4 h-4" />
-                                        Správa uživatelů
+                                    <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />
+                                    <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 2px' }}>Pokročilá správa</span>
+                                    <button onClick={() => { setAdminTab('users'); fetchUsers(); }} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === 'users' ? 700 : 500, background: adminTab === 'users' ? 'rgba(15,82,125,0.1)' : 'transparent', color: adminTab === 'users' ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === 'users' ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === 'users' ? '3px solid var(--color-primary)' : '3px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Icon icon={faUsers} size="xs" /> Správa uživatelů
                                     </button>
                                 </>
                             )}
                         </div>
                     )}
 
-                    {/* Modal Content */}
-                    <div className="flex-1 p-6 flex flex-col bg-white dark:bg-slate-800 overflow-hidden">
+                    {/* Content */}
+                    <div style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                         {isLoading ? (
-                            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                                <Loader2 className="w-8 h-8 animate-spin mb-4" />
-                                <p>Načítám z databáze...</p>
+                            <div className="loading-overlay" style={{ position: 'relative', flex: 1 }}>
+                                <span className="spinner spinner--lg" />
+                                <p style={{ marginTop: 12, color: 'var(--text-muted)' }}>Načítám z databáze...</p>
                             </div>
                         ) : adminTab === 'profile' ? (
-                            <div className="flex-1 flex flex-col overflow-y-auto pr-2">
-                                <div className="mb-6">
-                                    <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200 mb-1">Profil vyučujícího a podpisová doložka</h3>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">Údaje zadané níže budou použity pro generování PDF a oddělení vašich dat.</p>
+                            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
+                                <div style={{ marginBottom: 16 }}>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>Profil vyučujícího a podpisová doložka</h3>
+                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Údaje zadané níže budou použity pro generování PDF a oddělení vašich dat.</p>
                                 </div>
-
-                                <div className="space-y-6 max-w-2xl">
-                                    <div>
-                                        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Služební e-mail uživatele</label>
-                                        <input type="email" required value={profile.email} disabled={!isSetupMode} onChange={e => setProfile({ ...profile, email: e.target.value })} className={`w-full border ${isSetupMode ? 'border-slate-300 dark:border-slate-600 focus:ring-2 focus:ring-[#002855]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 cursor-not-allowed'} rounded-lg px-4 py-2 text-sm outline-none`} />
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 600 }}>
+                                    <div className="form-group">
+                                        <label>Služební e-mail uživatele</label>
+                                        <input type="email" required value={profile.email} disabled={!isSetupMode} onChange={e => setProfile({ ...profile, email: e.target.value })} className="form-control" />
                                     </div>
-
                                     {isSetupMode && (
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Bezpečné heslo pro přihlášení</label>
-                                            <input type="password" minLength={12} pattern="(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{12,}" title="Min. 12 znaků, kombinace A, a, 1" required value={profile.password} onChange={e => setProfile({ ...profile, password: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
-                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Min. 12 znaků, kombinace A, a, 1</p>
+                                        <div className="form-group">
+                                            <label>Bezpečné heslo pro přihlášení</label>
+                                            <input type="password" minLength={12} pattern="(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{12,}" title="Min. 12 znaků, kombinace A, a, 1" required value={profile.password} onChange={e => setProfile({ ...profile, password: e.target.value })} className="form-control" />
+                                            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}><Icon icon={faCircleExclamation} size="xs" /> Min. 12 znaků, kombinace A, a, 1</p>
                                         </div>
                                     )}
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Titul před jménem</label>
-                                            <input type="text" placeholder="Bc., Mgr., Ing." value={profile.title_before} onChange={e => setProfile({ ...profile, title_before: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Titul za jménem</label>
-                                            <input type="text" placeholder="Ph.D." value={profile.title_after} onChange={e => setProfile({ ...profile, title_after: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Jméno</label>
-                                            <input type="text" value={profile.first_name} onChange={e => setProfile({ ...profile, first_name: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Příjmení</label>
-                                            <input type="text" value={profile.last_name} onChange={e => setProfile({ ...profile, last_name: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">hodnostní označení</label>
-                                            <input type="text" placeholder="plk., kpt., por." value={profile.rank_shortcut} onChange={e => setProfile({ ...profile, rank_shortcut: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Hodnost</label>
-                                            <select value={profile.rank_full} onChange={e => setProfile({ ...profile, rank_full: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white dark:bg-slate-800">
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                        <div className="form-group"><label>Titul před jménem</label><input type="text" placeholder="Bc., Mgr., Ing." value={profile.title_before} onChange={e => setProfile({ ...profile, title_before: e.target.value })} className="form-control" /></div>
+                                        <div className="form-group"><label>Titul za jménem</label><input type="text" placeholder="Ph.D." value={profile.title_after} onChange={e => setProfile({ ...profile, title_after: e.target.value })} className="form-control" /></div>
+                                        <div className="form-group"><label>Jméno</label><input type="text" value={profile.first_name} onChange={e => setProfile({ ...profile, first_name: e.target.value })} className="form-control" /></div>
+                                        <div className="form-group"><label>Příjmení</label><input type="text" value={profile.last_name} onChange={e => setProfile({ ...profile, last_name: e.target.value })} className="form-control" /></div>
+                                        <div className="form-group"><label>Hodnostní označení</label><input type="text" placeholder="plk., kpt., por." value={profile.rank_shortcut} onChange={e => setProfile({ ...profile, rank_shortcut: e.target.value })} className="form-control" /></div>
+                                        <div className="form-group">
+                                            <label>Hodnost</label>
+                                            <select value={profile.rank_full} onChange={e => setProfile({ ...profile, rank_full: e.target.value })} className="form-control">
                                                 <option value="">Vyberte hodnost</option>
                                                 <option value="vrchní komisař">vrchní komisař</option>
                                                 <option value="rada">rada</option>
                                             </select>
                                         </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Funkční zařazení</label>
-                                            <select
-                                                value={profile.funkcni_zarazeni}
-                                                onChange={e => {
-                                                    const val = e.target.value;
-                                                    let newRankShortcut = profile.rank_shortcut;
-                                                    let newRankFull = profile.rank_full;
-
-                                                    if (val === 'Lektor') {
-                                                        newRankShortcut = 'kpt.';
-                                                        newRankFull = 'vrchní komisař';
-                                                    } else if (val === 'Metodik') {
-                                                        newRankShortcut = 'pplk.';
-                                                        newRankFull = 'rada';
-                                                    }
-
-                                                    setProfile({
-                                                        ...profile,
-                                                        funkcni_zarazeni: val,
-                                                        rank_shortcut: newRankShortcut,
-                                                        rank_full: newRankFull
-                                                    });
-                                                }}
-                                                className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white dark:bg-slate-800"
-                                            >
+                                        <div className="form-group">
+                                            <label>Funkční zařazení</label>
+                                            <select value={profile.funkcni_zarazeni} onChange={e => {
+                                                const val = e.target.value;
+                                                let newRankShortcut = profile.rank_shortcut;
+                                                let newRankFull = profile.rank_full;
+                                                if (val === 'Lektor') { newRankShortcut = 'kpt.'; newRankFull = 'vrchní komisař'; }
+                                                else if (val === 'Metodik') { newRankShortcut = 'pplk.'; newRankFull = 'rada'; }
+                                                setProfile({ ...profile, funkcni_zarazeni: val, rank_shortcut: newRankShortcut, rank_full: newRankFull });
+                                            }} className="form-control">
                                                 <option value="">Vyberte zařazení</option>
                                                 <option value="Vyučující">Vyučující</option>
                                                 <option value="Metodik">Metodik</option>
                                                 <option value="Administrátor">Administrátor</option>
                                             </select>
                                         </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Organizační článek</label>
-                                            <select
-                                                value={profile.school_location}
-                                                onChange={e => setProfile({ ...profile, school_location: e.target.value })}
-                                                className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#002855] outline-none bg-white dark:bg-slate-800"
-                                            >
+                                        <div className="form-group">
+                                            <label>Organizační článek</label>
+                                            <select value={profile.school_location} onChange={e => setProfile({ ...profile, school_location: e.target.value })} className="form-control">
                                                 <option value="">Vyberte útvar...</option>
                                                 {schoolLocations.map(loc => (
                                                     <option key={loc} value={loc}>{loc}</option>
@@ -695,466 +585,269 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                     </div>
 
                                     {/* Živý náhled doložky */}
-                                    <div className="mt-8 p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl relative overflow-hidden">
-                                        <div className="absolute top-0 left-0 w-1 h-full bg-[#D4AF37]"></div>
-                                        <h4 className="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider flex items-center gap-1.5">
-                                            <UserPen className="w-3.5 h-3.5" />
-                                            Živý náhled podpisové doložky
+                                    <div style={{ padding: 16, background: 'var(--bg-surface-2)', border: '1px solid var(--border-color)', borderLeft: '3px solid var(--color-warning)', borderRadius: 6, marginTop: 8 }}>
+                                        <h4 style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <Icon icon={faUserPen} size="xs" /> Živý náhled podpisové doložky
                                         </h4>
-                                        <div className="text-[15px] text-slate-800 dark:text-slate-100 leading-relaxed font-medium">
-                                            {profile.rank_shortcut} {profile.title_before} {profile.first_name} {profile.last_name}{profile.title_after ? `, ${profile.title_after}` : ''}
-                                            <br />
-                                            {profile.rank_full}
-                                            <br />
+                                        <div style={{ fontSize: '0.9rem', lineHeight: 1.7, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                            {profile.rank_shortcut} {profile.title_before} {profile.first_name} {profile.last_name}{profile.title_after ? `, ${profile.title_after}` : ''}<br />
+                                            {profile.rank_full}<br />
                                             Útvar policejního vzdělávání a služební přípravy
-                                            {profile.school_location && profile.school_location !== 'ÚPVSP' && (
-                                                <>
-                                                    <br />
-                                                    <span className="text-[#002855] font-semibold">{profile.school_location}</span>
-                                                </>
-                                            )}
+                                            {profile.school_location && profile.school_location !== 'ÚPVSP' && (<><br /><span style={{ color: 'var(--color-primary)', fontWeight: 700 }}>{profile.school_location}</span></>)}
                                         </div>
                                     </div>
 
-                                    {/* Historie Exportů */}
+                                    {/* Historie exportů */}
                                     {!isSetupMode && exportsHistory.length > 0 && (
-                                        <div className="mt-8">
-                                            <h4 className="font-bold text-[#002855] dark:text-[#facc15] mb-4 flex items-center gap-2 border-b dark:border-slate-700 pb-2">
-                                                <History className="w-5 h-5 text-slate-500 dark:text-slate-400" />
-                                                Moje poslední exporty
+                                        <div style={{ marginTop: 16 }}>
+                                            <h4 style={{ fontWeight: 700, color: 'var(--color-primary)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--border-color)', paddingBottom: 6 }}>
+                                                <Icon icon={faClockRotateLeft} /> Moje poslední exporty
                                             </h4>
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full text-sm text-left">
-                                                    <thead className="bg-[#002855]/5 text-[#002855] dark:text-blue-300 text-xs uppercase font-semibold">
-                                                        <tr>
-                                                            <th className="px-4 py-3 rounded-tl-lg">Datum exportu</th>
-                                                            <th className="px-4 py-3">Scénář / Třída</th>
-                                                            <th className="px-4 py-3">Typ</th>
-                                                            <th className="px-4 py-3 text-right rounded-tr-lg">Akce</th>
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                                                <thead>
+                                                    <tr style={{ background: 'var(--bg-surface-2)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>Datum exportu</th>
+                                                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>Scénář / Třída</th>
+                                                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>Typ</th>
+                                                        <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>Akce</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {exportsHistory.map((item, idx) => (
+                                                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                            <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>{item.created_at}</td>
+                                                            <td style={{ padding: '8px 12px', fontWeight: 600 }}>{item.scenario_name}</td>
+                                                            <td style={{ padding: '8px 12px' }}><span className="badge badge--light">{item.type}</span></td>
+                                                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                                                                <a href={`${API_BASE_URL.replace('/api/v1', '')}${item.download_url}`} download onClick={(e) => e.stopPropagation()} className="btn btn--outline btn--sm">
+                                                                    <Icon icon={faDownload} /> Stáhnout znovu
+                                                                </a>
+                                                            </td>
                                                         </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-100">
-                                                        {exportsHistory.map((item, idx) => (
-                                                            <tr key={idx} className="hover:bg-slate-50 dark:bg-slate-800/50 transition-colors">
-                                                                <td className="px-4 py-3 font-medium text-slate-600 dark:text-slate-300">{item.created_at}</td>
-                                                                <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-100">{item.scenario_name}</td>
-                                                                <td className="px-4 py-3">
-                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#D4AF37]/10 text-[#C5A028]">
-                                                                        {item.type}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-4 py-3 text-right">
-                                                                    <a
-                                                                        href={`${API_BASE_URL.replace('/api/v1', '')}${item.download_url}`}
-                                                                        download
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#002855] dark:text-blue-300 hover:bg-[#002855] hover:text-white border border-[#002855]/20 rounded transition-colors"
-                                                                    >
-                                                                        <Download className="w-3.5 h-3.5" />
-                                                                        Stáhnout znovu
-                                                                    </a>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                                    ))}
+                                                </tbody>
+                                            </table>
                                         </div>
                                     )}
                                 </div>
                             </div>
                         ) : adminTab === 'users' ? (
-                            <div className="flex-1 flex flex-col overflow-y-auto pr-2">
-                                <div className="flex justify-between items-center mb-6">
+                            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                                     <div>
-                                        <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200 mb-1">Správa uživatelů</h3>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">Účty uživatelů s přístupem do aplikace.</p>
+                                        <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>Správa uživatelů</h3>
+                                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Účty uživatelů s přístupem do aplikace.</p>
                                     </div>
-                                    <button onClick={() => setShowAddUser(!showAddUser)} className="flex items-center gap-1.5 px-3 py-2 bg-[#002855]/10 text-[#002855] dark:text-blue-300 font-semibold rounded-lg hover:bg-[#002855]/20 transition-colors text-sm">
-                                        <UserPlus className="w-4 h-4" /> {showAddUser ? 'Zavřít' : 'Nový uživatel'}
+                                    <button className="btn btn--outline btn--sm" onClick={() => setShowAddUser(!showAddUser)}>
+                                        <Icon icon={faUserPlus} /> {showAddUser ? 'Zavřít' : 'Nový uživatel'}
                                     </button>
                                 </div>
-
                                 {showAddUser && (
-                                    <form onSubmit={handleAddUser} className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6 space-y-4">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">E-mail</label>
-                                                <input type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm outline-none" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Dočasné heslo</label>
-                                                <input type="password" required value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm outline-none" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Jméno</label>
-                                                <input type="text" required value={newUser.first_name} onChange={e => setNewUser({ ...newUser, first_name: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm outline-none" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Příjmení</label>
-                                                <input type="text" required value={newUser.last_name} onChange={e => setNewUser({ ...newUser, last_name: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm outline-none" />
-                                            </div>
+                                    <form onSubmit={handleAddUser} className="card" style={{ padding: 14, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                            <div className="form-group"><label>E-mail</label><input type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} className="form-control" /></div>
+                                            <div className="form-group"><label>Dočasné heslo</label><input type="password" required value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} className="form-control" /></div>
+                                            <div className="form-group"><label>Jméno</label><input type="text" required value={newUser.first_name} onChange={e => setNewUser({ ...newUser, first_name: e.target.value })} className="form-control" /></div>
+                                            <div className="form-group"><label>Příjmení</label><input type="text" required value={newUser.last_name} onChange={e => setNewUser({ ...newUser, last_name: e.target.value })} className="form-control" /></div>
                                         </div>
-                                        <div className="flex gap-2 items-center">
-                                            <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Role:</label>
-                                            <select value={newUser.role || 'vyucujici'} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-sm outline-none bg-white dark:bg-slate-800">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>Role:</label>
+                                            <select value={newUser.role || 'vyucujici'} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="form-control" style={{ width: 'auto' }}>
                                                 <option value="vyucujici">Vyučující</option>
                                                 <option value="admin">Admin</option>
                                                 <option value="superadmin">SuperAdmin</option>
                                             </select>
                                         </div>
-                                        <button type="submit" className="w-full py-2 bg-[#002855] text-white font-semibold rounded-lg text-sm hover:bg-[#001f44]">Vytvořit účet</button>
+                                        <button type="submit" className="btn btn--positive">Vytvořit účet</button>
                                     </form>
                                 )}
-
                                 {isUsersLoading ? (
-                                    <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+                                    <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}><span className="spinner spinner--lg" /></div>
                                 ) : (
-                                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                                        <table className="w-full text-sm text-left bg-white dark:bg-slate-800">
-                                            <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
-                                                <tr>
-                                                    <th className="px-4 py-3">Jméno a Příjmení</th>
-                                                    <th className="px-4 py-3">E-mail</th>
-                                                    <th className="px-4 py-3">Role a Stav</th>
-                                                    <th className="px-4 py-3 text-right">Akce</th>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', border: '1px solid var(--border-color)', borderRadius: 6 }}>
+                                        <thead>
+                                            <tr style={{ background: 'var(--bg-surface-2)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                                                <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Jméno a Příjmení</th>
+                                                <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>E-mail</th>
+                                                <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Role a Stav</th>
+                                                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Akce</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {usersList.map((u: any) => (
+                                                <tr key={u.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>{u.first_name} {u.last_name}</td>
+                                                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{u.email}</td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                            <select value={u.is_superadmin ? 'superadmin' : (u.is_admin ? 'admin' : 'vyucujici')} onChange={(e) => handleRoleChange(u.id, e.target.value)} className="form-control" style={{ width: 'auto', fontSize: '0.78rem', padding: '3px 6px' }}>
+                                                                <option value="vyucujici">Vyučující</option>
+                                                                <option value="admin">Admin</option>
+                                                                <option value="superadmin">SuperAdmin</option>
+                                                            </select>
+                                                            {!u.is_active && <span className="badge badge--negative">Deaktivován</span>}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                                            <button className="btn btn--sm btn--icon-only btn--outline" onClick={() => handleResetPassword(u.id)} title="Vnutit nové heslo"><Icon icon={faKey} /></button>
+                                                            <button className={`btn btn--sm btn--icon-only ${u.is_active ? 'btn--negative' : 'btn--positive'}`} onClick={() => handleToggleActive(u.id)} title={u.is_active ? "Zablokovat přístup" : "Povolit přístup"}><Icon icon={faPowerOff} /></button>
+                                                        </div>
+                                                    </td>
                                                 </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {usersList.map((u: any) => (
-                                                    <tr key={u.id} className="hover:bg-slate-50 dark:bg-slate-800/50/50">
-                                                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-100">{u.first_name} {u.last_name}</td>
-                                                        <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{u.email}</td>
-                                                        <td className="px-4 py-3">
-                                                            <div className="flex gap-2 items-center">
-                                                                <select
-                                                                    value={u.is_superadmin ? 'superadmin' : (u.is_admin ? 'admin' : 'vyucujici')}
-                                                                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                                                                    className={`px-2 py-1 rounded text-xs font-semibold outline-none border focus:ring-1 ${
-                                                                        u.is_superadmin 
-                                                                            ? 'bg-blue-100 text-[#002855] border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800' 
-                                                                            : u.is_admin
-                                                                                ? 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800'
-                                                                                : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                                                    }`}
-                                                                >
-                                                                    <option value="vyucujici">Vyučující</option>
-                                                                    <option value="admin">Admin</option>
-                                                                    <option value="superadmin">SuperAdmin</option>
-                                                                </select>
-                                                                {!u.is_active && <span className="px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">Deaktivován</span>}
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-4 py-3 flex gap-2 justify-end">
-                                                            <button onClick={() => handleResetPassword(u.id)} className="p-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 rounded shadow-sm transition-colors" title="Vnutit nové heslo">
-                                                                <Key className="w-4 h-4" />
-                                                            </button>
-                                                            <button onClick={() => handleToggleActive(u.id)} className={`p-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm rounded transition-colors ${u.is_active ? 'hover:border-red-300 hover:bg-red-50 text-slate-600 dark:text-slate-300 hover:text-red-600' : 'hover:border-emerald-300 hover:bg-emerald-50 text-slate-600 dark:text-slate-300 hover:text-emerald-600'}`} title={u.is_active ? "Zablokovat přístup" : "Povolit přístup"}>
-                                                                <Power className="w-4 h-4" />
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 )}
                             </div>
                         ) : adminTab !== 'vllm' ? (
                             <>
-                                <div className="mb-4">
-                                    <h2 className="text-xl font-bold text-[#002855] dark:text-[#facc15]">Nastavení LLM & MLOps Engine</h2>
-                                    <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200 mb-1">
+                                <div style={{ marginBottom: 12 }}>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>
                                         Systémový prompt: {adminTab === 'prompt1' ? 'Fáze 1' : adminTab === 'prompt2' ? 'Fáze 2' : 'Fáze 3'}
                                     </h3>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400 flex items-start gap-1.5 mb-2">
-                                        <AlertCircle className="w-4 h-4 text-[#D4AF37] mt-0.5 flex-shrink-0" />
+                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                                        <Icon icon={faCircleExclamation} style={{ color: 'var(--color-warning)', flexShrink: 0, marginTop: 2 }} />
                                         <span>
                                             Zde můžete upravit chování AI. Změny se projeví u všech uživatelů a uloží se do DB.
-                                            {adminTab === 'prompt3' && (
-                                                <span className="block mt-1 text-[#002855] dark:text-blue-300 font-medium">
-                                                    Tip: V textu níže můžete libovolně upravit hranice pro hodnocení třídy (např. Vynikající 90-100% místo 80-100%). AI se těmito pásmy bude při analýze striktně řídit.
-                                                </span>
-                                            )}
+                                            {adminTab === 'prompt3' && <span style={{ display: 'block', marginTop: 4, color: 'var(--color-primary)', fontWeight: 600 }}>Tip: V textu níže můžete libovolně upravit hranice pro hodnocení třídy (např. Vynikající 90-100% místo 80-100%). AI se těmito pásmy bude při analýze striktně řídit.</span>}
                                         </span>
                                     </p>
                                 </div>
-
-                                <textarea
-                                    className="flex-1 w-full border border-slate-300 dark:border-slate-600 rounded-xl p-4 font-mono text-sm text-slate-700 dark:text-slate-300 focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none leading-relaxed bg-slate-50 dark:bg-slate-800/50"
-                                    value={currentPromptText}
-                                    onChange={(e) => setPromptText(e.target.value)}
-                                />
-
-                                <div className="mt-6 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex items-center justify-between">
+                                <textarea className="form-control" style={{ flex: 1, resize: 'none', fontFamily: 'monospace', fontSize: '0.82rem', lineHeight: 1.6 }} value={currentPromptText} onChange={(e) => setPromptText(e.target.value)} />
+                                <div className="card" style={{ marginTop: 12, padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
                                     <div>
-                                        <label className="block text-sm font-semibold text-[#002855] dark:text-blue-300 mb-1">Model Temperature</label>
-                                        <p className="text-xs text-slate-500 dark:text-slate-400">Určuje míru kreativity vs. faktické přesnosti modelu.</p>
+                                        <label style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--color-primary)', display: 'block', marginBottom: 2 }}>Model Temperature</label>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Určuje míru kreativity vs. faktické přesnosti modelu.</p>
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                        <input
-                                            type="range"
-                                            min="0" max="1" step="0.1"
-                                            value={currentPromptTemp}
-                                            onChange={(e) => setPromptTemp(parseFloat(e.target.value))}
-                                            className="w-32 accent-[#002855]"
-                                        />
-                                        <span className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1 rounded-md text-sm font-mono font-medium text-[#002855] dark:text-blue-300">
-                                            {currentPromptTemp} (Faktická přesnost)
-                                        </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <input type="range" min="0" max="1" step="0.1" value={currentPromptTemp} onChange={(e) => setPromptTemp(parseFloat(e.target.value))} style={{ width: 120, accentColor: 'var(--color-primary)' }} />
+                                        <span style={{ padding: '3px 10px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-color)', borderRadius: 5, fontSize: '0.82rem', fontFamily: 'monospace', color: 'var(--color-primary)' }}>{currentPromptTemp} (Faktická přesnost)</span>
                                     </div>
                                 </div>
                             </>
                         ) : adminTab === 'vllm' ? (
-                            <div className="flex-1 flex flex-col overflow-y-auto pr-2">
-                                <div className="mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
-                                    <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200 mb-1">Správa LLM Backendů (Multi-LLM)</h3>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">Volba inferenčního enginu a mapování úloh na konkrétní modely.</p>
+                            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 12 }}>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>Správa LLM Backendů (Multi-LLM)</h3>
+                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Volba inferenčního enginu a mapování úloh na konkrétní modely.</p>
                                 </div>
 
-                                <div className="space-y-6 max-w-3xl">
-                                    <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border border-slate-200 dark:border-slate-700 rounded-xl">
-                                        <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2">
-                                            <Power className="w-4 h-4 text-blue-600" />
-                                            Hlavní připojení (Endpoint Node)
-                                        </h4>
-                                        <div className="grid grid-cols-2 gap-4 mb-4">
-                                            <div>
-                                                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Cílová Platforma</label>
-                                                <select
-                                                    value={llmPlatform}
-                                                    onChange={(e) => setLlmPlatform(e.target.value)}
-                                                    className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none shadow-sm"
-                                                >
-                                                    <option value="vllm">vLLM (Produkce GPU)</option>
-                                                    <option value="lmstudio">LM Studio (Lokální vývoj)</option>
-                                                    <option value="ollama">Ollama (Lokální CLI)</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">API Endpoint URL</label>
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="text"
-                                                        placeholder={llmPlatform === 'ollama' ? 'http://localhost:11434/v1' : 'http://localhost:8000/v1'}
-                                                        value={vllmUrl}
-                                                        onChange={(e) => setVllmUrl(e.target.value)}
-                                                        className="flex-1 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none shadow-sm"
-                                                    />
-                                                </div>
-                                            </div>
+                                <div className="card" style={{ padding: 14 }}>
+                                    <h4 style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Icon icon={faPowerOff} style={{ color: 'var(--color-primary)' }} /> Hlavní připojení (Endpoint Node)
+                                    </h4>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                                        <div className="form-group">
+                                            <label>Cílová Platforma</label>
+                                            <select value={llmPlatform} onChange={(e) => setLlmPlatform(e.target.value)} className="form-control">
+                                                <option value="vllm">vLLM (Produkce GPU)</option>
+                                                <option value="lmstudio">LM Studio (Lokální vývoj)</option>
+                                                <option value="ollama">Ollama (Lokální CLI)</option>
+                                            </select>
                                         </div>
-                                        <div className="flex gap-4 items-end">
-                                            <div className="flex-1">
-                                                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">API Key (volitelné)</label>
-                                                <input
-                                                    type="text"
-                                                    autoComplete="off"
-                                                    placeholder="sk-..."
-                                                    value={isApiKeyFocused ? vllmApiKey : (vllmApiKey ? '••••••••••••••••' : '')}
-                                                    onChange={(e) => setVllmApiKey(e.target.value)}
-                                                    onFocus={() => setIsApiKeyFocused(true)}
-                                                    onBlur={() => setIsApiKeyFocused(false)}
-                                                    className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#002855] outline-none shadow-sm"
-                                                />
-                                            </div>
-                                            <button
-                                                onClick={handleTestConnection}
-                                                disabled={isTestingConnection || !vllmUrl}
-                                                className="px-4 py-2 border border-[#002855] text-[#002855] rounded-lg hover:bg-[#002855] hover:text-white transition-colors text-sm font-semibold flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
-                                            >
-                                                {isTestingConnection ? <Loader2 className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
-                                                {isTestingConnection ? 'Testuji...' : 'Test připojení'}
-                                            </button>
+                                        <div className="form-group">
+                                            <label>API Endpoint URL</label>
+                                            <input type="text" placeholder={llmPlatform === 'ollama' ? 'http://localhost:11434/v1' : 'http://localhost:8000/v1'} value={vllmUrl} onChange={(e) => setVllmUrl(e.target.value)} className="form-control" />
                                         </div>
                                     </div>
+                                    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                                        <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                                            <label>API Key (volitelné)</label>
+                                            <input type="text" autoComplete="off" placeholder="sk-..." value={isApiKeyFocused ? vllmApiKey : (vllmApiKey ? '••••••••••••••••' : '')} onChange={(e) => setVllmApiKey(e.target.value)} onFocus={() => setIsApiKeyFocused(true)} onBlur={() => setIsApiKeyFocused(false)} className="form-control" />
+                                        </div>
+                                        <button className="btn btn--outline" onClick={handleTestConnection} disabled={isTestingConnection || !vllmUrl}>
+                                            {isTestingConnection ? <span className="spinner spinner--sm" /> : <Icon icon={faPowerOff} />}
+                                            {isTestingConnection ? 'Testuji...' : 'Test připojení'}
+                                        </button>
+                                    </div>
+                                </div>
 
-                                    {/* Task Routing */}
-                                    <div>
-                                        <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2">
-                                            <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
-                                            Task Routing (Přiřazení modelů a uvažování)
-                                        </h4>
-                                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
-                                            Rozdělením úkolů mezi menší rychlé modely (např. Llama3) a mohutné reasoning modely (např. Qwen2.5) drasticky zvýšíte plynulost aplikace.
-                                        </p>
-
-                                        <div className="space-y-3">
-                                            {/* Extrakce */}
-                                            <div className="grid grid-cols-[1fr_2fr_auto] gap-4 items-center bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
-                                                <div>
-                                                    <span className="block text-sm font-semibold text-slate-700 dark:text-slate-300">Fast-Scan Vytěžení</span>
-                                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Analýza jména z dokumentu</span>
-                                                </div>
-                                                <input type="text" placeholder="např. llama3.2-1b" value={modelExtraction} onChange={e => setModelExtraction(e.target.value)} className="w-full border border-slate-300 dark:border-slate-600 rounded-md px-3 py-1.5 text-sm outline-none" />
-                                                <label className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-md cursor-pointer hover:bg-slate-100 transition-colors">
-                                                    <input type="checkbox" checked={thinkingExtraction} onChange={e => setThinkingExtraction(e.target.checked)} className="w-4 h-4 accent-[#002855]" /> Enable Thinking
+                                <div>
+                                    <h4 style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Icon icon={faSliders} style={{ color: 'var(--color-warning)' }} /> Task Routing (Přiřazení modelů a uvažování)
+                                    </h4>
+                                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 10 }}>Rozdělením úkolů mezi menší rychlé modely (např. Llama3) a mohutné reasoning modely (např. Qwen2.5) drasticky zvýšíte plynulost aplikace.</p>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        {[
+                                            { label: 'Fast-Scan Vytěžení', desc: 'Analýza jména z dokumentu', model: modelExtraction, setModel: setModelExtraction, thinking: thinkingExtraction, setThinking: setThinkingExtraction, ph: 'např. llama3.2-1b', highlight: false },
+                                            { label: 'Fáze 1', desc: 'Precizace a příprava kritérií', model: modelPhase1, setModel: setModelPhase1, thinking: thinkingPhase1, setThinking: setThinkingPhase1, ph: 'např. qwen2.5-14b-instruct', highlight: false },
+                                            { label: 'Fáze 2 (Core)', desc: 'Samotné hodnocení ÚZ (Nejtěžší)', model: modelPhase2, setModel: setModelPhase2, thinking: thinkingPhase2, setThinking: setThinkingPhase2, ph: 'např. qwen2.5-32b-instruct', highlight: true },
+                                            { label: 'Fáze 3', desc: 'Statistická analýza třídy', model: modelPhase3, setModel: setModelPhase3, thinking: thinkingPhase3, setThinking: setThinkingPhase3, ph: 'Odpovídá hlavnímu modelu', highlight: false },
+                                        ].map((row, i) => (
+                                            <div key={i} style={{ display: 'grid', gridTemplateColumns: '180px 1fr auto', gap: 10, alignItems: 'center', padding: '10px 12px', background: row.highlight ? 'rgba(15,82,125,0.06)' : 'var(--bg-surface-2)', border: `1px solid ${row.highlight ? 'var(--color-primary)' : 'var(--border-color)'}`, borderRadius: 6 }}>
+                                                <div><span style={{ display: 'block', fontWeight: row.highlight ? 700 : 600, fontSize: '0.82rem', color: row.highlight ? 'var(--color-primary)' : 'var(--text-primary)' }}>{row.label}</span><span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{row.desc}</span></div>
+                                                <input type="text" placeholder={row.ph} value={row.model} onChange={e => row.setModel(e.target.value)} className="form-control" style={{ fontSize: '0.82rem' }} />
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', padding: '6px 10px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 5, whiteSpace: 'nowrap' }}>
+                                                    <input type="checkbox" checked={row.thinking} onChange={e => row.setThinking(e.target.checked)} style={{ accentColor: 'var(--color-primary)' }} /> Enable Thinking
                                                 </label>
                                             </div>
+                                        ))}
+                                    </div>
+                                </div>
 
-                                            {/* Fáze 1 */}
-                                            <div className="grid grid-cols-[1fr_2fr_auto] gap-4 items-center bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
-                                                <div>
-                                                    <span className="block text-sm font-semibold text-slate-700 dark:text-slate-300">Fáze 1</span>
-                                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Precizace a příprava kritérií</span>
-                                                </div>
-                                                <input type="text" placeholder="např. qwen2.5-14b-instruct" value={modelPhase1} onChange={e => setModelPhase1(e.target.value)} className="w-full border border-slate-300 dark:border-slate-600 rounded-md px-3 py-1.5 text-sm outline-none" />
-                                                <label className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-md cursor-pointer hover:bg-slate-100 transition-colors">
-                                                    <input type="checkbox" checked={thinkingPhase1} onChange={e => setThinkingPhase1(e.target.checked)} className="w-4 h-4 accent-[#002855]" /> Enable Thinking
-                                                </label>
-                                            </div>
-
-                                            {/* Fáze 2 */}
-                                            <div className="grid grid-cols-[1fr_2fr_auto] gap-4 items-center bg-blue-50/50 border border-blue-200 rounded-lg p-3">
-                                                <div>
-                                                    <span className="block text-sm font-bold text-[#002855]">Fáze 2 (Core)</span>
-                                                    <span className="text-[10px] text-blue-500 font-semibold uppercase tracking-wide">Samotné hodnocení ÚZ (Nejtěžší)</span>
-                                                </div>
-                                                <input type="text" placeholder="např. qwen2.5-32b-instruct" value={modelPhase2} onChange={e => setModelPhase2(e.target.value)} className="w-full border border-blue-300 rounded-md px-3 py-1.5 text-sm outline-none ring-1 ring-blue-100" />
-                                                <label className="flex items-center gap-2 text-sm font-bold text-blue-900 bg-white dark:bg-slate-800 border border-blue-200 px-3 py-1.5 rounded-md cursor-pointer hover:bg-blue-50 transition-colors">
-                                                    <input type="checkbox" checked={thinkingPhase2} onChange={e => setThinkingPhase2(e.target.checked)} className="w-4 h-4 accent-[#002855]" /> Enable Thinking
-                                                </label>
-                                            </div>
-
-                                            {/* Fáze 3 */}
-                                            <div className="grid grid-cols-[1fr_2fr_auto] gap-4 items-center bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
-                                                <div>
-                                                    <span className="block text-sm font-semibold text-slate-700 dark:text-slate-300">Fáze 3</span>
-                                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Statistická analýza třídy</span>
-                                                </div>
-                                                <input type="text" placeholder="Odpovídá hlavnímu modelu" value={modelPhase3} onChange={e => setModelPhase3(e.target.value)} className="w-full border border-slate-300 dark:border-slate-600 rounded-md px-3 py-1.5 text-sm outline-none" />
-                                                <label className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-md cursor-pointer hover:bg-slate-100 transition-colors">
-                                                    <input type="checkbox" checked={thinkingPhase3} onChange={e => setThinkingPhase3(e.target.checked)} className="w-4 h-4 accent-[#002855]" /> Enable Thinking
-                                                </label>
-                                            </div>
+                                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 14 }}>
+                                    <h4 style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}><Icon icon={faGear} size="sm" /> Sdílené samplovací parametry</h4>
+                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Tyto hodnoty budou aplikovány globálně na <strong>všechny specifikované modely výše</strong>.</p>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                                        <div className="card" style={{ padding: 12 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem', display: 'block', marginBottom: 4 }}>Max Tokens (Limit odpovědi)</label>
+                                            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 6 }}>Hard stop stav pro generování. Qwen3.5 potřebuje 2048+.</p>
+                                            <input type="number" min="128" max="32768" value={vllmMaxTokens} onChange={e => setVllmMaxTokens(parseInt(e.target.value) || 2048)} className="form-control" />
+                                        </div>
+                                        <div className="card" style={{ padding: 12 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem', display: 'block', marginBottom: 4, color: 'var(--color-primary)' }}>
+                                                Context Window {llmPlatform === 'ollama' && <span className="badge badge--positive" style={{ fontSize: '0.6rem', marginLeft: 4 }}>Auto-Apply</span>}
+                                            </label>
+                                            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 6 }}>Velikost kontextu modelu. Pro ÚZ s 25+ kritérii doporučeno 16384+.</p>
+                                            <input type="number" min="1024" max="128000" step="1024" value={vllmContextWindow} onChange={e => setVllmContextWindow(parseInt(e.target.value) || 8192)} className="form-control" />
                                         </div>
                                     </div>
-
-                                    <div className="pt-6 mt-6 border-t border-slate-200 dark:border-slate-700">
-                                        <h3 className="text-md font-bold text-slate-800 dark:text-slate-100 mb-1 flex items-center gap-2">
-                                            <Settings className="w-4 h-4 text-slate-400" />
-                                            Sdílené samplovací parametry
-                                        </h3>
-                                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium">
-                                            Tyto hodnoty budou aplikovány globálně na <strong>všechny specifikované modely výše</strong>.
-                                        </p>
-
-                                        <div className="grid grid-cols-2 gap-4 mb-4">
-                                            <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-                                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Max Tokens (Limit odpovědi)</label>
-                                                <p className="text-[10px] text-slate-400 mb-2 leading-tight">Hard stop stav pro generování. Qwen3.5 potřebuje 2048+.</p>
-                                                <input type="number" min="128" max="32768" value={vllmMaxTokens} onChange={e => setVllmMaxTokens(parseInt(e.target.value) || 2048)} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm outline-none shadow-sm" />
+                                    {llmPlatform !== 'ollama' && (
+                                        <div className="alert alert--warning" style={{ marginBottom: 10, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                            <Icon icon={faCircleExclamation} style={{ flexShrink: 0, marginTop: 2 }} />
+                                            <p style={{ margin: 0, fontSize: '0.78rem' }}>U platformy <strong>{llmPlatform.toUpperCase()}</strong> musí být tato hodnota nastavena přímo v inferenčním serveru. EVALUZ tuto hodnotu pro {llmPlatform.toUpperCase()} používá pouze jako limit pro přípravu promptu.</p>
+                                        </div>
+                                    )}
+                                    {[
+                                        { key: 'Top_P (Nucleus Sampling)', desc: 'Vybírá nejlepší slova v percentilu. Snižuje šanci na utíkání od tématu. Doporučeno: 0.8.', val: vllmTopP, set: setVllmTopP, min: 0, max: 1, step: 0.05 },
+                                        { key: 'Presence Penalty', desc: 'Zamezuje generování nových témat a redukuje rozvláčnost. 0.0 je neutrální.', val: vllmPresence, set: setVllmPresence, min: -2, max: 2, step: 0.1 },
+                                        { key: 'Frequency Penalty', desc: 'Penalizuje opakující se slova. Pomáhá zamezit smyčkám (0.0 neutrální).', val: vllmFreq, set: setVllmFreq, min: -2, max: 2, step: 0.1 },
+                                    ].map((row, i) => (
+                                        <div key={i} className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                            <div style={{ flex: 1, paddingRight: 16 }}>
+                                                <label style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--color-primary)', display: 'block', marginBottom: 2 }}>{row.key}</label>
+                                                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: 0 }}>{row.desc}</p>
                                             </div>
-                                            <div className="bg-blue-50/30 dark:bg-blue-900/10 p-3 rounded-lg border border-blue-200/50 dark:border-blue-800/50">
-                                                <label className="block text-sm font-semibold text-blue-800 dark:text-blue-300 mb-1 flex items-center gap-1.5">
-                                                    Context Window
-                                                    {llmPlatform === 'ollama' && <span className="text-[8px] bg-green-500 text-white px-1 rounded-sm uppercase">Auto-Apply</span>}
-                                                </label>
-                                                <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-2 leading-tight">Velikost kontextu modelu. Pro ÚZ s 25+ kritérii doporučeno 16384+.</p>
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="number"
-                                                        min="1024"
-                                                        max="128000"
-                                                        step="1024"
-                                                        value={vllmContextWindow}
-                                                        onChange={e => setVllmContextWindow(parseInt(e.target.value) || 8192)}
-                                                        className="flex-1 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-1.5 text-sm outline-none shadow-sm bg-white dark:bg-slate-900"
-                                                    />
-                                                </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <input type="range" min={row.min} max={row.max} step={row.step} value={row.val} onChange={(e) => row.set(parseFloat(e.target.value))} style={{ width: 100, accentColor: 'var(--color-primary)' }} />
+                                                <span style={{ width: 44, textAlign: 'center', padding: '2px 6px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-color)', borderRadius: 4, fontSize: '0.82rem', fontFamily: 'monospace', color: 'var(--color-primary)' }}>{row.val}</span>
                                             </div>
                                         </div>
-
-                                        {llmPlatform !== 'ollama' && (
-                                            <div className="mb-4 bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800/50 p-2.5 rounded-lg flex items-start gap-2.5">
-                                                <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                                                <p className="text-[10px] text-orange-800 dark:text-orange-300 leading-normal font-medium">
-                                                    U platformy <strong>{llmPlatform.toUpperCase()}</strong> musí být tato hodnota nastavena přímo v inferenčním serveru (v záložce Configuration/Settings u LM Studia). EVALUZ tuto hodnotu pro {llmPlatform.toUpperCase()} používá pouze jako limit pro přípravu promptu.
-                                                </p>
-                                            </div>
-                                        )}
-
-                                        <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-                                            <p className="text-xs text-slate-500 dark:text-slate-400 italic text-center leading-relaxed">
-                                                Teplotu (Kreativitu) modelu lze nastavit ručně pro každou jednotlivou fázi hodnocení v příslušných záložkách promptů.
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
-                                            <div className="pr-4 w-1/2">
-                                                <label className="block text-sm font-semibold text-[#002855] mb-1">Top_P (Nucleus Sampling)</label>
-                                                <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Vybírá nejlepší slova v percentilu. Snižuje šanci na utíkání od tématu. Doporučeno: 0.8 pro kratší odpovědi.</p>
-                                            </div>
-                                            <div className="flex items-center gap-3 w-1/2 justify-end">
-                                                <input type="range" min="0" max="1" step="0.05" value={vllmTopP} onChange={(e) => setVllmTopP(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
-                                                <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmTopP}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
-                                            <div className="pr-4 w-1/2">
-                                                <label className="block text-sm font-semibold text-[#002855] mb-1">Presence Penalty</label>
-                                                <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Zamezuje neúnavnému generování nových témat a redukuje "rozvláčnost". 0.0 je neutrální, 1.0 je vysoké rozšiřování.</p>
-                                            </div>
-                                            <div className="flex items-center gap-3 w-1/2 justify-end">
-                                                <input type="range" min="-2.0" max="2.0" step="0.1" value={vllmPresence} onChange={(e) => setVllmPresence(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
-                                                <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmPresence}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 rounded-lg flex items-center justify-between">
-                                            <div className="pr-4 w-1/2">
-                                                <label className="block text-sm font-semibold text-[#002855] mb-1">Frequency Penalty</label>
-                                                <p className="text-xs text-slate-500 dark:text-slate-400 leading-tight">Penalizuje často se opakující slova. Pomáhá zamezit smyčkám při dlouhých výstupech (0.0 neutrální).</p>
-                                            </div>
-                                            <div className="flex items-center gap-3 w-1/2 justify-end">
-                                                <input type="range" min="-2.0" max="2.0" step="0.1" value={vllmFreq} onChange={(e) => setVllmFreq(parseFloat(e.target.value))} className="w-32 accent-[#002855]" />
-                                                <span className="w-12 text-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded text-sm font-mono text-[#002855]">{vllmFreq}</span>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    ))}
                                 </div>
                             </div>
                         ) : adminTab === 'rag' ? (
-                            <div className="flex-1 flex flex-col overflow-y-auto pr-2">
-                                <div className="mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
-                                    <h3 className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-700 to-fuchsia-600 mb-1 flex items-center gap-2">
-                                        AI Laboratoř & MLOps (Zlaté příklady)
-                                    </h3>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                                        Experimentální funkce pro učení se z vlastních (perfektních) hodnocení. Využívá RAG.
-                                    </p>
+                            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
+                                <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 12, marginBottom: 16 }}>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>AI Laboratoř & MLOps (Zlaté příklady)</h3>
+                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Experimentální funkce pro učení se z vlastních (perfektních) hodnocení. Využívá RAG.</p>
                                 </div>
-                                <div className="space-y-6 max-w-3xl">
-                                    <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 dark:border-slate-700 p-6 rounded-xl shadow-sm">
-                                        <div className="flex items-start justify-between">
-                                            <div>
-                                                <h4 className="text-md font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2">
-                                                    Zapnout sdílenou paměť Zlatých příkladů (RAG)
-                                                </h4>
-                                                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-xl">
-                                                    Jazyk nebo pokyny pro doporučení studentovi (ukáže se vyučujícím u každé úspěšné evaluace jako návrh postupu).
-                                                </p>
-                                            </div>
-                                            <div className="shrink-0 pt-2">
-                                                <label className="relative inline-flex items-center cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        className="sr-only peer"
-                                                        checked={enableRagModule}
-                                                        onChange={(e) => setEnableRagModule(e.target.checked)}
-                                                    />
-                                                    <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:bg-slate-800 after:border-slate-300 dark:border-slate-600 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-purple-600"></div>
-                                                </label>
-                                            </div>
-                                        </div>
+                                <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 12 }}>
+                                    <div>
+                                        <h4 style={{ fontWeight: 700, fontSize: '0.9rem', margin: '0 0 8px' }}>Zapnout sdílenou paměť Zlatých příkladů (RAG)</h4>
+                                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0, maxWidth: 420, lineHeight: 1.6 }}>Jazyk nebo pokyny pro doporučení studentovi (ukáže se vyučujícím u každé úspěšné evaluace jako návrh postupu).</p>
                                     </div>
-                                    <div className="text-sm text-slate-500 dark:text-slate-400 bg-blue-50/50 p-4 rounded-lg border border-blue-100">
-                                        <strong className="text-blue-800 block mb-1">Jak to funguje technicky?</strong>
-                                        <p>Zlaté příklady jsou ukládány do databáze (Cosine podoba, či textová filtrace podle Scenario ID). Připojený LLM při zapnutí Fáze 2 stáhne nejbližší zlatý příklad do historie chatu a naformátuje z něj bezchybnou JSON ukázku pro model. To drasticky redukuje halucinace Fáze 2.</p>
+                                    <div style={{ flexShrink: 0, paddingTop: 4 }}>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
+                                            <input type="checkbox" checked={enableRagModule} onChange={(e) => setEnableRagModule(e.target.checked)} style={{ width: 18, height: 18, accentColor: 'var(--color-positive)', cursor: 'pointer' }} />
+                                            {enableRagModule ? 'Zapnuto' : 'Vypnuto'}
+                                        </label>
                                     </div>
+                                </div>
+                                <div className="alert alert--primary" style={{ fontSize: '0.82rem', lineHeight: 1.6 }}>
+                                    <strong style={{ display: 'block', marginBottom: 4 }}>Jak to funguje technicky?</strong>
+                                    Zlaté příklady jsou ukládány do databáze (Cosine podoba, či textová filtrace podle Scenario ID). Připojený LLM při zapnutí Fáze 2 stáhne nejbližší zlatý příklad do historie chatu a naformátuje z něj bezchybnou JSON ukázku pro model. To drasticky redukuje halucinace Fáze 2.
                                 </div>
                             </div>
                         ) : null}
@@ -1162,42 +855,32 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 </div>
 
                 {/* Modal Footer */}
-                <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <div className="modal__footer">
                     <div>
                         {saveSuccess && (
-                            <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 animate-in fade-in slide-in-from-bottom-2">
-                                <CheckCircle2 className="w-4 h-4" /> Uloženo do databáze
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-positive)' }}>
+                                <Icon icon={faCircleCheck} /> Uloženo do databáze
                             </span>
                         )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    {/* NCIKT pořadí: Negativní → Neutrální → Pozitivní */}
+                    <div className="btn-group">
                         {!isSetupMode && (
-                            <button
-                                onClick={onClose}
-                                className="px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-100 transition-colors text-sm font-medium shadow-sm"
-                            >
-                                Zrušit (Zavřít)
-                            </button>
+                            <button className="btn btn--negative" onClick={onClose}>Zrušit (Zavřít)</button>
                         )}
                         <button
+                            className={`btn btn--positive btn--lg${saveSuccess ? '' : ''}`}
                             onClick={handleSave}
                             disabled={isSaving || isLoading || adminTab === 'users'}
                             style={{ opacity: adminTab === 'users' ? 0.3 : 1 }}
-                            className={`flex items-center gap-2 px-5 py-2.5 ${saveSuccess ? 'bg-emerald-600' : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028]'} text-white rounded-lg hover:opacity-90 transition-all text-sm font-bold shadow-md disabled:opacity-50`}
                         >
-                            {isSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : saveSuccess ? (
-                                <CheckCircle2 className="w-4 h-4" />
-                            ) : (
-                                <Save className="w-4 h-4" />
-                            )}
+                            {isSaving ? <span className="spinner spinner--sm spinner--white" /> : saveSuccess ? <Icon icon={faCircleCheck} /> : <Icon icon={faFloppyDisk} />}
                             {isSaving ? 'Ukládám...' : saveSuccess ? 'Uloženo' : (isSetupMode ? 'Vytvořit účet' : 'Uložit do DB')}
                         </button>
                     </div>
                 </div>
             </div>
-        </div >
+        </div>
     );
 }
 

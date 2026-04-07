@@ -1,0 +1,325 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Záhlaví (Header)
+// 2 horizontální kontejnery × 44px výška každý
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+// ─── Horní pruh: Aplikační nabídka ───────────────────────────
+// Pozadí: $secondary-color dle NCIKT | Layout: levá flex | střed auto | pravá flex
+
+.header-appbar {
+  height: $header-appbar-height;
+  background-color: $secondary-color;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+
+  // Levá část: Statický titulek organizace — není klikatelný
+  &__home {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    border-right: 1px solid rgba(255, 255, 255, 0.15);
+    color: $text-on-dark;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: default;
+    pointer-events: none;
+
+    &__logo-img {
+      height: 28px;
+      width: auto;
+      object-fit: contain;
+      flex-shrink: 0;
+      opacity: 0.9;
+    }
+
+    &__label {
+      font-weight: 600;
+      @include text-ellipsis;
+    }
+
+    @include tablet {
+      padding: 0 12px;
+      font-size: 0.75rem;
+    }
+  }
+
+  // Středová část: Logo + název + podtitulek — pevná šířka, centrovaný text
+  &__logo {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    padding: 0 24px;
+    color: $text-on-dark;
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+    border-right: 1px solid rgba(255, 255, 255, 0.15);
+
+    &__img {
+      height: 24px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    &__name {
+      font-weight: 800;
+      font-size: 1rem;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    &__subtitle {
+      font-size: 0.65rem;
+      font-weight: 400;
+      opacity: 0.8;
+      white-space: nowrap;
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+
+      @include small-pc {
+        display: none;
+      }
+    }
+
+    @include tablet {
+      display: none;
+    }
+  }
+
+  // Pravá část (41.67%): Uživatel, odhlášení, dark mode
+  &__user {
+    width: 41.67%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 16px;
+    color: $text-on-dark;
+    margin-left: auto;
+
+    &__version {
+      font-size: 0.75rem;
+      opacity: 0.7;
+      font-weight: 400;
+
+      @include small-pc {
+        display: none;
+      }
+    }
+
+    &__name {
+      font-size: 0.875rem;
+      font-weight: 600;
+      @include text-ellipsis;
+      max-width: 160px;
+
+      @include small-pc {
+        max-width: 100px;
+      }
+    }
+
+    @include tablet {
+      width: 50%;
+      padding: 0 12px;
+    }
+  }
+}
+
+// Tlačítko v header baru (primární varianta v sekundárním pozadí)
+.header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: $radius-sm;
+  color: $text-on-dark;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  @include transition(background-color, border-color);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+
+  &--icon-only {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+// Dropdown menu pro uživatele v headeru
+.header-dropdown {
+  position: relative;
+
+  &__menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    box-shadow: var(--shadow-md);
+    min-width: 180px;
+    z-index: 2000;
+    padding: 4px;
+    animation: dropdown-in 0.1s ease;
+
+    @keyframes dropdown-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  }
+}
+
+// ─── Dolní pruh: Navigační menu ─────────────────────────────
+// Pozadí: $primary-color | Výška: 44px
+// 3 části: 25% | 50% | 25%
+.header-navbar {
+  height: $header-navbar-height;
+  background-color: $primary-color;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+
+  // Levá část (25%): filtry, navigace, hamburger na mobilu
+  &__left {
+    width: 25%;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  // Středová část (50%): záložky
+  &__tabs {
+    width: 50%;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+
+    @include tablet {
+      display: none;
+
+      &--open {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        top: $header-total-height;
+        left: 0;
+        right: 0;
+        background: $primary-color;
+        z-index: 999;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 8px 0;
+        box-shadow: var(--shadow-md);
+
+        .nav-tab {
+          height: 44px;
+          justify-content: flex-start;
+          padding: 0 20px;
+          width: 100%;
+
+          &--active::after {
+            display: none;
+          }
+          &--active {
+            background: rgba(255, 255, 255, 0.15);
+          }
+        }
+      }
+    }
+  }
+
+  // Pravá část (25%): admin, nastavení
+  &__right {
+    width: 25%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 12px;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+}
+
+// Záložka navigace dle NCIKT
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: $header-navbar-height;
+  padding: 0 18px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.75);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  @include transition(color, background-color);
+
+  &:hover {
+    color: $text-on-dark;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  // Aktivní záložka — spodní pruh $positive-color
+  &--active {
+    color: $text-on-dark;
+
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background-color: $positive-color;
+    }
+  }
+
+  // Uzamčená záložka (krok ještě nedostupný)
+  &--locked {
+    opacity: 0.4;
+    cursor: not-allowed;
+
+    &:hover {
+      color: rgba(255, 255, 255, 0.75);
+      background: transparent;
+    }
+  }
+
+  @include small-pc {
+    padding: 0 12px;
+    font-size: 0.8rem;
+  }
+}

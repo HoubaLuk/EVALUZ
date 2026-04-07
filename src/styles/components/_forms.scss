@@ -1,0 +1,160 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Formuláře a vstupní pole
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+// Skupina formulářového pole
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.form-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+// Vstupní pole dle NCIKT — 6 stavů
+.form-control {
+  width: 100%;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid #ced4da;  // výchozí: šedé ohraničení
+  border-radius: $radius-sm;
+  @include transition(border-color, box-shadow);
+  appearance: none;
+
+  // Placeholder
+  &::placeholder {
+    color: var(--text-muted);
+  }
+
+  // Focused: primární barva s menším krytím
+  &:focus {
+    outline: none;
+    border-color: rgba($primary-color, 0.7);
+    box-shadow: 0 0 0 3px rgba($primary-color, 0.15);
+  }
+
+  // Editované: plná primární barva
+  &--edited {
+    border-color: $primary-color;
+  }
+
+  // Validní: zelené ohraničení + ikona zaškrtnutí
+  &--valid {
+    border-color: $positive-color;
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23178754' d='M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+  }
+
+  // Chybové: červené ohraničení + ikona kříže
+  &--error {
+    border-color: $negative-color;
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23c51515' d='M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+  }
+
+  // Neaktivní
+  &:disabled {
+    background-color: #f8f9fa;
+    color: #6c757d;
+    cursor: not-allowed;
+    border-color: #ced4da;
+  }
+
+  // Dark mode
+  .dark & {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+
+    &:focus {
+      border-color: rgba($primary-color, 0.8);
+      box-shadow: 0 0 0 3px rgba($primary-color, 0.2);
+    }
+
+    &:disabled {
+      background: var(--bg-surface-2);
+      color: var(--text-muted);
+    }
+  }
+}
+
+// Textarea
+textarea.form-control {
+  resize: vertical;
+  min-height: 80px;
+}
+
+// Popisný text pod polem
+.form-text {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+
+  &--valid { color: $positive-color; }
+  &--error { color: $negative-color; }
+}
+
+// Checkbox / Radio
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    accent-color: $primary-color;
+    cursor: pointer;
+  }
+
+  &__label {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+  }
+}
+
+// Upload zóna (drag & drop)
+.upload-zone {
+  border: 2px dashed var(--border-color);
+  border-radius: $radius-md;
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  @include transition(border-color, background-color);
+  background: var(--bg-surface);
+
+  &:hover,
+  &--active {
+    border-color: $primary-color;
+    background: rgba($primary-color, 0.04);
+  }
+
+  &__icon {
+    color: var(--text-muted);
+    font-size: 2rem;
+    margin-bottom: 8px;
+  }
+
+  &__text {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+  }
+}

@@ -1,0 +1,67 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Barevná paleta
+// ============================================================
+
+// Primární paleta (POVINNÉ HEX hodnoty dle NCIKT)
+$primary-color:   #0f527d;  // navigační menu, primární tlačítka
+$secondary-color: #13689f;  // aplikační nabídka (horní bar), produkční verze
+$tertiary-color:  #177fc1;  // podřízené prvky
+$positive-color:  #178754;  // uložit, schválit, Home Button, vývojová verze
+$warning-color:   #e28413;  // upozornění, abnormální stav
+$negative-color:  #c51515;  // chyba, smazat, zrušit
+$light-color:     #6c757d;  // stavová tlačítka, pozadí kontejnerů
+$dark-color:      #495057;  // stavová tlačítka
+
+// Pozadí stránky (světle šedá — menší zátěž pro oči)
+$page-bg:         #f0f2f5;
+$surface-bg:      #ffffff;
+$border-color:    #dee2e6;
+$border-light:    #e9ecef;
+
+// Text
+$text-primary:    #212529;
+$text-secondary:  #6c757d;
+$text-muted:      #adb5bd;
+$text-on-dark:    #ffffff;
+
+// CSS Custom Properties (světlý + tmavý režim)
+:root {
+  --color-primary:    #{$primary-color};
+  --color-secondary:  #{$secondary-color};
+  --color-tertiary:   #{$tertiary-color};
+  --color-positive:   #{$positive-color};
+  --color-warning:    #{$warning-color};
+  --color-negative:   #{$negative-color};
+  --color-light:      #{$light-color};
+  --color-dark:       #{$dark-color};
+
+  --bg-page:          #{$page-bg};
+  --bg-surface:       #{$surface-bg};
+  --bg-surface-2:     #f8f9fa;
+  --border-color:     #{$border-color};
+
+  --text-primary:     #{$text-primary};
+  --text-secondary:   #{$text-secondary};
+  --text-muted:       #{$text-muted};
+
+  --shadow-sm:   0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md:   0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg:   0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+// Dark mode overrides (zachováno — není v NCIKT, ale uživatelský požadavek)
+// Header barvy zůstávají stejné v obou módech (identitní prvek dle NCIKT)
+.dark {
+  --bg-page:          #1a1f2e;
+  --bg-surface:       #1e2535;
+  --bg-surface-2:     #252d40;
+  --border-color:     #334155;
+
+  --text-primary:     #e2e8f0;
+  --text-secondary:   #94a3b8;
+  --text-muted:       #64748b;
+
+  --shadow-sm:   0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md:   0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg:   0 8px 24px rgba(0, 0, 0, 0.4);
+}

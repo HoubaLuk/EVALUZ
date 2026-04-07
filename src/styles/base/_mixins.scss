@@ -1,0 +1,83 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Mixiny
+// ============================================================
+@use 'variables' as *;
+@use 'colors' as *;
+
+// Stavy tlačítka dle NCIKT: hover = ztmavit 5%, active = zesvětlit 10%, disabled = zesvětlit 5%
+@mixin btn-states($base-color) {
+  background-color: $base-color;
+  &:hover:not(:disabled) {
+    background-color: color-mix(in srgb, $base-color 95%, black);
+  }
+  &:active:not(:disabled) {
+    background-color: color-mix(in srgb, $base-color 90%, white);
+  }
+  &:disabled {
+    background-color: color-mix(in srgb, $base-color 95%, white);
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+
+// Responzivní breakpointy dle NCIKT
+@mixin mobile {
+  @media (max-width: #{$mobile-max}) { @content; }
+}
+
+@mixin tablet {
+  @media (max-width: #{$tablet-max}) { @content; }
+}
+
+@mixin small-pc {
+  @media (max-width: #{$small-pc-max}) { @content; }
+}
+
+@mixin regular-pc {
+  @media (max-width: #{$regular-pc-max}) { @content; }
+}
+
+@mixin hi-res {
+  @media (min-width: calc(#{$regular-pc-max} + 1px)) { @content; }
+}
+
+// Flexbox zkratky
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+// Přechod (transition) — podporuje více vlastností
+@mixin transition($props...) {
+  $transitions: ();
+  @if length($props) == 0 {
+    $transitions: (all $transition-speed $transition-ease);
+  } @else {
+    @each $prop in $props {
+      $transitions: append($transitions, $prop $transition-speed $transition-ease, comma);
+    }
+  }
+  transition: $transitions;
+}
+
+// Ořez textu na jeden řádek
+@mixin text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Stín povrchu
+@mixin surface {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  border-radius: $radius-md;
+}

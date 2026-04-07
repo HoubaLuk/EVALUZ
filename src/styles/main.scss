@@ -1,0 +1,25 @@
+// ============================================================
+// EVALUZ — NCIKT Visual Standards v1.1
+// Hlavní SCSS entry point
+// Pořadí: base → components → layouts
+// ============================================================
+
+// Base
+@use 'base/colors';      // CSS custom properties (:root, .dark)
+@use 'base/variables';   // Sass proměnné (breakpointy, výšky, šířky)
+@use 'base/root';        // Globální reset, body, footer skrytý
+@use 'base/typography';  // Exo 2, nadpisy, texty
+
+// Components
+@use 'components/buttons';
+@use 'components/cards';
+@use 'components/forms';
+@use 'components/modals';
+@use 'components/spinner';
+@use 'components/hamburgermenu';
+@use 'components/lists';
+
+// Layouts
+@use 'layouts/header';
+@use 'layouts/navbar';
+@use 'layouts/containers';

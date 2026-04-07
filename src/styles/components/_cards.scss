@@ -1,0 +1,91 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Karty (Card)
+// Struktura: hlavička + obsahová část
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+.card {
+  background: var(--bg-surface);
+  border-radius: $radius-md;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+
+  &__header {
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+
+    // Varianty pozadí hlavičky dle NCIKT
+    &--primary   { background: $primary-color;   color: $text-on-dark; }
+    &--secondary { background: $secondary-color; color: $text-on-dark; }
+    &--tertiary  { background: $tertiary-color;  color: $text-on-dark; }
+    &--positive  { background: $positive-color;  color: $text-on-dark; }
+    &--warning   { background: $warning-color;   color: $text-on-dark; }
+    &--negative  { background: $negative-color;  color: $text-on-dark; }
+    &--light     { background: #f8f9fa; color: $text-primary; border-bottom: 1px solid $border-color; }
+    &--dark      { background: $dark-color; color: $text-on-dark; }
+
+    .dark & {
+      &--light { background: var(--bg-surface-2); color: var(--text-primary); }
+    }
+  }
+
+  &__body {
+    padding: 16px;
+    color: var(--text-primary);
+  }
+
+  &__footer {
+    padding: 10px 16px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-surface-2);
+  }
+
+  // Grid šířky (1–12 sloupců) dle NCIKT 12-sloupcového gridu
+  @for $i from 1 through 12 {
+    &--w-#{$i} {
+      grid-column: span $i;
+    }
+  }
+}
+
+// KPI karta (pro analytiku)
+.kpi-card {
+  @include surface;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  &__label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  &__value {
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1;
+  }
+
+  &__sub {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  &--positive .kpi-card__value { color: $positive-color; }
+  &--warning  .kpi-card__value { color: $warning-color; }
+  &--negative .kpi-card__value { color: $negative-color; }
+  &--primary  .kpi-card__value { color: $primary-color; }
+}

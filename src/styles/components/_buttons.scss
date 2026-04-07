@@ -1,0 +1,136 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Tlačítka
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+// Základní tlačítko
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: $radius-sm;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  @include transition(background-color, box-shadow);
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  // Varianty dle NCIKT sémantiky
+  &--primary {
+    @include btn-states($primary-color);
+    color: $text-on-dark;
+  }
+
+  &--secondary {
+    @include btn-states($secondary-color);
+    color: $text-on-dark;
+  }
+
+  &--tertiary {
+    @include btn-states($tertiary-color);
+    color: $text-on-dark;
+  }
+
+  // Pozitivní: Uložit, Odeslat, Potvrdit, Schválit
+  &--positive {
+    @include btn-states($positive-color);
+    color: $text-on-dark;
+  }
+
+  // Varující: Upoutat pozornost, stavové tlačítko
+  &--warning {
+    @include btn-states($warning-color);
+    color: $text-on-dark;
+  }
+
+  // Negativní: Zrušit, Smazat, Storno
+  &--negative {
+    @include btn-states($negative-color);
+    color: $text-on-dark;
+  }
+
+  &--light {
+    @include btn-states($light-color);
+    color: $text-on-dark;
+  }
+
+  &--dark {
+    @include btn-states($dark-color);
+    color: $text-on-dark;
+  }
+
+  // Outline varianta
+  &--outline {
+    background: transparent;
+    border: 1px solid var(--color-primary);
+    color: var(--color-primary);
+
+    &:hover:not(:disabled) {
+      background: var(--color-primary);
+      color: $text-on-dark;
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  &--outline-negative {
+    background: transparent;
+    border: 1px solid var(--color-negative);
+    color: var(--color-negative);
+
+    &:hover:not(:disabled) {
+      background: var(--color-negative);
+      color: $text-on-dark;
+    }
+  }
+
+  // Rozměry
+  &--sm {
+    height: 28px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+  }
+
+  &--lg {
+    height: 44px;
+    padding: 0 24px;
+    font-size: 1rem;
+  }
+
+  &--icon-only {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+
+    &.btn--sm { width: 28px; }
+    &.btn--lg { width: 44px; }
+  }
+}
+
+// Skupina tlačítek — POVINNÉ pořadí dle NCIKT: Negativní → Neutrální → Pozitivní
+.btn-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+
+  // Zarovnání skupiny vpravo (pro formuláře)
+  &--end {
+    justify-content: flex-end;
+  }
+}

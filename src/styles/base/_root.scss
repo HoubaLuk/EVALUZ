@@ -1,0 +1,55 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Globální reset a základní styly
+// ============================================================
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+// NCIKT: Footer je ve výchozím stavu skrytý
+footer {
+  display: none !important;
+}
+
+// Plynulé scrollování
+html {
+  scroll-behavior: smooth;
+}
+
+// Obrázky
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+// Odkazy
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}

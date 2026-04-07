@@ -1,0 +1,150 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Seznamy, Dropdown, Badges
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+// Seznam (obecný)
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    @include transition(background-color);
+    color: var(--text-primary);
+
+    &:hover {
+      background: var(--bg-surface-2);
+    }
+
+    &--active {
+      background: rgba($primary-color, 0.1);
+      color: $primary-color;
+      font-weight: 600;
+    }
+  }
+}
+
+// Radix UI Dropdown Menu styly
+.dropdown-content {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+  min-width: 160px;
+  z-index: 3000;
+  animation: dropdown-in 0.1s ease;
+
+  @keyframes dropdown-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: $radius-sm;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  @include transition(background-color, color);
+
+  &:hover,
+  &:focus {
+    background: var(--bg-surface-2);
+    outline: none;
+  }
+
+  &--danger {
+    color: $negative-color;
+
+    &:hover {
+      background: rgba($negative-color, 0.08);
+    }
+  }
+
+  &--separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+    padding: 0;
+    pointer-events: none;
+  }
+}
+
+.dropdown-label {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+// Badge / Chip
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+
+  &--primary   { background: rgba($primary-color, 0.12);   color: $primary-color; }
+  &--secondary { background: rgba($secondary-color, 0.12); color: $secondary-color; }
+  &--positive  { background: rgba($positive-color, 0.12);  color: $positive-color; }
+  &--warning   { background: rgba($warning-color, 0.15);   color: darken($warning-color, 10%); }
+  &--negative  { background: rgba($negative-color, 0.12);  color: $negative-color; }
+  &--neutral   { background: var(--bg-surface-2); color: var(--text-secondary); border: 1px solid var(--border-color); }
+}
+
+// Tab navigace (pro Sidebar a inline taby)
+.tab-list {
+  display: flex;
+  border-bottom: 2px solid var(--border-color);
+  gap: 0;
+  overflow-x: auto;
+
+  &__item {
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    @include transition(color, border-color);
+
+    &:hover {
+      color: var(--text-primary);
+    }
+
+    &--active {
+      color: $primary-color;
+      border-bottom-color: $primary-color;
+    }
+  }
+}

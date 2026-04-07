@@ -1,0 +1,286 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Navigační lišta (Sidebar)
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+.sidebar {
+  width: $sidebar-width;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  @include transition(width, transform);
+  position: relative;
+
+  // Složený sidebar
+  &--collapsed {
+    width: $sidebar-collapsed-width;
+    align-items: center;
+
+    .sidebar-item__label,
+    .sidebar-section__title,
+    .sidebar-class__meta,
+    .sidebar-footer {
+      display: none;
+    }
+  }
+
+  // Mobilní: skrytý mimo obrazovku, slide-in
+  @include tablet {
+    position: fixed;
+    left: -$sidebar-width;
+    top: $header-total-height;
+    bottom: 0;
+    z-index: 998;
+    box-shadow: var(--shadow-lg);
+
+    &--open {
+      left: 0;
+      transform: translateX(0);
+    }
+  }
+}
+
+// Tlačítko pro toggle sidebar
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  cursor: pointer;
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  @include transition(background-color, color, border-color);
+
+  &:hover {
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+  }
+}
+
+// Hlavička sidebar sekce
+.sidebar-section {
+  padding: 0;
+
+  &__title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+}
+
+// Položka třídy v sidebaru
+.sidebar-class {
+  border-bottom: 1px solid var(--border-light);
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    @include transition(background-color);
+
+    &:hover {
+      background: var(--bg-surface-2);
+    }
+  }
+
+  &__icon {
+    color: $primary-color;
+    flex-shrink: 0;
+    width: 16px;
+  }
+
+  &__name {
+    flex: 1;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    @include text-ellipsis;
+  }
+
+  &__meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 0 12px 4px 36px;
+  }
+
+  &__chevron {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    @include transition(transform);
+
+    &--open {
+      transform: rotate(180deg);
+    }
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+}
+
+// Scénáře pod třídou
+.sidebar-scenarios {
+  padding: 4px 0;
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 32px;
+    cursor: pointer;
+    @include transition(background-color);
+    position: relative;
+
+    &:hover {
+      background: var(--bg-surface-2);
+    }
+
+    &--active {
+      background: rgba($primary-color, 0.08);
+
+      &::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: $primary-color;
+        border-radius: 0 2px 2px 0;
+      }
+
+      .sidebar-scenarios__name {
+        color: $primary-color;
+        font-weight: 600;
+      }
+    }
+
+    &__icon {
+      color: var(--text-muted);
+      flex-shrink: 0;
+      width: 14px;
+    }
+  }
+
+  &__name {
+    flex: 1;
+    font-size: 0.825rem;
+    color: var(--text-secondary);
+    @include text-ellipsis;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    @include transition(opacity);
+
+    .sidebar-scenarios__item:hover & {
+      opacity: 1;
+    }
+  }
+}
+
+// Ikona tlačítka v sidebaru
+.sidebar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  color: var(--text-muted);
+  @include transition(background-color, color);
+
+  &:hover {
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+  }
+
+  &--danger:hover {
+    background: rgba($negative-color, 0.1);
+    color: $negative-color;
+  }
+}
+
+// Synchronizační stav
+.sidebar-sync {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+// Mobilní overlay — zatmavení pozadí při otevřeném sidebaru
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 997;
+
+  @include tablet {
+    &--open {
+      display: block;
+    }
+  }
+}
+
+// Tlačítko přidat
+.sidebar-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-light);
+  font-family: inherit;
+  font-size: 0.825rem;
+  color: $primary-color;
+  cursor: pointer;
+  @include transition(background-color);
+
+  &:hover {
+    background: rgba($primary-color, 0.06);
+  }
+}

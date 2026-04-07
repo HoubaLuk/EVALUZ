@@ -1,0 +1,31 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Proměnné
+// ============================================================
+
+// Breakpointy
+$mobile-max:      480px;
+$tablet-max:      768px;
+$small-pc-max:    1024px;
+$regular-pc-max:  1200px;
+
+// Header
+$header-appbar-height: 44px;
+$header-navbar-height: 44px;
+$header-total-height:  88px;
+
+// Sidebar
+$sidebar-width:           288px;
+$sidebar-collapsed-width: 68px;
+
+// Layout
+$main-padding-desktop: 16px;
+$main-padding-mobile:  8px;
+
+// Border radius
+$radius-sm: 4px;
+$radius-md: 6px;
+$radius-lg: 8px;
+
+// Přechodové animace
+$transition-speed: 0.2s;
+$transition-ease:  ease-in-out;

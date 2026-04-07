@@ -1,0 +1,71 @@
+// ============================================================
+// NCIKT Visual Standards v1.1 — Hamburger menu (mobilní)
+// Zobrazuje se na zařízeních ≤768px
+// ============================================================
+@use '../base/variables' as *;
+@use '../base/colors' as *;
+@use '../base/mixins' as *;
+
+.hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: $radius-sm;
+  cursor: pointer;
+  padding: 4px;
+  @include transition(background-color, border-color);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+
+  &__line {
+    display: block;
+    width: 18px;
+    height: 2px;
+    background: #ffffff;
+    border-radius: 2px;
+    @include transition(transform, opacity);
+    transform-origin: center;
+  }
+
+  // Animace: čáry → křížek
+  &--open {
+    .hamburger__line:nth-child(1) {
+      transform: translateY(7px) rotate(45deg);
+    }
+    .hamburger__line:nth-child(2) {
+      opacity: 0;
+      transform: scaleX(0);
+    }
+    .hamburger__line:nth-child(3) {
+      transform: translateY(-7px) rotate(-45deg);
+    }
+  }
+
+  @include tablet {
+    display: flex;
+  }
+}
+
+// Mobilní overlay pro sidebar
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 997;
+
+  @include tablet {
+    &--open {
+      display: block;
+    }
+  }
+}

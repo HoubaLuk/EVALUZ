@@ -1,3 +1,1 @@
-@import "tailwindcss";
-
-@custom-variant dark (&:where(.dark, .dark *));
+/* Tailwind removed — styles migrated to SCSS (NCIKT Visual Standards v1.1) */
