@@ -18,7 +18,7 @@ export default defineConfig(({mode}) => {
       proxy: {
         // Forward /api/ requests to backend in local dev (mirrors Nginx proxy in production)
         '/api': {
-          target: 'http://localhost:8001',
+          target: 'http://localhost:8000',
           changeOrigin: true,
           ws: true, // WebSocket proxy support
         },

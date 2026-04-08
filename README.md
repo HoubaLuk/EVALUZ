@@ -25,6 +25,7 @@ EVALUZ je specializovaná platforma pro automatizovanou analýzu úředních zá
 ## Architektura
 
 ```
+PRODUKCE:
 [Uživatel / Prohlížeč]
         │
         ▼
@@ -34,6 +35,15 @@ EVALUZ je specializovaná platforma pro automatizovanou analýzu úředních zá
 [nginx proxy kontejner]
    ├── /api/*  →  [FastAPI backend :8000]  ←→  [PostgreSQL]
    └── /*      →  [React frontend :80]
+
+LOKÁLNÍ VÝVOJ:
+[Uživatel / Prohlížeč]
+        │
+        ▼
+  [Vite dev server :3000]  ← proxy /api/* → backend:8000
+        │
+        ▼
+[FastAPI backend :8000]  ←→  [SQLite]
 ```
 
 ### Technologický zásobník
@@ -66,7 +76,7 @@ EVALUZ je specializovaná platforma pro automatizovanou analýzu úředních zá
 - Min. 2 GB RAM pro backend kontejner
 
 ### Lokální vývoj
-- Python 3.10+
+- Python 3.10+ (doporučeno 3.13+; vyžadováno pro union type syntax `X | None`)
 - Node.js 20+
 - SQLite (součástí Pythonu — bez další instalace)
 
