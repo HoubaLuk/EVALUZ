@@ -41,8 +41,8 @@ services:
     container_name: evaluz_frontend
     restart: always
     ports:
-      - "80:80"   # HTTP → přesměrování na HTTPS
-      - "443:443" # HTTPS (self-signed nebo vlastní certifikát)
+      - "8001:80"   # HTTP → přesměrování na HTTPS
+      - "8443:443" # HTTPS (self-signed nebo vlastní certifikát)
     volumes:
       - ./ssl:/etc/nginx/ssl:ro  # SSL certifikát (vygenerovat pomocí generate-ssl.sh)
     depends_on:
