@@ -1,593 +1,534 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../utils/api';
-
-import { Folder, ChevronDown, MoreVertical, FileText, Edit2, Trash2, Copy, ChevronLeft, ChevronRight, HardDrive, Loader2, HelpCircle, CheckCircle2, XCircle } from 'lucide-react';
+import {
+  faFolder, faFolderOpen, faChevronDown, faChevronRight, faChevronLeft,
+  faEllipsisVertical, faFileLines, faPen, faTrash, faCopy,
+  faHardDrive, faRotate, faCircleQuestion, faCircleCheck, faCircleXmark,
+  faXmark, faPlus,
+} from '@fortawesome/free-solid-svg-icons';
+import { Icon } from './Icon';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-
 import { ClassData } from '../types';
 import { useDialog } from '../contexts/DialogContext';
 
 export interface SidebarProps {
-    classes: ClassData[];
-    setClasses: React.Dispatch<React.SetStateAction<ClassData[]>>;
-    activeClassId: string | null;
-    activeScenarioId: string | null;
-    onSelectScenario: (classId: string, scenarioId: string) => void;
+  classes: ClassData[];
+  setClasses: React.Dispatch<React.SetStateAction<ClassData[]>>;
+  activeClassId: string | null;
+  activeScenarioId: string | null;
+  onSelectScenario: (classId: string, scenarioId: string) => void;
 }
 
 export type EditMode =
-    | null
-    | { type: 'new_class' }
-    | { type: 'new_scenario', classId: string }
-    | { type: 'rename_class', classId: string, currentName: string }
-    | { type: 'rename_scenario', classId: string, scenId: string, currentName: string };
+  | null
+  | { type: 'new_class' }
+  | { type: 'new_scenario'; classId: string }
+  | { type: 'rename_class'; classId: string; currentName: string }
+  | { type: 'rename_scenario'; classId: string; scenId: string; currentName: string };
 
 export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, onSelectScenario }: SidebarProps) {
-    const { showConfirm, showAlert } = useDialog();
+  const { showConfirm } = useDialog();
 
-    const [editMode, setEditMode] = React.useState<EditMode>(null);
-    const [editValue, setEditValue] = React.useState('');
-    const [isCollapsed, setIsCollapsed] = React.useState(() => {
-        const saved = localStorage.getItem('upvsp_sidebar_collapsed');
-        return saved ? JSON.parse(saved) : false;
-    });
-    const [isSyncing, setIsSyncing] = useState(false);
-    const [lastSyncInfo, setLastSyncInfo] = useState<{ name: string; date: string } | null>(() => {
-        const saved = localStorage.getItem('evaluz_last_sync');
-        return saved ? JSON.parse(saved) : null;
-    });
-    const [showSyncHelp, setShowSyncHelp] = useState(false);
-    const [syncDirHandle, setSyncDirHandle] = useState<any>(null);
-    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [editMode, setEditMode] = React.useState<EditMode>(null);
+  const [editValue, setEditValue] = React.useState('');
+  const [isCollapsed, setIsCollapsed] = React.useState(() => {
+    const saved = localStorage.getItem('upvsp_sidebar_collapsed');
+    return saved ? JSON.parse(saved) : false;
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncInfo, setLastSyncInfo] = useState<{ name: string; date: string } | null>(() => {
+    const saved = localStorage.getItem('evaluz_last_sync');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [showSyncHelp, setShowSyncHelp] = useState(false);
+  const [syncDirHandle, setSyncDirHandle] = useState<any>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-    const saveClasses = React.useCallback((newClasses: ClassData[]) => {
-        setClasses(newClasses);
-        localStorage.setItem('upvsp_classes', JSON.stringify(newClasses));
-    }, [setClasses]);
+  const handleCollapseToggle = () => {
+    const next = !isCollapsed;
+    setIsCollapsed(next);
+    localStorage.setItem('upvsp_sidebar_collapsed', JSON.stringify(next));
+  };
 
-    const handleSaveEdit = React.useCallback(() => {
-        if (!editMode) return;
-        const val = editValue.trim();
-        if (editMode.type === 'new_class' && val) {
-            const newClass: ClassData = {
-                id: `class-${Date.now()}`,
-                name: val,
-                expanded: true,
-                scenarios: []
-            };
-            saveClasses([...classes, newClass]);
-            // Synchronizovat novou třídu do DB (fire-and-forget)
-            fetch(`${API_BASE_URL}/evaluate/classes/ensure`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
-                },
-                body: JSON.stringify({ name: val })
-            }).catch(() => {});
-        } else if (editMode.type === 'new_scenario' && val) {
-            const newClasses = classes.map(c => c.id === editMode.classId ? {
-                ...c,
-                expanded: true,
-                scenarios: [...c.scenarios, { id: `scen-${Date.now()}`, name: val }]
-            } : c);
-            saveClasses(newClasses);
-        } else if (editMode.type === 'rename_class' && val && val !== editMode.currentName) {
-            saveClasses(classes.map(c => c.id === editMode.classId ? { ...c, name: val } : c));
-        } else if (editMode.type === 'rename_scenario' && val && val !== editMode.currentName) {
-            saveClasses(classes.map(c => c.id === editMode.classId ? {
-                ...c,
-                scenarios: c.scenarios.map(s => s.id === editMode.scenId ? { ...s, name: val } : s)
-            } : c));
+  const saveClasses = React.useCallback((newClasses: ClassData[]) => {
+    setClasses(newClasses);
+    localStorage.setItem('upvsp_classes', JSON.stringify(newClasses));
+  }, [setClasses]);
+
+  const handleSaveEdit = React.useCallback(() => {
+    if (!editMode) return;
+    const val = editValue.trim();
+    if (editMode.type === 'new_class' && val) {
+      const newClass: ClassData = {
+        id: `class-${Date.now()}`,
+        name: val,
+        expanded: true,
+        scenarios: [],
+      };
+      saveClasses([...classes, newClass]);
+    } else if (editMode.type === 'new_scenario' && val) {
+      const newClasses = classes.map(c => c.id === editMode.classId ? {
+        ...c, expanded: true,
+        scenarios: [...c.scenarios, { id: `scen-${Date.now()}`, name: val }],
+      } : c);
+      saveClasses(newClasses);
+    } else if (editMode.type === 'rename_class' && val && val !== editMode.currentName) {
+      saveClasses(classes.map(c => c.id === editMode.classId ? { ...c, name: val } : c));
+    } else if (editMode.type === 'rename_scenario' && val && val !== editMode.currentName) {
+      saveClasses(classes.map(c => c.id === editMode.classId ? {
+        ...c,
+        scenarios: c.scenarios.map(s => s.id === editMode.scenId ? { ...s, name: val } : s),
+      } : c));
+    }
+    setEditMode(null);
+    setEditValue('');
+  }, [editMode, editValue, classes, saveClasses]);
+
+  const handleInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleSaveEdit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); setEditMode(null); setEditValue(''); }
+  };
+
+  const startEdit = (e: React.MouseEvent | undefined, mode: EditMode, initialValue: string = '') => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    setEditMode(mode);
+    setEditValue(initialValue);
+  };
+
+  const toggleClassExpansion = React.useCallback((classId: string, e?: React.MouseEvent) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    saveClasses(classes.map(c => c.id === classId ? { ...c, expanded: !c.expanded } : c));
+  }, [classes, saveClasses]);
+
+  const deleteClass = React.useCallback(async (id: string, name: string) => {
+    const conf = await showConfirm(`Opravdu chcete smazat třídu "${name}" i se všemi modelovými situacemi?`);
+    if (conf) {
+      saveClasses(classes.filter(c => c.id !== id));
+      if (activeClassId === id) onSelectScenario('', '');
+    }
+  }, [classes, saveClasses, showConfirm, activeClassId, onSelectScenario]);
+
+  const duplicateScenario = React.useCallback((classId: string, scenId: string) => {
+    saveClasses(classes.map(c => {
+      if (c.id === classId) {
+        const target = c.scenarios.find(s => s.id === scenId);
+        if (target) {
+          const newScenarios = [...c.scenarios];
+          const index = newScenarios.indexOf(target);
+          newScenarios.splice(index + 1, 0, { id: `scen-${Date.now()}`, name: `${target.name} (Kopie)` });
+          return { ...c, expanded: true, scenarios: newScenarios };
         }
-        setEditMode(null);
-        setEditValue('');
-    }, [editMode, editValue, classes, saveClasses]);
+      }
+      return c;
+    }));
+  }, [classes, saveClasses]);
 
-    const handleInputKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            handleSaveEdit();
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            setEditMode(null);
-            setEditValue('');
-        }
-    };
+  const deleteScenario = React.useCallback(async (classId: string, scenId: string, name: string) => {
+    const conf = await showConfirm(`Opravdu chcete smazat modelovou situaci "${name}"?`);
+    if (conf) {
+      saveClasses(classes.map(c => c.id === classId ? {
+        ...c, scenarios: c.scenarios.filter(s => s.id !== scenId),
+      } : c));
+      if (activeScenarioId === scenId) onSelectScenario(classId, '');
+    }
+  }, [classes, saveClasses, showConfirm, activeScenarioId, onSelectScenario]);
 
-    const startEdit = (e: React.MouseEvent | undefined, mode: EditMode, initialValue: string = '') => {
-        if (e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-        setEditMode(mode);
-        setEditValue(initialValue);
-    };
+  const performSync = async (dirHandle: any) => {
+    try {
+      setIsSyncing(true);
+      let currentClasses = JSON.parse(JSON.stringify(classes)) as ClassData[];
+      let totalFiles = 0; let newClassesCount = 0; let newScenariosCount = 0;
 
-    const toggleClassExpansion = React.useCallback((classId: string, e?: React.MouseEvent) => {
-        if (e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-        const newClasses = classes.map(c =>
-            c.id === classId ? { ...c, expanded: !c.expanded } : c
-        );
-        saveClasses(newClasses);
-    }, [classes, saveClasses]);
+      for await (const [className, classHandle] of (dirHandle as any).entries()) {
+        if ((classHandle as any).kind !== 'directory') continue;
+        let cls = currentClasses.find(c => c.name === className);
+        if (!cls) {
+          cls = { id: `class-${Date.now()}-${Math.random()}`, name: className, expanded: true, scenarios: [] };
+          currentClasses.push(cls);
+          newClassesCount++;
+        } else { cls.expanded = true; }
 
-    const deleteClass = React.useCallback(async (id: string, name: string) => {
-        const conf = await showConfirm(`Opravdu chcete smazat třídu "${name}" i se všemi modelovými situacemi?`);
-        if (conf) {
-            saveClasses(classes.filter(c => c.id !== id));
-            if (activeClassId === id) {
-                onSelectScenario('', '');
+        for await (const [scenName, scenHandle] of (classHandle as any).entries()) {
+          if ((scenHandle as any).kind !== 'directory') continue;
+          let scen = cls.scenarios.find(s => s.name === scenName);
+          if (!scen) {
+            scen = { id: `scen-${Date.now()}-${Math.random()}`, name: scenName };
+            cls.scenarios.push(scen);
+            newScenariosCount++;
+          }
+          const validFiles: File[] = [];
+          for await (const [fileName, fileHandle] of (scenHandle as any).entries()) {
+            if ((fileHandle as any).kind === 'file') {
+              const file = await (fileHandle as any).getFile();
+              const ext = file.name.split('.').pop()?.toLowerCase();
+              if (ext && ['pdf', 'doc', 'docx', 'rtf', 'odt'].includes(ext) && !fileName.startsWith('~') && !fileName.startsWith('.')) {
+                validFiles.push(file);
+              }
             }
-        }
-    }, [classes, saveClasses, showConfirm, activeClassId, onSelectScenario]);
-
-    const duplicateScenario = React.useCallback((classId: string, scenId: string) => {
-        saveClasses(classes.map(c => {
-            if (c.id === classId) {
-                const target = c.scenarios.find(s => s.id === scenId);
-                if (target) {
-                    const newScenarios = [...c.scenarios];
-                    const index = newScenarios.indexOf(target);
-                    newScenarios.splice(index + 1, 0, { id: `scen-${Date.now()}`, name: `${target.name} (Kopie)` });
-                    return { ...c, expanded: true, scenarios: newScenarios };
-                }
-            }
-            return c;
-        }));
-    }, [classes, saveClasses]);
-
-    const deleteScenario = React.useCallback(async (classId: string, scenId: string, name: string) => {
-        const conf = await showConfirm(`Opravdu chcete smazat modelovou situaci "${name}"?`);
-        if (conf) {
-            saveClasses(classes.map(c => c.id === classId ? {
-                ...c,
-                scenarios: c.scenarios.filter(s => s.id !== scenId)
-            } : c));
-            if (activeScenarioId === scenId) {
-                onSelectScenario(classId, '');
-            }
-        }
-    }, [classes, saveClasses, showConfirm, activeScenarioId, onSelectScenario]);
-
-    const performSync = async (dirHandle: any) => {
-        try {
-            setIsSyncing(true);
-            let currentClasses = JSON.parse(JSON.stringify(classes)) as ClassData[];
-            let totalFiles = 0;
-            let newClassesCount = 0;
-            let newScenariosCount = 0;
-
-            for await (const [className, classHandle] of (dirHandle as any).entries()) {
-                if ((classHandle as any).kind !== 'directory') continue;
-
-                let cls = currentClasses.find(c => c.name === className);
-                if (!cls) {
-                    cls = { id: `class-${Date.now()}-${Math.random()}`, name: className, expanded: true, scenarios: [] };
-                    currentClasses.push(cls);
-                    newClassesCount++;
-                } else {
-                    cls.expanded = true;
-                }
-
-                for await (const [scenName, scenHandle] of (classHandle as any).entries()) {
-                    if ((scenHandle as any).kind !== 'directory') continue;
-
-                    let scen = cls.scenarios.find(s => s.name === scenName);
-                    if (!scen) {
-                        scen = { id: `scen-${Date.now()}-${Math.random()}`, name: scenName };
-                        cls.scenarios.push(scen);
-                        newScenariosCount++;
-                    }
-
-                    const validFiles: File[] = [];
-                    for await (const [fileName, fileHandle] of (scenHandle as any).entries()) {
-                        if ((fileHandle as any).kind === 'file') {
-                            const file = await (fileHandle as any).getFile();
-                            const ext = file.name.split('.').pop()?.toLowerCase();
-                            if (ext && ['pdf', 'doc', 'docx', 'rtf', 'odt'].includes(ext) && !fileName.startsWith('~') && !fileName.startsWith('.')) {
-                                validFiles.push(file);
-                            }
-                        }
-                    }
-
-                    if (validFiles.length > 0) {
-                        totalFiles += validFiles.length;
-                        const formData = new FormData();
-                        validFiles.forEach(f => formData.append('files', f));
-                        formData.append('scenario_id', scen.id);
-                        formData.append('scenario_display_name', scen.name);
-                        formData.append('class_name', cls.name);
-
-                        await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
-                            body: formData
-                        });
-                    }
-                }
-            }
-
-            saveClasses(currentClasses);
-            const msg = totalFiles > 0
-                ? `Sync dokončen! ${newClassesCount > 0 ? newClassesCount + ' nových tříd, ' : ''}${newScenariosCount > 0 ? newScenariosCount + ' nových situací, ' : ''}${totalFiles} souborů nahráno.`
-                : newClassesCount > 0 || newScenariosCount > 0
-                    ? `Struktura synchronizována (${newClassesCount} tříd, ${newScenariosCount} situací). Žádné dokumenty k nahrání.`
-                    : 'Žádné nové položky nalezeny. Zkontrolujte strukturu složek (viz nápověda ❓).';
-
-            setLastSyncInfo({
-                name: dirHandle.name,
-                date: new Date().toLocaleString('cs-CZ')
+          }
+          if (validFiles.length > 0) {
+            totalFiles += validFiles.length;
+            const formData = new FormData();
+            validFiles.forEach(f => formData.append('files', f));
+            formData.append('scenario_id', scen.id);
+            await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+              body: formData,
             });
-            localStorage.setItem('evaluz_last_sync', JSON.stringify({
-                name: dirHandle.name,
-                date: new Date().toLocaleString('cs-CZ')
-            }));
-
-            setToast({ message: msg, type: totalFiles > 0 || newClassesCount > 0 || newScenariosCount > 0 ? 'success' : 'error' });
-
-            if (totalFiles > 0) {
-                window.dispatchEvent(new CustomEvent('evaluz-sync-complete'));
-            }
-
-            setTimeout(() => setToast(null), 8000);
-        } catch (e: any) {
-            if (e.name !== 'AbortError') {
-                console.error('HDD Sync Error:', e);
-                setToast({ message: 'Nastala chyba při synchronizaci. Zkontrolujte strukturu složek.', type: 'error' });
-                setTimeout(() => setToast(null), 6000);
-            }
-        } finally {
-            setIsSyncing(false);
+          }
         }
-    };
+      }
 
-    const isFileSystemApiSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+      saveClasses(currentClasses);
+      const msg = totalFiles > 0
+        ? `Sync dokončen! ${newClassesCount > 0 ? newClassesCount + ' nových tříd, ' : ''}${newScenariosCount > 0 ? newScenariosCount + ' nových situací, ' : ''}${totalFiles} souborů nahráno.`
+        : newClassesCount > 0 || newScenariosCount > 0
+          ? `Struktura synchronizována (${newClassesCount} tříd, ${newScenariosCount} situací). Žádné dokumenty k nahrání.`
+          : 'Žádné nové položky nalezeny. Zkontrolujte strukturu složek.';
 
-    const handleSelectAndSync = async () => {
-        if (!isFileSystemApiSupported) {
-            setToast({ message: 'Synchronizace s PC vyžaduje HTTPS (zabezpečené připojení) nebo localhost.', type: 'error' });
-            setTimeout(() => setToast(null), 6000);
-            return;
+      const syncInfo = { name: dirHandle.name, date: new Date().toLocaleString('cs-CZ') };
+      setLastSyncInfo(syncInfo);
+      localStorage.setItem('evaluz_last_sync', JSON.stringify(syncInfo));
+      setToast({ message: msg, type: totalFiles > 0 || newClassesCount > 0 || newScenariosCount > 0 ? 'success' : 'error' });
+      if (totalFiles > 0) window.dispatchEvent(new CustomEvent('evaluz-sync-complete'));
+      setTimeout(() => setToast(null), 8000);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        setToast({ message: 'Nastala chyba při synchronizaci.', type: 'error' });
+        setTimeout(() => setToast(null), 6000);
+      }
+    } finally { setIsSyncing(false); }
+  };
+
+  const isFileSystemApiSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+
+  const handleSelectAndSync = async () => {
+    if (!isFileSystemApiSupported) {
+      setToast({ message: 'Synchronizace vyžaduje HTTPS nebo localhost.', type: 'error' });
+      setTimeout(() => setToast(null), 6000);
+      return;
+    }
+    try {
+      const dirHandle = await (window as any).showDirectoryPicker();
+      setSyncDirHandle(dirHandle);
+      await performSync(dirHandle);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') console.error('Directory Picker Error:', e);
+    }
+  };
+
+  const handleDirectSync = async () => {
+    if (syncDirHandle) await performSync(syncDirHandle);
+    else await handleSelectAndSync();
+  };
+
+  return (
+    <aside className={`sidebar${isCollapsed ? ' sidebar--collapsed' : ''}`}>
+      {/* Toggle button */}
+      <button
+        className="sidebar-toggle"
+        style={isCollapsed
+          ? { position: 'static', margin: '10px auto 0', display: 'flex', alignSelf: 'center' }
+          : { position: 'absolute', right: 4, top: 12, zIndex: 9999 }
         }
-        try {
-            const dirHandle = await (window as any).showDirectoryPicker();
-            setSyncDirHandle(dirHandle);
-            await performSync(dirHandle);
-        } catch (e: any) {
-            if (e.name !== 'AbortError') console.error('Directory Picker Error:', e);
-        }
-    };
+        onClick={handleCollapseToggle}
+        title={isCollapsed ? 'Rozbalit sidebar' : 'Sbalit sidebar'}
+      >
+        <Icon icon={isCollapsed ? faChevronRight : faChevronLeft} size="xs" />
+      </button>
 
-    const handleDirectSync = async () => {
-        if (syncDirHandle) {
-            await performSync(syncDirHandle);
-        } else {
-            await handleSelectAndSync();
-        }
-    };
-
-    return (
-        <aside className={`bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col shadow-sm z-10 transition-all duration-300 relative ${isCollapsed ? 'w-[68px]' : 'w-72'}`}>
-            <button
-                onClick={() => setIsCollapsed(!isCollapsed)}
-                className="absolute -right-3 top-4 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-full p-1 text-slate-400 dark:text-slate-300 hover:text-[#002855] dark:hover:text-blue-300 hover:border-[#002855] dark:hover:border-blue-400 transition-colors z-20 shadow-sm"
-            >
-                {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
-            <div className={`p-4 border-b border-slate-100 dark:border-slate-700 flex flex-col gap-2 ${isCollapsed ? 'items-center' : ''}`}>
-                {!isCollapsed && <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Pracovní prostor</h2>}
-
-                {!isCollapsed ? (
-                    <>
-                        <div className="flex gap-1.5">
-                            <button
-                                onClick={handleDirectSync}
-                                disabled={isSyncing}
-                                className={`flex-1 flex items-center justify-center gap-2 py-2 border text-sm font-semibold whitespace-nowrap shadow-sm transition-colors rounded-lg disabled:opacity-50 relative group ${syncDirHandle
-                                    ? 'bg-[#002855] text-white border-[#002855] hover:bg-[#003a7a]'
-                                    : 'bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                    }`}
-                                title={syncDirHandle ? `Synchronizovat složku: ${syncDirHandle.name}` : 'Klikněte pro výběr složky a synchronizaci'}
-                            >
-                                {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <HardDrive className="w-4 h-4" />}
-                                {isSyncing ? 'Synchronizuji...' : 'Sync ÚZ v PC'}
-                                {syncDirHandle && !isSyncing && (
-                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white dark:border-slate-800 rounded-full shadow-sm" />
-                                )}
-                            </button>
-                            <button
-                                onClick={handleSelectAndSync}
-                                className={`p-2 border rounded-lg transition-colors ${syncDirHandle
-                                    ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-100'
-                                    : 'text-slate-400 hover:text-[#002855] dark:hover:text-blue-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                    }`}
-                                title="Změnit cílovou složku pro synchronizaci"
-                            >
-                                <Folder className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setShowSyncHelp(!showSyncHelp)}
-                                className="p-2 text-slate-400 hover:text-[#002855] dark:hover:text-blue-300 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                                title="Nápověda ke struktuře složek"
-                            >
-                                <HelpCircle className="w-4 h-4" />
-                            </button>
-                        </div>
-                        {showSyncHelp && (
-                            <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                                <p className="font-bold text-[#002855] dark:text-[#facc15] mb-1">📁 Požadovaná struktura složek:</p>
-                                <code className="block bg-white dark:bg-slate-800 p-2 rounded text-[11px] font-mono mb-2">
-                                    Kořenová složka/<br />
-                                    &nbsp;&nbsp;├── ZOP 02-2026/<br />
-                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── MS1 - Téma/<br />
-                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── student1.docx<br />
-                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└── student2.pdf<br />
-                                    &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└── MS2 - Téma/<br />
-                                    &nbsp;&nbsp;└── ZOP 03-2026/<br />
-                                </code>
-                                <p className="text-slate-500 dark:text-slate-400 mb-1">Podporované formáty: <strong>.docx, .doc, .pdf, .rtf</strong></p>
-                                <p className="text-red-500 dark:text-red-400 font-semibold">⚠ Nenazývejte složky s lomítkem „/" (např. ZOP 02/2026). Na macOS jsou pro prohlížeč neviditelné! Použijte pomlčku: ZOP 02-2026</p>
-                                {!isFileSystemApiSupported && (
-                                    <p className="mt-2 p-2 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded font-bold">
-                                        ⚠ Prohlížeč blokuje přístup k souborům (showDirectoryPicker) z důvodu nezabezpečeného připojení (HTTP). Pro funkční synchronizaci s HDD je NUTNÉ používat HTTPS.
-                                    </p>
-                                )}
-                            </div>
-                        )}
-                    </>
-                ) : (
-                    <button
-                        onClick={() => setIsCollapsed(false)}
-                        className="w-full flex items-center justify-center p-2 text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
-                        title="Sync ÚZ v PC"
-                    >
-                        <HardDrive className="w-5 h-5" />
-                    </button>
-                )}
+      {/* Sync sekce */}
+      <div style={{ padding: '12px', borderBottom: '1px solid var(--border-color)' }}>
+        {!isCollapsed ? (
+          <>
+            <div style={{ display: 'flex', gap: 6, paddingRight: 40 }}>
+              <button
+                className={`btn btn--sm${syncDirHandle ? ' btn--primary' : ' btn--outline'}`}
+                style={{ flex: 1 }}
+                onClick={handleDirectSync}
+                disabled={isSyncing}
+                title={syncDirHandle ? `Synchronizovat: ${syncDirHandle.name}` : 'Vybrat složku a synchronizovat'}
+              >
+                <Icon icon={isSyncing ? faRotate : faHardDrive} spin={isSyncing} />
+                {isSyncing ? 'Synchronizuji...' : 'Sync ÚZ v PC'}
+              </button>
+              <button
+                className="btn btn--sm btn--outline"
+                onClick={handleSelectAndSync}
+                title="Změnit cílovou složku"
+              >
+                <Icon icon={faFolder} />
+              </button>
+              <button
+                className="btn btn--sm btn--outline"
+                onClick={() => setShowSyncHelp(!showSyncHelp)}
+                title="Nápověda ke struktuře složek"
+              >
+                <Icon icon={faCircleQuestion} />
+              </button>
             </div>
-
-            <div className="p-4 border-b border-slate-100 dark:border-slate-700">
-                {!isCollapsed ? (
-                    editMode?.type === 'new_class' ? (
-                        <input
-                            autoFocus
-                            value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
-                            onKeyDown={handleInputKeyDown}
-                            onBlur={handleSaveEdit}
-                            placeholder="Název třídy (Enter pro uložení)"
-                            className="w-full px-3 py-1.5 border border-[#002855]/30 dark:border-slate-600 rounded-md text-sm outline-none focus:border-[#002855] dark:focus:border-[#D4AF37] focus:ring-1 focus:ring-[#002855] dark:focus:ring-[#D4AF37] bg-white dark:bg-slate-800"
-                        />
-                    ) : (
-                        <button
-                            onClick={(e) => startEdit(e, { type: 'new_class' })}
-                            className="w-full flex items-center justify-center gap-2 py-2 border-2 border-[#002855] dark:border-[#D4AF37] text-[#002855] dark:text-[#facc15] rounded-lg hover:bg-[#002855] dark:hover:bg-[#D4AF37] hover:text-white transition-colors text-sm font-semibold whitespace-nowrap"
-                        >
-                            <Folder className="w-4 h-4" />
-                            + Nová třída
-                        </button>
-                    )
-                ) : (
-                    <button
-                        onClick={() => setIsCollapsed(false)}
-                        className="w-full flex items-center justify-center p-2 text-[#002855] dark:text-[#facc15] border-2 border-[#002855] dark:border-[#D4AF37] rounded-lg hover:bg-[#002855] dark:hover:bg-[#D4AF37] hover:text-white transition-colors"
-                        title="Přidat třídu"
-                    >
-                        <Folder className="w-5 h-5" />
-                    </button>
-                )}
-            </div>
-            <div className="p-4 flex-1 overflow-y-auto overflow-x-hidden">
-                <div className="space-y-4">
-                    {classes.map(cls => (
-                        <div key={cls.id} className="space-y-1">
-                            {/* Class Folder */}
-                            <div
-                                className={`relative group/class flex items-center px-2 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-md transition-colors ${isCollapsed ? 'justify-center' : 'justify-between'}`}
-                                title={isCollapsed ? cls.name : undefined}
-                            >
-                                <div
-                                    className={`flex items-center gap-2 cursor-pointer ${isCollapsed ? '' : 'flex-1'}`}
-                                    onClick={(e) => {
-                                        if (isCollapsed) {
-                                            setIsCollapsed(false);
-                                            // Automatically expand this class when opening sidebar via folder click
-                                            if (!cls.expanded) toggleClassExpansion(cls.id, e);
-                                        } else {
-                                            toggleClassExpansion(cls.id, e);
-                                        }
-                                    }}
-                                >
-                                    {!isCollapsed && <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${cls.expanded ? '' : '-rotate-90'}`} />}
-                                    <Folder className="w-4 h-4 text-[#D4AF37] flex-shrink-0" />
-                                    {!isCollapsed && (editMode?.type === 'rename_class' && editMode.classId === cls.id ? (
-                                        <input
-                                            autoFocus
-                                            value={editValue}
-                                            onChange={e => setEditValue(e.target.value)}
-                                            onKeyDown={handleInputKeyDown}
-                                            onBlur={handleSaveEdit}
-                                            onClick={e => e.stopPropagation()}
-                                            className="font-medium text-sm bg-transparent border-b border-[#002855] outline-none flex-1 max-w-[140px]"
-                                        />
-                                    ) : (
-                                        <span className="font-medium text-sm truncate max-w-[160px]">{cls.name}</span>
-                                    ))}
-                                </div>
-                                {!isCollapsed && (
-                                    <div className="relative">
-                                        <DropdownMenu.Root>
-                                            <DropdownMenu.Trigger asChild>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                    }}
-                                                    className="opacity-0 group-hover/class:opacity-100 p-1 text-slate-400 hover:text-[#002855] transition-all rounded-md hover:bg-slate-200 focus:opacity-100 outline-none data-[state=open]:opacity-100 data-[state=open]:bg-slate-200"
-                                                    title="Možnosti třídy"
-                                                >
-                                                    <MoreVertical className="w-3.5 h-3.5" />
-                                                </button>
-                                            </DropdownMenu.Trigger>
-
-                                            <DropdownMenu.Portal>
-                                                <DropdownMenu.Content
-                                                    onCloseAutoFocus={(e) => e.preventDefault()}
-                                                    className="w-44 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-100 py-1.5 z-50 animate-in fade-in-80 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2"
-                                                    sideOffset={5}
-                                                    align="end"
-                                                >
-                                                    <DropdownMenu.Item
-                                                        onSelect={(e) => startEdit(undefined, { type: 'rename_class', classId: cls.id, currentName: cls.name }, cls.name)}
-                                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 flex items-center gap-2 cursor-pointer outline-none data-[highlighted]:bg-slate-50 dark:bg-slate-800/50"
-                                                    >
-                                                        <Edit2 className="w-4 h-4 text-slate-400" /> Přejmenovat
-                                                    </DropdownMenu.Item>
-                                                    <DropdownMenu.Separator className="h-px bg-slate-100 my-1" />
-                                                    <DropdownMenu.Item
-                                                        onSelect={() => deleteClass(cls.id, cls.name)}
-                                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
-                                                    >
-                                                        <Trash2 className="w-4 h-4 text-red-500" /> Smazat třídu
-                                                    </DropdownMenu.Item>
-                                                </DropdownMenu.Content>
-                                            </DropdownMenu.Portal>
-                                        </DropdownMenu.Root>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Scenarios */}
-                            {!isCollapsed && cls.expanded && (
-                                <div className="pl-6 space-y-1">
-                                    {cls.scenarios.map(scen => {
-                                        const isSelected = scen.id === activeScenarioId;
-
-                                        return (
-                                            <div
-                                                key={scen.id}
-                                                onClick={() => onSelectScenario(cls.id, scen.id)}
-                                                className={`relative group/scen flex items-center justify-between px-2 py-1.5 rounded-md transition-colors cursor-pointer ${isSelected
-                                                    ? 'bg-[#002855]/5 dark:bg-[#facc15]/10 text-[#002855] dark:text-[#facc15] border-l-2 border-[#002855] dark:border-[#D4AF37]'
-                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
-                                                    }`}
-                                            >
-                                                <div className="flex items-center gap-2 pl-1 flex-1">
-                                                    <FileText className={`w-4 h-4 ${isSelected ? 'text-[#002855] dark:text-[#facc15]' : 'text-slate-400'}`} />
-                                                    {editMode?.type === 'rename_scenario' && editMode.scenId === scen.id ? (
-                                                        <input
-                                                            autoFocus
-                                                            value={editValue}
-                                                            onChange={e => setEditValue(e.target.value)}
-                                                            onKeyDown={handleInputKeyDown}
-                                                            onBlur={handleSaveEdit}
-                                                            onClick={e => e.stopPropagation()}
-                                                            className="font-medium text-sm bg-transparent border-b border-[#002855] outline-none flex-1 max-w-[140px]"
-                                                        />
-                                                    ) : (
-                                                        <span className={`text-sm ${isSelected ? 'font-semibold' : ''}`}>{scen.name}</span>
-                                                    )}
-                                                </div>
-                                                <div className="relative">
-                                                    <DropdownMenu.Root>
-                                                        <DropdownMenu.Trigger asChild>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    e.stopPropagation();
-                                                                }}
-                                                                className={`opacity-0 group-hover/scen:opacity-100 p-1 transition-all rounded-md focus:opacity-100 outline-none data-[state=open]:opacity-100 data-[state=open]:bg-slate-200 ${isSelected
-                                                                    ? 'text-[#002855]/60 hover:text-[#002855] hover:bg-[#002855]/10 data-[state=open]:bg-[#002855]/10'
-                                                                    : 'text-slate-400 hover:text-[#002855] hover:bg-slate-200'
-                                                                    }`}
-                                                            >
-                                                                <MoreVertical className="w-3.5 h-3.5" />
-                                                            </button>
-                                                        </DropdownMenu.Trigger>
-
-                                                        <DropdownMenu.Portal>
-                                                            <DropdownMenu.Content
-                                                                onCloseAutoFocus={(e) => e.preventDefault()}
-                                                                className="w-44 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-100 py-1.5 z-50 animate-in fade-in-80 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2"
-                                                                sideOffset={5}
-                                                                align="end"
-                                                            >
-                                                                <DropdownMenu.Item
-                                                                    onSelect={(e) => startEdit(undefined, { type: 'rename_scenario', classId: cls.id, scenId: scen.id, currentName: scen.name }, scen.name)}
-                                                                    className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 flex items-center gap-2 cursor-pointer outline-none data-[highlighted]:bg-slate-50 dark:bg-slate-800/50"
-                                                                >
-                                                                    <Edit2 className="w-4 h-4 text-slate-400" /> Přejmenovat
-                                                                </DropdownMenu.Item>
-                                                                <DropdownMenu.Item
-                                                                    onSelect={() => duplicateScenario(cls.id, scen.id)}
-                                                                    className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 flex items-center gap-2 cursor-pointer outline-none data-[highlighted]:bg-slate-50 dark:bg-slate-800/50"
-                                                                >
-                                                                    <Copy className="w-4 h-4 text-slate-400" /> Duplikovat
-                                                                </DropdownMenu.Item>
-                                                                <DropdownMenu.Separator className="h-px bg-slate-100 my-1" />
-                                                                <DropdownMenu.Item
-                                                                    onSelect={() => deleteScenario(cls.id, scen.id, scen.name)}
-                                                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
-                                                                >
-                                                                    <Trash2 className="w-4 h-4 text-red-500" /> Smazat
-                                                                </DropdownMenu.Item>
-                                                            </DropdownMenu.Content>
-                                                        </DropdownMenu.Portal>
-                                                    </DropdownMenu.Root>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-
-                                    {/* Add Scenario Button */}
-                                    <div className="pt-1 pl-1">
-                                        {editMode?.type === 'new_scenario' && editMode.classId === cls.id ? (
-                                            <input
-                                                autoFocus
-                                                value={editValue}
-                                                onChange={e => setEditValue(e.target.value)}
-                                                onKeyDown={handleInputKeyDown}
-                                                onBlur={handleSaveEdit}
-                                                placeholder="Název (MS/OOP: Téma)"
-                                                className="w-full px-2 py-1.5 border border-[#002855]/30 rounded-md text-sm outline-none focus:border-[#002855] focus:ring-1 focus:ring-[#002855] mt-1"
-                                            />
-                                        ) : (
-                                            <button
-                                                onClick={(e) => startEdit(e, { type: 'new_scenario', classId: cls.id })}
-                                                className="flex items-center gap-2 px-2 py-1.5 w-full text-left text-slate-400 hover:text-[#D4AF37] hover:bg-slate-50 dark:bg-slate-800/50 rounded-md transition-colors text-sm font-medium cursor-pointer"
-                                            >
-                                                <FileText className="w-4 h-4 opacity-50" />
-                                                + Nová modelová situace
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* Toast Notification */}
-            {toast && (
-                <div className={`absolute bottom-4 left-4 right-4 p-3 rounded-lg shadow-lg border flex items-start gap-2 text-sm animate-in slide-in-from-bottom-4 z-50 ${toast.type === 'success'
-                    ? 'bg-green-50 border-green-200 text-green-800'
-                    : 'bg-red-50 border-red-200 text-red-800'
-                    }`}>
-                    {toast.type === 'success'
-                        ? <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                        : <XCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
-                    }
-                    <span className="flex-1">{toast.message}</span>
-                    <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 dark:text-slate-300">
-                        <XCircle className="w-3.5 h-3.5" />
-                    </button>
-                </div>
+            {lastSyncInfo && !showSyncHelp && (
+              <div className="sidebar-sync">
+                <Icon icon={faCircleCheck} style={{ color: 'var(--color-positive)' }} size="xs" />
+                Sync: {lastSyncInfo.name} · {lastSyncInfo.date}
+              </div>
             )}
-        </aside>
-    );
+            {showSyncHelp && (
+              <div className="alert alert--primary" style={{ marginTop: 8, fontSize: '0.75rem' }}>
+                <div>
+                  <strong>Požadovaná struktura složek:</strong>
+                  <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', background: 'var(--bg-surface-2)', padding: 8, borderRadius: 4, margin: '4px 0', whiteSpace: 'pre-wrap' }}>
+                    {`Kořenová složka/\n  ├── ZOP 02-2026/\n  │   ├── MS1 - Téma/\n  │   │   ├── student1.docx\n  │   │   └── student2.pdf\n  │   └── MS2 - Téma/\n  └── ZOP 03-2026/`}
+                  </pre>
+                  <p style={{ margin: 0, color: 'var(--color-warning)' }}>
+                    Nepoužívejte lomítko v názvech složek (ZOP 02-2026, ne 02/2026).
+                  </p>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <button
+            className="btn btn--sm btn--outline btn--icon-only"
+            style={{ width: '100%' }}
+            onClick={handleDirectSync}
+            disabled={isSyncing}
+            title="Sync ÚZ v PC"
+          >
+            <Icon icon={isSyncing ? faRotate : faHardDrive} spin={isSyncing} />
+          </button>
+        )}
+      </div>
+
+      {/* Nová třída */}
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-color)' }}>
+        {!isCollapsed ? (
+          editMode?.type === 'new_class' ? (
+            <input
+              autoFocus
+              value={editValue}
+              onChange={e => setEditValue(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              onBlur={handleSaveEdit}
+              placeholder="Název třídy (Enter)"
+              className="form-control form-control--sm"
+            />
+          ) : (
+            <button
+              className="sidebar-add-btn"
+              onClick={(e) => startEdit(e, { type: 'new_class' })}
+            >
+              <Icon icon={faPlus} size="xs" />
+              Nová třída
+            </button>
+          )
+        ) : (
+          <button
+            className="btn btn--sm btn--outline btn--icon-only"
+            style={{ width: '100%' }}
+            onClick={() => { setIsCollapsed(false); localStorage.setItem('upvsp_sidebar_collapsed', 'false'); }}
+            title="Přidat třídu"
+          >
+            <Icon icon={faPlus} size="xs" />
+          </button>
+        )}
+      </div>
+
+      {/* Seznam tříd */}
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
+        {classes.map(cls => (
+          <div key={cls.id} className="sidebar-class">
+            {/* Hlavička třídy */}
+            <div
+              className="sidebar-class__header"
+              title={isCollapsed ? cls.name : undefined}
+              onClick={(e) => {
+                if (isCollapsed) {
+                  setIsCollapsed(false);
+                  localStorage.setItem('upvsp_sidebar_collapsed', 'false');
+                  if (!cls.expanded) toggleClassExpansion(cls.id, e);
+                } else {
+                  toggleClassExpansion(cls.id, e);
+                }
+              }}
+            >
+              {!isCollapsed && (
+                <Icon
+                  icon={cls.expanded ? faChevronDown : faChevronRight}
+                  className="sidebar-class__chevron"
+                  size="xs"
+                />
+              )}
+              <Icon
+                icon={cls.expanded ? faFolderOpen : faFolder}
+                className="sidebar-class__icon"
+                size="sm"
+              />
+              {!isCollapsed && (
+                editMode?.type === 'rename_class' && editMode.classId === cls.id ? (
+                  <input
+                    autoFocus
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={handleInputKeyDown}
+                    onBlur={handleSaveEdit}
+                    onClick={e => e.stopPropagation()}
+                    className="form-control"
+                    style={{ fontSize: '0.825rem', height: 28, padding: '0 6px', flex: 1 }}
+                  />
+                ) : (
+                  <span className="sidebar-class__name">{cls.name}</span>
+                )
+              )}
+              {!isCollapsed && (
+                <div className="sidebar-class__actions">
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        className="sidebar-icon-btn"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        title="Možnosti třídy"
+                      >
+                        <Icon icon={faEllipsisVertical} size="xs" />
+                      </button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content className="dropdown-content" sideOffset={4} align="end">
+                        <DropdownMenu.Item
+                          className="dropdown-item"
+                          onSelect={() => startEdit(undefined, { type: 'rename_class', classId: cls.id, currentName: cls.name }, cls.name)}
+                        >
+                          <Icon icon={faPen} size="xs" /> Přejmenovat
+                        </DropdownMenu.Item>
+                        <div className="dropdown-item--separator" role="separator" />
+                        <DropdownMenu.Item
+                          className="dropdown-item dropdown-item--danger"
+                          onSelect={() => deleteClass(cls.id, cls.name)}
+                        >
+                          <Icon icon={faTrash} size="xs" /> Smazat třídu
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
+                </div>
+              )}
+            </div>
+
+            {/* Scénáře */}
+            {!isCollapsed && cls.expanded && (
+              <div className="sidebar-scenarios">
+                {cls.scenarios.map(scen => {
+                  const isSelected = scen.id === activeScenarioId;
+                  return (
+                    <div
+                      key={scen.id}
+                      className={`sidebar-scenarios__item${isSelected ? ' sidebar-scenarios__item--active' : ''}`}
+                      onClick={() => onSelectScenario(cls.id, scen.id)}
+                    >
+                      <Icon icon={faFileLines} className="sidebar-scenarios__item__icon" size="xs" />
+                      {editMode?.type === 'rename_scenario' && editMode.scenId === scen.id ? (
+                        <input
+                          autoFocus
+                          value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          onKeyDown={handleInputKeyDown}
+                          onBlur={handleSaveEdit}
+                          onClick={e => e.stopPropagation()}
+                          className="form-control"
+                          style={{ fontSize: '0.8rem', height: 26, padding: '0 6px', flex: 1 }}
+                        />
+                      ) : (
+                        <span className="sidebar-scenarios__name">{scen.name}</span>
+                      )}
+                      <div className="sidebar-scenarios__actions">
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger asChild>
+                            <button
+                              className="sidebar-icon-btn"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                            >
+                              <Icon icon={faEllipsisVertical} size="xs" />
+                            </button>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Portal>
+                            <DropdownMenu.Content className="dropdown-content" sideOffset={4} align="end">
+                              <DropdownMenu.Item
+                                className="dropdown-item"
+                                onSelect={() => startEdit(undefined, { type: 'rename_scenario', classId: cls.id, scenId: scen.id, currentName: scen.name }, scen.name)}
+                              >
+                                <Icon icon={faPen} size="xs" /> Přejmenovat
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Item
+                                className="dropdown-item"
+                                onSelect={() => duplicateScenario(cls.id, scen.id)}
+                              >
+                                <Icon icon={faCopy} size="xs" /> Duplikovat
+                              </DropdownMenu.Item>
+                              <div className="dropdown-item--separator" role="separator" />
+                              <DropdownMenu.Item
+                                className="dropdown-item dropdown-item--danger"
+                                onSelect={() => deleteScenario(cls.id, scen.id, scen.name)}
+                              >
+                                <Icon icon={faTrash} size="xs" /> Smazat
+                              </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Nová modelová situace */}
+                {editMode?.type === 'new_scenario' && editMode.classId === cls.id ? (
+                  <div style={{ padding: '4px 12px 4px 32px' }}>
+                    <input
+                      autoFocus
+                      value={editValue}
+                      onChange={e => setEditValue(e.target.value)}
+                      onKeyDown={handleInputKeyDown}
+                      onBlur={handleSaveEdit}
+                      placeholder="Název (MS/OOP: Téma)"
+                      className="form-control"
+                      style={{ fontSize: '0.8rem', height: 28, padding: '0 8px' }}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    className="sidebar-add-btn"
+                    style={{ paddingLeft: 32, fontSize: '0.8rem' }}
+                    onClick={(e) => startEdit(e, { type: 'new_scenario', classId: cls.id })}
+                  >
+                    <Icon icon={faPlus} size="xs" />
+                    Nová modelová situace
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`alert alert--${toast.type === 'success' ? 'positive' : 'negative'}`}
+          style={{ position: 'absolute', bottom: 8, left: 8, right: 8, margin: 0, zIndex: 50 }}
+        >
+          <Icon
+            icon={toast.type === 'success' ? faCircleCheck : faCircleXmark}
+            className="alert__icon"
+          />
+          <span style={{ flex: 1, fontSize: '0.8rem' }}>{toast.message}</span>
+          <button
+            onClick={() => setToast(null)}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, color: 'inherit', opacity: 0.7 }}
+          >
+            <Icon icon={faXmark} size="xs" />
+          </button>
+        </div>
+      )}
+    </aside>
+  );
 }

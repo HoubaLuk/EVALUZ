@@ -1,6 +1,9 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { ChevronRight, CheckCircle2, Lock, UserPlus, LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
+import {
+  faLock, faRightToBracket, faEye, faEyeSlash, faSpinner,
+} from '@fortawesome/free-solid-svg-icons';
+import { Icon } from './components/Icon';
 
 import { Tab, ClassData, DEFAULT_CLASS_DATA } from './types';
 import { Header } from './components/Header';
@@ -21,6 +24,7 @@ export default function EvaluzDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('evaluation');
   const [selectedStudent, setSelectedStudent] = useState<number | null>(1); // Default to first student for demo
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Auth State
   const [authState, setAuthState] = useState<'CHECKING' | 'RECOGNIZED_EMPTY_DB' | 'LOGIN_REQUIRED' | 'AUTHENTICATED' | 'FORCE_PASSWORD_CHANGE'>('CHECKING');
@@ -209,16 +213,16 @@ export default function EvaluzDashboard() {
 
   if (authState === 'CHECKING') {
     return (
-      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center">
-        <Loader2 className="w-8 h-8 text-[#002855] animate-spin mb-4" />
-        <p className="text-slate-500 dark:text-slate-400 font-medium">Ověřování přístupu...</p>
+      <div className="main-layout" style={{ alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <div className="spinner spinner--lg" />
+        <p style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Ověřování přístupu...</p>
       </div>
     );
   }
 
   if (authState === 'RECOGNIZED_EMPTY_DB') {
     return (
-      <div className="min-h-screen bg-[#F8FAFC]">
+      <div className="main-layout">
         <AdminModal
           isOpen={isAdminOpen}
           onClose={() => { }}
@@ -236,50 +240,57 @@ export default function EvaluzDashboard() {
 
   if (authState === 'LOGIN_REQUIRED') {
     return (
-      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden">
-          <div className="bg-[#002855] px-6 py-6 text-center">
-            <Lock className="w-12 h-12 text-white/90 mx-auto mb-3" />
-            <h2 className="text-2xl font-bold text-white">Přihlášení do systému</h2>
-            <p className="text-blue-200 text-sm mt-1">EVALUZ</p>
+      <div className="main-layout" style={{ alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+        <div className="card" style={{ width: '100%', maxWidth: 420 }}>
+          <div className="card__header card__header--primary" style={{ flexDirection: 'column', alignItems: 'center', padding: '24px 24px 20px', gap: 8 }}>
+            <Icon icon={faLock} size="2x" />
+            <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Přihlášení do systému</h2>
+            <p style={{ margin: 0, fontSize: '0.8rem', opacity: 0.75 }}>EVALUZ — ÚPVSP</p>
           </div>
-          <form onSubmit={handleLogin} className="p-6">
-            {authError && <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">{authError}</div>}
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">E-mail vyučujícího</label>
-                <input type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent" />
+          <div className="card__body">
+            <form onSubmit={handleLogin}>
+              {authError && (
+                <div className="alert alert--negative" style={{ marginBottom: 16 }}>
+                  {authError}
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label">E-mail vyučujícího</label>
+                <input
+                  type="email" required
+                  value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+                  className="form-control"
+                />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Heslo</label>
-                <div className="relative">
+              <div className="form-group">
+                <label className="form-label">Heslo</label>
+                <div style={{ position: 'relative' }}>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={authPassword}
-                    onChange={e => setAuthPassword(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent"
+                    type={showPassword ? 'text' : 'password'} required
+                    value={authPassword} onChange={e => setAuthPassword(e.target.value)}
+                    className="form-control"
+                    style={{ paddingRight: 40 }}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:text-slate-300"
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
                     tabIndex={-1}
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    <Icon icon={showPassword ? faEyeSlash : faEye} />
                   </button>
                 </div>
               </div>
-            </div>
-
-            <button type="submit" disabled={authLoading} className="w-full mt-6 bg-[#002855] text-white py-2.5 rounded-md font-medium hover:bg-[#001f44] transition-colors flex justify-center items-center">
-              {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
-                <><LogIn className="w-5 h-5 mr-2" /> Vstoupit</>
-              )}
-            </button>
-          </form>
+              <div className="btn-group" style={{ marginTop: 20 }}>
+                <button type="submit" disabled={authLoading} className="btn btn--primary btn--lg" style={{ flex: 1, justifyContent: 'center' }}>
+                  {authLoading
+                    ? <><span className="spinner spinner--sm spinner--white" /> Přihlašuji...</>
+                    : <><Icon icon={faRightToBracket} /> Vstoupit</>
+                  }
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     );
@@ -316,54 +327,66 @@ export default function EvaluzDashboard() {
     };
 
     return (
-      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-xl shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden">
-          <div className="bg-[#D4AF37] px-6 py-6 text-center">
-            <Lock className="w-12 h-12 text-white/90 mx-auto mb-3" />
-            <h2 className="text-2xl font-bold text-white">Vynucená změna hesla</h2>
-            <p className="text-[#002855] text-sm mt-1 font-semibold">Z bezpečnostních důvodů (vyzývati si heslo)</p>
+      <div className="main-layout" style={{ alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+        <div className="card" style={{ width: '100%', maxWidth: 420 }}>
+          <div className="card__header card__header--warning" style={{ flexDirection: 'column', alignItems: 'center', padding: '24px 24px 20px', gap: 8 }}>
+            <Icon icon={faLock} size="2x" />
+            <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Vynucená změna hesla</h2>
+            <p style={{ margin: 0, fontSize: '0.8rem', opacity: 0.85 }}>Z bezpečnostních důvodů musíte nastavit nové heslo</p>
           </div>
-          <form onSubmit={handleChangePassword} className="p-6">
-            {authError && <div className="p-3 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">{authError}</div>}
-
-            <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">
-              Administrátor resetoval Vaše heslo, případně Vaše heslo expirovalo.
-              Prosím zadejte nové bezpečné heslo (min. 12 znaků, kombinace malých, velkých písmen a číslic).
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nové heslo</label>
-                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
+          <div className="card__body">
+            <form onSubmit={handleChangePassword}>
+              {authError && (
+                <div className="alert alert--negative" style={{ marginBottom: 16 }}>
+                  {authError}
+                </div>
+              )}
+              <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>
+                Administrátor resetoval Vaše heslo, případně Vaše heslo expirovalo.
+                Zadejte nové bezpečné heslo (min. 12 znaků, kombinace malých, velkých písmen a číslic).
+              </p>
+              <div className="form-group">
+                <label className="form-label">Nové heslo</label>
+                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} className="form-control" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Potvrzení nového hesla</label>
-                <input type="password" required value={newPasswordConfirm} onChange={e => setNewPasswordConfirm(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent" />
+              <div className="form-group">
+                <label className="form-label">Potvrzení nového hesla</label>
+                <input type="password" required value={newPasswordConfirm} onChange={e => setNewPasswordConfirm(e.target.value)} className="form-control" />
               </div>
-            </div>
-
-            <button type="submit" disabled={authLoading || !newPassword || !newPasswordConfirm} className="w-full mt-6 bg-[#002855] text-white py-2.5 rounded-md font-medium hover:bg-[#001f44] transition-colors flex justify-center items-center">
-              {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Změnit heslo a vstoupit'}
-            </button>
-          </form>
+              <div className="btn-group" style={{ marginTop: 20 }}>
+                <button type="submit" disabled={authLoading || !newPassword || !newPasswordConfirm} className="btn btn--positive btn--lg" style={{ flex: 1, justifyContent: 'center' }}>
+                  {authLoading ? <span className="spinner spinner--sm spinner--white" /> : null}
+                  Změnit heslo a vstoupit
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans flex flex-col transition-colors duration-200">
-      <Header 
-          setIsAdminOpen={setIsAdminOpen} 
-          lecturerName={lecturerName} 
-          isAdminUser={isAdminUser} 
-          activeTab={activeTab}
-          onOpenStatistics={() => setActiveTab(activeTab === 'statistics' ? 'evaluation' : 'statistics')} 
+    <div className="main-layout">
+      <Header
+        setIsAdminOpen={setIsAdminOpen}
+        lecturerName={lecturerName}
+        isAdminUser={isAdminUser}
+        activeTab={activeTab}
+        onOpenStatistics={() => setActiveTab(activeTab === 'statistics' ? 'evaluation' : 'statistics')}
+        setActiveTab={setActiveTab}
+        hasCriteria={hasCriteria}
+        hasEvaluations={hasEvaluations}
+        isMobileMenuOpen={isMobileMenuOpen}
+        setIsMobileMenuOpen={setIsMobileMenuOpen}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      {/* Mobilní overlay pro sidebar */}
+      {isMobileMenuOpen && (
+        <div className="sidebar-overlay sidebar-overlay--open" onClick={() => setIsMobileMenuOpen(false)} />
+      )}
+
+      <div className="content-area">
         {activeTab !== 'statistics' && (
           <Sidebar
             classes={classes}
@@ -374,80 +397,26 @@ export default function EvaluzDashboard() {
           />
         )}
 
-        {/* Main Content */}
-        <main className="flex-1 flex flex-col overflow-hidden">
-          {/* Header */}
-          {activeTab !== 'statistics' && (
-            <>
-              <div className="bg-white dark:bg-slate-800 px-8 py-6 border-b border-slate-200 dark:border-slate-700 transition-colors duration-200">
-                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-2">
-                  <span>{activeClass?.name || 'Nevybráno'}</span>
-                  <ChevronRight className="w-4 h-4" />
-                  <span className="text-[#002855] dark:text-[#facc15] font-medium">{activeScenario?.name || 'Vyberte situaci v postranním panelu'}</span>
-                </div>
-                <h2 className="text-3xl font-bold text-[#002855] dark:text-white">{activeScenario?.name || 'EVALUZ'}</h2>
-
-                <p className="text-slate-500 dark:text-slate-400 mt-1">Hodnocení úředních záznamů dle precizovaných kritérií.</p>
+        {/* Hlavní obsah */}
+        <main className="main-content">
+          {/* Breadcrumb + nadpis scénáře */}
+          {activeTab !== 'statistics' && activeScenarioId && (
+            <div className="card" style={{ marginBottom: 16, flexShrink: 0 }}>
+              <div className="card__body" style={{ padding: '12px 16px' }}>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', marginBottom: 4 }}>
+                  {activeClass?.name || 'Nevybráno'} › <span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>{activeScenario?.name}</span>
+                </p>
+                <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {activeScenario?.name || 'EVALUZ'}
+                </h2>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 2 }}>Hodnocení úředních záznamů dle precizovaných kritérií</p>
               </div>
-
-              {/* Workflow Stepper */}
-              <div className="px-8 py-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-between max-w-4xl mx-auto relative">
-                  {/* Connecting Line */}
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0"></div>
-                  <div
-                    className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-[#002855] dark:bg-[#D4AF37] rounded-full z-0 transition-all duration-300"
-                    style={{ width: activeTab === 'criteria' ? '0%' : activeTab === 'evaluation' ? '50%' : '100%' }}
-                  ></div>
-
-                  {/* Steps */}
-                  {[
-                    { id: 'criteria', num: '1', label: 'Precizace kritérií' },
-                    { id: 'evaluation', num: '2', label: 'Vyhodnocení ÚZ' },
-                    { id: 'analytics', num: '3', label: 'Analýza třídy' }
-                  ].map((step, index) => {
-                    const isActive = activeTab === step.id;
-                    let isCompleted = false;
-                    const _hasAnalytics = !!(activeScenarioId && cachedAnalytics[activeScenarioId] && cachedAnalytics[activeScenarioId].stats?.length > 0);
-
-                    if (index === 0) {
-                      isCompleted = hasCriteria;
-                    } else if (index === 1) {
-                      isCompleted = hasEvaluations || activeTab === 'analytics' || _hasAnalytics;
-                    } else if (index === 2) {
-                      isCompleted = _hasAnalytics;
-                    }
-
-                    const circleColorClass = isCompleted
-                      ? `bg-[#D4AF37] text-white overflow-hidden transition-all duration-300 ${isActive ? 'ring-4 ring-[#D4AF37]/20 shadow-md' : ''}`
-                      : isActive
-                        ? 'bg-[#002855] dark:bg-[#D4AF37] text-white ring-4 ring-[#002855]/20 dark:ring-[#D4AF37]/20 shadow-md transition-all duration-300'
-                        : 'bg-white dark:bg-slate-800 text-slate-400 border-2 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:border-slate-600 transition-all duration-300';
-
-                    return (
-                      <button
-                        key={step.id}
-                        onClick={() => setActiveTab(step.id as Tab)}
-                        className="relative z-10 flex flex-col items-center gap-2 group"
-                      >
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${circleColorClass}`}>
-                          {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.num}
-                        </div>
-                        <span className={`text-sm font-semibold transition-colors ${isActive ? 'text-[#002855] dark:text-[#facc15]' : isCompleted ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400'
-                          }`}>
-                          {step.label}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
+            </div>
           )}
 
-          {/* Tab Content Area */}
-          <div className="flex-1 overflow-hidden p-8 flex flex-col">
-            <div className={`flex-1 ${activeTab === 'criteria' ? 'flex flex-col' : 'hidden'}`}>
+          {/* Obsah záložek */}
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, display: activeTab === 'criteria' ? 'flex' : 'none', flexDirection: 'column' }}>
               <TabCriteria
                 scenarioId={activeScenarioId}
                 scenarioName={activeScenario?.name || null}
@@ -455,7 +424,7 @@ export default function EvaluzDashboard() {
               />
             </div>
 
-            <div className={`flex-1 ${activeTab === 'evaluation' ? 'flex flex-col' : 'hidden'}`}>
+            <div style={{ flex: 1, display: activeTab === 'evaluation' ? 'flex' : 'none', flexDirection: 'column' }}>
               <TabEvaluation
                 selectedStudent={selectedStudent}
                 setSelectedStudent={setSelectedStudent}
@@ -467,11 +436,9 @@ export default function EvaluzDashboard() {
               />
             </div>
 
-            <div className={`${activeTab === 'analytics' ? 'block' : 'hidden'}`}>
+            <div style={{ display: activeTab === 'analytics' ? 'block' : 'none' }}>
               <TabAnalytics
                 scenarioId={activeScenarioId}
-                className={activeClass?.name}
-                scenarioName={activeScenario?.name}
                 cachedData={activeScenarioId ? cachedAnalytics[activeScenarioId] : null}
                 onCacheData={(data) => {
                   if (activeScenarioId) {
@@ -490,8 +457,8 @@ export default function EvaluzDashboard() {
               />
             </div>
 
-            <div className={`${activeTab === 'statistics' ? 'block' : 'hidden'} h-full flex-1 overflow-visible`}>
-              <TabMonitor classes={classes} />
+            <div style={{ display: activeTab === 'statistics' ? 'block' : 'none', flex: 1 }}>
+              <TabMonitor />
             </div>
           </div>
         </main>

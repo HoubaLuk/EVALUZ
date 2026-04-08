@@ -1,27 +1,28 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { API_BASE_URL } from '../utils/api';
 
-import { UploadCloud, Wand2, CheckCircle2, AlertCircle, User, MessageSquareQuote, Download, Shield, X, XCircle, Loader2, MoreVertical, Trash2, Save, Pencil, GraduationCap, UserCheck, Hourglass, FileText, Upload, CheckSquare, PlayCircle, Clock, ShieldCheck } from 'lucide-react';
+import {
+  faCloudArrowUp, faWandMagicSparkles, faCircleCheck, faCircleExclamation,
+  faUser, faCommentDots, faDownload, faShield, faXmark, faCircleXmark,
+  faSpinner, faEllipsisVertical, faTrash, faFloppyDisk, faPencil,
+  faGraduationCap, faUserCheck, faHourglass, faFileLines, faUpload,
+  faSquareCheck, faCirclePlay, faClock, faShieldHalved,
+} from '@fortawesome/free-solid-svg-icons';
+import { Icon } from './Icon';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Student } from '../types';
 import { useDialog } from '../contexts/DialogContext';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode; content: string }) => {
     const [isVisible, setIsVisible] = useState(false);
-
     return (
         <div
-            className="relative flex items-center"
+            className="tooltip-container"
             onMouseEnter={() => setIsVisible(true)}
             onMouseLeave={() => setIsVisible(false)}
         >
             {children}
-            {isVisible && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-[#002855] text-white text-xs rounded-md whitespace-nowrap z-50 shadow-lg">
-                    {content}
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#002855]"></div>
-                </div>
-            )}
+            {isVisible && <div className="tooltip-box">{content}</div>}
         </div>
     );
 };
@@ -92,7 +93,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         let ws: WebSocket;
         const connectWs = () => {
             if (!lecturerId) return;
-            const wsUrl = API_BASE_URL.replace('http', 'ws') + `/evaluate/ws?lecturer_id=${lecturerId}`;
+            const wsToken = localStorage.getItem('upvsp_token') || '';
+            const wsUrl = API_BASE_URL.replace('http', 'ws') + `/evaluate/ws?lecturer_id=${lecturerId}&token=${encodeURIComponent(wsToken)}`;
             ws = new WebSocket(wsUrl);
             ws.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
@@ -721,131 +723,98 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
     return (
         <div
-            className={`h-full flex flex-col gap-6 max-w-[1500px] w-full mx-auto px-4 xl:px-8 relative transition-colors duration-200 ${isDragging ? 'bg-blue-50/50 rounded-2xl ring-4 ring-blue-500/20' : ''}`}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12, position: 'relative' }}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
         >
+            {/* Drag overlay */}
             {isDragging && (
-                <div className="absolute inset-0 bg-blue-500/10 backdrop-blur-sm z-40 rounded-2xl flex flex-col items-center justify-center border-4 border-dashed border-blue-500 pointer-events-none">
-                    <div className="bg-white dark:bg-slate-800 p-6 rounded-full shadow-2xl mb-4">
-                        <Upload className="w-16 h-16 text-blue-600 animate-bounce" />
-                    </div>
-                    <h2 className="text-3xl font-bold text-blue-800 drop-shadow-sm">Pusťte soubory zde</h2>
-                    <p className="text-blue-600 mt-2 font-medium">Podporované formáty: PDF, DOCX, RTF</p>
+                <div className="upload-zone upload-zone--active" style={{ position: 'absolute', inset: 0, zIndex: 40, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                    <Icon icon={faUpload} size="2x" />
+                    <strong>Pusťte soubory zde</strong>
+                    <span style={{ fontSize: '0.85rem' }}>Podporované formáty: PDF, DOCX, RTF</span>
                 </div>
             )}
 
-            {/* Global Success Toast Notifikace */}
+            {/* Toast */}
             {toastMessage && (
-                <div className="absolute top-0 right-1/2 translate-x-1/2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 z-50 animate-in fade-in slide-in-from-top-4">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                    <p className="font-semibold text-sm">{toastMessage}</p>
-                    <button onClick={() => setToastMessage(null)} className="p-1 hover:bg-emerald-100 rounded-md transition-colors ml-2">
-                        <X className="w-4 h-4" />
+                <div className="alert alert--positive" style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+                    <Icon icon={faCircleCheck} />
+                    <span>{toastMessage}</span>
+                    <button className="btn btn--sm btn--icon-only" style={{ marginLeft: 8, background: 'transparent', border: 'none', color: 'inherit' }} onClick={() => setToastMessage(null)}>
+                        <Icon icon={faXmark} />
                     </button>
                 </div>
             )}
-
 
             {/* Top Action Bar */}
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex items-center justify-between mt-2 transition-colors duration-200">
-                <div className="flex items-center gap-4">
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleFileChange}
-                        multiple
-                        accept=".docx,.rtf,.pdf"
-                        className="hidden"
-                    />
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-2 px-4 py-2 border-2 border-[#002855] text-[#002855] dark:border-[#D4AF37] dark:text-[#facc15] rounded-lg hover:bg-[#002855] dark:hover:bg-[#D4AF37] hover:text-white transition-colors text-sm font-semibold shadow-sm"
-                    >
-                        <Upload className="w-4 h-4" />
-                        Nahrát ÚZ
+            <div className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept=".docx,.rtf,.pdf" style={{ display: 'none' }} />
+                    <button className="btn btn--outline btn--sm" onClick={() => fileInputRef.current?.click()}>
+                        <Icon icon={faUpload} /> Nahrát ÚZ
                     </button>
-                    <button
-                        onClick={handleSelectAll}
-                        disabled={students.length === 0}
-                        className="flex items-center gap-2 px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 rounded-lg transition-colors text-sm font-medium disabled:opacity-50"
-                    >
+                    <button className="btn btn--outline btn--sm" onClick={handleSelectAll} disabled={students.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <input
                             type="checkbox"
                             checked={isAllSelected}
                             onChange={handleSelectAll}
                             disabled={students.length === 0}
-                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#002855] focus:ring-[#002855] disabled:opacity-50"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ cursor: 'pointer' }}
                         />
                         Vybrat všechny
                     </button>
-
                     {selectedIds.length > 0 && (
-                        <button
-                            onClick={handleBulkDelete}
-                            className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium border border-red-100 shadow-sm"
-                        >
-                            <Trash2 className="w-4 h-4" />
-                            Smazat vybrané ({selectedIds.length})
+                        <button className="btn btn--negative btn--sm" onClick={handleBulkDelete}>
+                            <Icon icon={faTrash} /> Smazat vybrané ({selectedIds.length})
                         </button>
                     )}
                 </div>
-                <div className="flex items-center gap-3">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
+                        className={`btn btn--lg${canEvaluate ? ' btn--warning' : ''}`}
                         onClick={handleBatchEvaluate}
                         disabled={!canEvaluate}
-                        className={`flex flex-col items-center justify-center px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md relative overflow-hidden min-w-[200px] ${!canEvaluate
-                            ? 'bg-slate-300 cursor-not-allowed'
-                            : 'bg-gradient-to-r from-[#D4AF37] to-[#C5A028] hover:opacity-90'
-                            }`}
+                        style={{ minWidth: 200, position: 'relative', overflow: 'hidden' }}
                     >
-                        <div className="flex items-center gap-2 relative z-10">
-                            {(isEvaluating && canEvaluate) ? <Wand2 className="w-4 h-4" /> : isEvaluating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                            <span>
-                                {(isEvaluating && canEvaluate) ? 'Přidat do fronty AI' : isEvaluating ? 'Hromadně AI...' : 'Vyhodnotit označené ÚZ'}
-                            </span>
-                        </div>
+                        {isEvaluating ? <span className="spinner spinner--sm spinner--white" /> : <Icon icon={faWandMagicSparkles} />}
+                        <span>{(isEvaluating && canEvaluate) ? 'Přidat do fronty AI' : isEvaluating ? 'Hromadně AI...' : 'Vyhodnotit označené ÚZ'}</span>
                         {isEvaluating && (
-                            <div className="absolute bottom-0 left-0 h-1 bg-white dark:bg-slate-800/30 transition-all duration-300" style={{ width: `${evaluationProgress}%` }}></div>
+                            <div style={{ position: 'absolute', bottom: 0, left: 0, height: 3, background: 'rgba(255,255,255,0.5)', width: `${evaluationProgress}%`, transition: 'width 0.3s' }} />
                         )}
                     </button>
                     {isEvaluating && (
-                        <button
-                            onClick={handleCancelEvaluation}
-                            disabled={isCancelling}
-                            className={`flex items-center gap-2 px-6 py-2.5 text-white rounded-lg transition-all text-sm font-bold shadow-md h-[40px] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 ${isCancelling
-                                ? 'bg-rose-400 cursor-wait'
-                                : 'bg-rose-600 hover:bg-rose-700'
-                                }`}
-                        >
-                            <XCircle className="w-4 h-4" />
-                            {isCancelling ? 'Zastavuji...' : 'Zastavit'}
+                        <button className={`btn btn--negative btn--lg${isCancelling ? ' btn--disabled' : ''}`} onClick={handleCancelEvaluation} disabled={isCancelling}>
+                            <Icon icon={faCircleXmark} /> {isCancelling ? 'Zastavuji...' : 'Zastavit'}
                         </button>
                     )}
                 </div>
             </div>
 
             {/* Two-Column Layout */}
-            <div className="flex-1 flex gap-6 min-h-[500px]">
+            <div style={{ flex: 1, display: 'flex', gap: 12, minHeight: 500, overflow: 'hidden' }}>
                 {/* Left Column: Student Roster (35%) */}
-                <div className="w-[35%] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
-                        <h3 className="font-semibold text-[#002855] dark:text-[#facc15]">Seznam studentů</h3>
-                        <span className="text-xs font-medium text-slate-400">{selectedIds.length}/{students.length}</span>
+                <div className="card" style={{ width: '35%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <div className="card__header card__header--primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>Seznam studentů</span>
+                        <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>{selectedIds.length}/{students.length}</span>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                    <div style={{ flex: 1, overflowY: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {students.length === 0 ? (
-                            <div className="p-4 text-center text-slate-400 text-sm">
+                            <div className="empty-state" style={{ padding: 16 }}>
                                 Žádné nahrané soubory. Klikněte na "Nahrát ÚZ".
                             </div>
                         ) : students.map(student => (
                             <div
                                 key={student.id}
-                                className={`w-full text-left px-3 py-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer group ${selectedStudent === student.id
-                                    ? 'bg-[#002855]/10 border border-[#002855]/20'
-                                    : 'hover:bg-slate-50 dark:bg-slate-800/50 border border-transparent'
-                                    }`}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 8,
+                                    padding: '8px 10px', borderRadius: 6, cursor: 'pointer',
+                                    background: selectedStudent === student.id ? 'var(--color-primary-light, rgba(15,82,125,0.08))' : 'transparent',
+                                    border: `1px solid ${selectedStudent === student.id ? 'var(--color-primary)' : 'transparent'}`,
+                                }}
                                 onClick={() => setSelectedStudent(student.id)}
                             >
                                 <input
@@ -854,64 +823,50 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     onChange={() => toggleStudent(student.id)}
                                     onClick={(e) => e.stopPropagation()}
                                     disabled={student.is_approved === true}
-                                    className={`w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#002855] focus:ring-[#002855] ${student.is_approved ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                    style={{ cursor: student.is_approved ? 'not-allowed' : 'pointer', opacity: student.is_approved ? 0.4 : 1 }}
                                 />
-                                <div className="flex-1 min-w-0 flex items-center justify-between group-inner">
-                                    <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
-                                        <p className={`text-sm font-medium truncate ${selectedStudent === student.id ? 'text-[#002855] dark:text-[#facc15]' : 'text-slate-700 dark:text-slate-300'}`}>
+                                <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <p style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: selectedStudent === student.id ? 'var(--color-primary)' : 'var(--text-primary)' }}>
                                             {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim()}
                                         </p>
                                         {!student.identita && student.status === 'evaluated' && (
                                             <Tooltip content="Identita studenta byla manuálně ověřena vyučujícím.">
-                                                <UserCheck className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                                                <Icon icon={faUserCheck} size="xs" style={{ color: 'var(--color-primary)' }} />
                                             </Tooltip>
                                         )}
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                                         {student.status === 'evaluated' && !student.is_approved ? (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-                                                <Clock className="w-3 h-3" /> K revizi
+                                            <span className="badge badge--warning" style={{ fontSize: '0.7rem' }}>
+                                                <Icon icon={faClock} size="xs" /> K revizi
                                             </span>
                                         ) : student.status === 'evaluated' && student.is_approved ? (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                                <CheckCircle2 className="w-3 h-3" /> Schváleno
+                                            <span className="badge badge--positive" style={{ fontSize: '0.7rem' }}>
+                                                <Icon icon={faCircleCheck} size="xs" /> Schváleno
                                             </span>
                                         ) : student.status === 'evaluating' ? (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-orange-50 text-orange-700 border border-orange-200 animate-pulse transition-all">
-                                                <Loader2 className="w-3 h-3 animate-spin" /> Zpracovává se
+                                            <span className="badge badge--light" style={{ fontSize: '0.7rem' }}>
+                                                <span className="spinner spinner--sm" /> Zpracovává se
                                             </span>
                                         ) : (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-red-50 text-red-700 border border-red-200">
-                                                <AlertCircle className="w-3 h-3" /> Nezpracováno
+                                            <span className="badge badge--negative" style={{ fontSize: '0.7rem' }}>
+                                                <Icon icon={faCircleExclamation} size="xs" /> Nezpracováno
                                             </span>
                                         )}
-
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger asChild>
-                                                <button
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="p-2 text-slate-400 hover:text-[#002855] hover:bg-slate-200 rounded-md transition-all opacity-30 group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100 outline-none"
-                                                >
-                                                    <MoreVertical className="w-3.5 h-3.5" />
+                                                <button className="btn btn--sm btn--icon-only btn--outline" onClick={(e) => e.stopPropagation()} style={{ opacity: 0.5 }}>
+                                                    <Icon icon={faEllipsisVertical} />
                                                 </button>
                                             </DropdownMenu.Trigger>
                                             <DropdownMenu.Portal>
-                                                <DropdownMenu.Content
-                                                    className="w-44 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-100 py-1.5 z-[100] animate-in fade-in-80 zoom-in-95"
-                                                    sideOffset={5}
-                                                    align="end"
-                                                >
-                                                    <DropdownMenu.Item
-                                                        onSelect={() => handleRenameClick(student)}
-                                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-slate-50 dark:bg-slate-800/50 border-b border-slate-50"
-                                                    >
-                                                        <Pencil className="w-3.5 h-3.5" /> Upravit jméno
+                                                <DropdownMenu.Content className="dropdown-content" sideOffset={5} align="end">
+                                                    <DropdownMenu.Item className="dropdown-item" onSelect={() => handleRenameClick(student)}>
+                                                        <Icon icon={faPencil} /> Upravit jméno
                                                     </DropdownMenu.Item>
-                                                    <DropdownMenu.Item
-                                                        onSelect={(e) => handleDeleteStudent(student.id, e as unknown as React.MouseEvent)}
-                                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer outline-none data-[highlighted]:bg-red-50"
-                                                    >
-                                                        <Trash2 className="w-3.5 h-3.5" /> Smazat ÚZ
+                                                    <DropdownMenu.Item className="dropdown-item dropdown-item--danger" onSelect={(e) => handleDeleteStudent(student.id, e as unknown as React.MouseEvent)}>
+                                                        <Icon icon={faTrash} /> Smazat ÚZ
                                                     </DropdownMenu.Item>
                                                 </DropdownMenu.Content>
                                             </DropdownMenu.Portal>
@@ -923,104 +878,100 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     </div>
                 </div>
 
-                {/* Right Column: The Full-Width Evaluation Canvas (65%) */}
-                <div className="w-[65%] flex flex-col gap-4">
+                {/* Right Column: Evaluation Canvas (65%) */}
+                <div style={{ width: '65%', display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
                     {activeStudentData && activeStudentData.status === 'evaluated' ? (
                         <>
-                            {/* Header */}
-                            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
-                                        <User className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+                            {/* Student header */}
+                            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-color)' }}>
+                                        <Icon icon={faUser} />
                                     </div>
                                     <div>
-                                        <h2 className="text-xl font-bold text-[#002855] dark:text-[#facc15] flex items-center gap-2">
+                                        <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
                                             Hodnocení: {activeStudentData.identita?.prijmeni ? `${activeStudentData.identita.prijmeni.toUpperCase()} ${activeStudentData.identita.jmeno || ''}, ${activeStudentData.identita.hodnost || ''}` : activeStudentData.cleanedName || activeStudentData.name}
                                             {(!activeStudentData.identita && activeStudentData.status === 'evaluated') && (
                                                 <Tooltip content="Identita studenta byla manuálně ověřena vyučujícím.">
-                                                    <UserCheck className="w-5 h-5 text-blue-500" />
+                                                    <Icon icon={faUserCheck} size="xs" />
                                                 </Tooltip>
                                             )}
                                         </h2>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">{scenarioName || 'Evaluováno dynamicky'}</p>
+                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>{scenarioName || 'Evaluováno dynamicky'}</p>
                                     </div>
-
                                 </div>
-                                <div className="flex flex-col items-end">
-                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Celkové skóre</span>
-                                    <div className="bg-[#002855] text-white px-4 py-1.5 rounded-lg font-bold text-lg shadow-inner">
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Celkové skóre</span>
+                                    <div className="badge badge--primary" style={{ fontSize: '1rem', padding: '4px 12px' }}>
                                         {activeStudentData.score} / {activeStudentData.maxScore} b.
                                     </div>
                                 </div>
                             </div>
 
                             {/* AI Evaluation Table */}
-                            <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
-                                <div className="p-4 border-b border-slate-100 bg-[#002855] text-white flex items-center gap-2">
-                                    <Wand2 className="w-5 h-5 text-[#D4AF37]" />
-                                    <h3 className="font-semibold text-base tracking-wide">Výsledky hodnocení AI aplikací EVALUZ</h3>
+                            <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                                <div className="card__header card__header--primary" style={{ gap: 8 }}>
+                                    <Icon icon={faWandMagicSparkles} />
+                                    <span>Výsledky hodnocení AI aplikací EVALUZ</span>
                                 </div>
-                                <div className="flex-1 overflow-y-auto">
-                                    <table className="w-full text-left border-collapse">
+                                <div style={{ flex: 1, overflowY: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                                         <thead>
-                                            <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                                                <th className="px-6 py-4 font-medium w-1/4">Kritérium</th>
-                                                <th className="px-6 py-4 font-medium text-center w-24">Splněno</th>
-                                                <th className="px-6 py-4 font-medium">Zdůvodnění</th>
-                                                <th className="px-6 py-4 font-medium text-center w-24">Body</th>
+                                            <tr style={{ background: 'var(--bg-surface-2)', borderBottom: '1px solid var(--border-color)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
+                                                <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'left', width: '25%' }}>Kritérium</th>
+                                                <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'center', width: 80 }}>Splněno</th>
+                                                <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'left' }}>Zdůvodnění</th>
+                                                <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'center', width: 80 }}>Body</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-100">
+                                        <tbody>
                                             {activeStudentData.evaluationDetails?.map((detail, idx) => (
-                                                <tr key={idx} className={`hover:bg-slate-50 dark:bg-slate-800/50/50 transition-colors ${detail.upraveno_lektorem ? 'bg-blue-50/30' : ''}`}>
-                                                    <td className="px-6 py-5 text-sm font-medium text-[#002855] dark:text-white align-top">
-                                                        <div className="flex items-center gap-2">
-                                                            {detail.nazev}
-                                                        </div>
+                                                <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)', background: detail.upraveno_lektorem ? 'rgba(15,82,125,0.04)' : 'transparent' }}>
+                                                    <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-primary)', verticalAlign: 'top' }}>
+                                                        {detail.nazev}
                                                     </td>
-                                                    <td className="px-6 py-5 text-center align-top relative">
-                                                        <div className="flex items-center justify-center gap-1.5">
+                                                    <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                                                             {detail.body > 0 ? (
-                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 shadow-sm">
-                                                                    <CheckCircle2 className="w-5 h-5" />
+                                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: 'rgba(23,135,84,0.12)', color: 'var(--color-positive)' }}>
+                                                                    <Icon icon={faCircleCheck} size="sm" />
                                                                 </span>
                                                             ) : (
-                                                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-100 text-rose-700 shadow-sm">
-                                                                    <XCircle className="w-5 h-5" />
+                                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: 'rgba(197,21,21,0.1)', color: 'var(--color-negative)' }}>
+                                                                    <Icon icon={faCircleXmark} size="sm" />
                                                                 </span>
                                                             )}
                                                             {detail.upraveno_lektorem && (
-                                                                <span title="Zásah vyučujícího" className="inline-flex items-center justify-center relative">
-                                                                    <User className="w-5 h-5 text-blue-500 opacity-80" />
-                                                                    <GraduationCap className="w-3.5 h-3.5 text-blue-700 absolute -bottom-1 -right-1 drop-shadow-sm" />
-                                                                </span>
+                                                                <Tooltip content="Zásah vyučujícího">
+                                                                    <Icon icon={faGraduationCap} size="xs" style={{ color: 'var(--color-primary)' }} />
+                                                                </Tooltip>
                                                             )}
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-5 text-sm text-slate-600 dark:text-slate-300 align-top">
-                                                        <div className="flex items-start gap-3">
-                                                            <p className="leading-relaxed flex-1">{detail.oduvodneni}</p>
+                                                    <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', verticalAlign: 'top' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                                            <p style={{ lineHeight: 1.6, flex: 1, margin: 0 }}>{detail.oduvodneni}</p>
                                                             <Tooltip content="Zobrazit zdroj v textu studenta (AI Act Compliance)">
                                                                 <button
+                                                                    className="btn btn--sm btn--icon-only btn--outline"
                                                                     onClick={() => openSourceModal(detail.citace)}
-                                                                    className="p-2 text-[#D4AF37] hover:bg-[#D4AF37]/10 rounded-lg transition-colors flex-shrink-0 mt-0.5 border border-[#D4AF37]/30 shadow-sm bg-white dark:bg-slate-800"
                                                                     aria-label="Zobrazit zdroj v textu studenta"
+                                                                    style={{ flexShrink: 0 }}
                                                                 >
-                                                                    <MessageSquareQuote className="w-4 h-4" />
+                                                                    <Icon icon={faCommentDots} />
                                                                 </button>
                                                             </Tooltip>
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-5 text-center align-top">
-                                                        <div className="flex flex-col items-center gap-1">
-                                                            <input
-                                                                type="number"
-                                                                value={detail.body}
-                                                                onChange={(e) => handleScoreChange(idx, parseInt(e.target.value, 10) || 0)}
-                                                                disabled={!!activeStudentData.is_approved}
-                                                                className={`w-14 text-center border rounded-md py-1 text-sm font-medium focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37] outline-none ${activeStudentData.is_approved ? 'bg-slate-50 cursor-not-allowed text-slate-400 border-slate-200' : detail.upraveno_lektorem ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-300 dark:border-slate-600'}`}
-                                                            />
-                                                        </div>
+                                                    <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
+                                                        <input
+                                                            type="number"
+                                                            value={detail.body}
+                                                            onChange={(e) => handleScoreChange(idx, parseInt(e.target.value, 10) || 0)}
+                                                            disabled={!!activeStudentData.is_approved}
+                                                            className="form-control"
+                                                            style={{ width: 56, textAlign: 'center', padding: '4px 6px', fontSize: '0.85rem', fontWeight: 600 }}
+                                                        />
                                                     </td>
                                                 </tr>
                                             ))}
@@ -1030,63 +981,54 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             </div>
 
                             {/* Bottom Action Bar */}
-                            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-[#002855] dark:text-[#facc15] uppercase tracking-wider mb-2">
+                            <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                                         Zpětná vazba vyučujícího
                                     </label>
                                     <textarea
-                                        className={`w-full border rounded-xl p-4 text-sm focus:ring-2 focus:ring-[#002855] focus:border-[#002855] outline-none resize-none h-40 leading-relaxed shadow-inner ${activeStudentData.is_approved ? 'bg-slate-50 cursor-not-allowed text-slate-400 border-slate-200' : 'border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/50'}`}
+                                        className="form-control"
                                         value={activeStudentData.zpetna_vazba || ""}
                                         onChange={(e) => handleFeedbackChange(e.target.value)}
                                         disabled={!!activeStudentData.is_approved}
                                         placeholder="Zde uveďte celkové shrnutí a doporučení pro studenta..."
+                                        style={{ resize: 'none', height: 120 }}
                                     />
                                 </div>
-                                <div className="flex justify-end gap-3">
+                                {/* NCIKT pořadí: Negativní → Neutrální → Pozitivní */}
+                                <div className="btn-group btn-group--end">
                                     {activeStudentData.isDirty && (
-                                        <button
-                                            onClick={handleSaveChanges}
-                                            disabled={isSaving}
-                                            className="flex items-center gap-2 px-6 py-3 bg-white dark:bg-slate-800 border border-[#D4AF37] text-[#D4AF37] rounded-xl hover:bg-[#D4AF37]/5 transition-colors text-sm font-bold shadow-sm"
-                                        >
-                                            {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                                        <button className="btn btn--outline" onClick={handleSaveChanges} disabled={isSaving}>
+                                            {isSaving ? <span className="spinner spinner--sm" /> : <Icon icon={faFloppyDisk} />}
                                             Uložit úpravy {activeStudentData.score} / {activeStudentData.maxScore} b.
                                         </button>
                                     )}
                                     {isRagEnabled && (
                                         <button
+                                            className="btn btn--light"
                                             onClick={handleSaveGoldenExample}
                                             disabled={isSavingGolden}
-                                            className="flex items-center gap-2 px-6 py-3 bg-purple-100 text-purple-700 border border-purple-200 rounded-xl hover:bg-purple-200 transition-colors text-sm font-bold shadow-sm"
                                             title="Uložit toto finální skvělé hodnocení do sady etalonů RAG paměti pro budoucí AI inference."
                                         >
-                                            {isSavingGolden ? <Loader2 className="w-5 h-5 animate-spin" /> : <span className="text-xl -mt-1 leading-none">⭐</span>}
+                                            {isSavingGolden ? <span className="spinner spinner--sm" /> : <span>⭐</span>}
                                             Uložit jako Zlatý příklad
                                         </button>
                                     )}
                                     {!activeStudentData.is_approved ? (
                                         <button
+                                            className="btn btn--positive btn--lg"
                                             onClick={async () => {
                                                 if (activeStudentData) {
                                                     try {
-                                                        // 1. Schválit hodnocení
                                                         const approveRes = await fetch(`${API_BASE_URL}/analytics/evaluation/${activeStudentData.id}/approve`, {
                                                             method: 'PATCH',
-                                                            headers: {
-                                                                'Content-Type': 'application/json',
-                                                                'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
-                                                            },
+                                                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
                                                             body: JSON.stringify({ approved: true })
                                                         });
                                                         if (!approveRes.ok) throw new Error('Schválení selhalo');
-
-                                                        // 2. Aktualizovat lokální stav
                                                         setStudents(prev => prev.map(s => s.id === activeStudentData.id ? { ...s, is_approved: true } : s));
                                                         setToastMessage("Hodnocení schváleno.");
                                                         setTimeout(() => setToastMessage(null), 3000);
-
-                                                        // 3. Stáhnout PDF
                                                         const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
                                                         const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
                                                             headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
@@ -1097,100 +1039,76 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                         const a = document.createElement('a');
                                                         a.href = url;
                                                         a.download = `hodnoceni_${activeStudentData.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-                                                        document.body.appendChild(a);
-                                                        a.click();
-                                                        window.URL.revokeObjectURL(url);
-                                                        document.body.removeChild(a);
-
+                                                        document.body.appendChild(a); a.click();
+                                                        window.URL.revokeObjectURL(url); document.body.removeChild(a);
                                                         await fetch(`${API_BASE_URL}/export/history`, {
                                                             method: 'POST',
-                                                            headers: {
-                                                                'Content-Type': 'application/json',
-                                                                'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
-                                                            },
-                                                            body: JSON.stringify({
-                                                                scenario_name: scenarioId || 'Neznámý scénář',
-                                                                type: `PDF Hodnocení (${activeStudentData.name})`,
-                                                                download_url: `/api/v1/export/evaluation/${activeStudentData.id}/pdf`
-                                                            })
+                                                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+                                                            body: JSON.stringify({ scenario_name: scenarioId || 'Neznámý scénář', type: `PDF Hodnocení (${activeStudentData.name})`, download_url: `/api/v1/export/evaluation/${activeStudentData.id}/pdf` })
                                                         });
-                                                    } catch (e: any) {
-                                                        console.error("Schválení nebo export selhal:", e);
-                                                        showAlert(e.message);
-                                                    }
+                                                    } catch (e: any) { console.error(e); showAlert(e.message); }
                                                 }
                                             }}
-                                            className="flex items-center gap-2 px-6 py-3 bg-[#002855] text-white rounded-xl hover:bg-[#002855]/90 transition-colors text-sm font-bold shadow-md"
                                         >
-                                            <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />
-                                            Schválit a uložit jako PDF
+                                            <Icon icon={faShieldHalved} /> Schválit a uložit jako PDF
                                         </button>
                                     ) : (
-                                        <div className="flex flex-col items-end gap-1">
-                                            <div className="flex items-center gap-2 px-6 py-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                                                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                                <span className="text-sm font-bold text-emerald-700">Evaluace validována</span>
-                                            </div>
-                                            <button
-                                                onClick={async () => {
-                                                    if (activeStudentData) {
-                                                        try {
-                                                            const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
-                                                            const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
-                                                                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
-                                                            });
-                                                            if (!res.ok) throw new Error('PDF Export selhal');
-                                                            const blob = await res.blob();
-                                                            const url = window.URL.createObjectURL(blob);
-                                                            const a = document.createElement('a');
-                                                            a.href = url;
-                                                            a.download = `hodnoceni_${activeStudentData.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-                                                            document.body.appendChild(a);
-                                                            a.click();
-                                                            window.URL.revokeObjectURL(url);
-                                                            document.body.removeChild(a);
-                                                        } catch (e: any) {
-                                                            console.error("PDF export selhal:", e);
-                                                            showAlert(e.message);
-                                                        }
-                                                    }
-                                                }}
-                                                className="text-xs text-slate-400 hover:text-slate-600 underline transition-colors"
-                                            >
-                                                Stáhnout PDF znovu
-                                            </button>
-                                        </div>
+                                        <button
+                                            className="btn btn--outline"
+                                            onClick={async () => {
+                                                if (activeStudentData) {
+                                                    try {
+                                                        const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
+                                                        const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
+                                                            headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
+                                                        });
+                                                        if (!res.ok) throw new Error('PDF Export selhal');
+                                                        const blob = await res.blob();
+                                                        const url = window.URL.createObjectURL(blob);
+                                                        const a = document.createElement('a');
+                                                        a.href = url;
+                                                        a.download = `hodnoceni_${activeStudentData.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                                                        document.body.appendChild(a); a.click();
+                                                        window.URL.revokeObjectURL(url); document.body.removeChild(a);
+                                                    } catch (e: any) { console.error(e); showAlert(e.message); }
+                                                }
+                                            }}
+                                        >
+                                            <Icon icon={faDownload} /> Stáhnout PDF znovu
+                                        </button>
                                     )}
                                 </div>
                             </div>
                         </>
                     ) : (
-                        <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center text-slate-400">
-                            {activeStudentData && activeStudentData.status === 'pending' ? (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
-                                    <Hourglass className="w-16 h-16 text-slate-200" />
-                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Čeká se na zahájení evaluace...</h3>
-                                    <p className="text-sm">Vyberte studenty a klikněte na "Vyhodnotit označené ÚZ".</p>
-                                </div>
-                            ) : students.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
-                                    <FileText className="w-16 h-16 text-slate-200" />
-                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Nahrajte úřední záznamy k vyhodnocení</h3>
-                                    <p className="text-sm max-w-md">Přetáhněte soubory (.docx, .pdf) do tohoto okna nebo použijte tlačítko 'Nahrát ÚZ' vlevo nahoře.</p>
-                                </div>
-                            ) : selectedIds.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
-                                    <CheckSquare className="w-16 h-16 text-slate-200" />
-                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Záznamy nahrány. Nyní je vyberte.</h3>
-                                    <p className="text-sm max-w-md">Zaškrtněte políčka u studentů v levém sloupci, které chcete aktuálně vyhodnotit. Můžete nahrát i další záznamy.</p>
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center space-y-4">
-                                    <PlayCircle className="w-16 h-16 text-slate-200" />
-                                    <h3 className="text-xl font-medium text-slate-600 dark:text-slate-300">Připraveno k AI vyhodnocení</h3>
-                                    <p className="text-sm max-w-md">Klikněte na zlaté tlačítko 'Vyhodnotit označené ÚZ' v horní liště, nebo vyhodnoťte záznamy jednotlivě.</p>
-                                </div>
-                            )}
+                        <div className="card" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <div className="empty-state">
+                                {activeStudentData && activeStudentData.status === 'pending' ? (
+                                    <>
+                                        <Icon icon={faHourglass} size="2x" />
+                                        <h3>Čeká se na zahájení evaluace...</h3>
+                                        <p>Vyberte studenty a klikněte na "Vyhodnotit označené ÚZ".</p>
+                                    </>
+                                ) : students.length === 0 ? (
+                                    <>
+                                        <Icon icon={faFileLines} size="2x" />
+                                        <h3>Nahrajte úřední záznamy k vyhodnocení</h3>
+                                        <p>Přetáhněte soubory (.docx, .pdf) do tohoto okna nebo použijte tlačítko "Nahrát ÚZ" vlevo nahoře.</p>
+                                    </>
+                                ) : selectedIds.length === 0 ? (
+                                    <>
+                                        <Icon icon={faSquareCheck} size="2x" />
+                                        <h3>Záznamy nahrány. Nyní je vyberte.</h3>
+                                        <p>Zaškrtněte políčka u studentů v levém sloupci, které chcete aktuálně vyhodnotit.</p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Icon icon={faCirclePlay} size="2x" />
+                                        <h3>Připraveno k AI vyhodnocení</h3>
+                                        <p>Klikněte na tlačítko "Vyhodnotit označené ÚZ" v horní liště.</p>
+                                    </>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
@@ -1198,39 +1116,32 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
             {/* AI Act Source Modal */}
             {isSourceModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                        <div className="px-6 py-4 bg-[#002855] text-white flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <Shield className="w-5 h-5 text-[#D4AF37]" />
-                                <h2 className="text-lg font-semibold tracking-wide">Zdrojová pasáž dokumentu</h2>
-                            </div>
-                            <button
-                                onClick={() => setIsSourceModalOpen(false)}
-                                className="p-1.5 hover:bg-white dark:bg-slate-800/20 rounded-lg transition-colors"
-                            >
-                                <X className="w-5 h-5" />
+                <div className="modal-overlay" onClick={() => setIsSourceModalOpen(false)}>
+                    <div className="modal" style={{ maxWidth: 700 }} onClick={(e) => e.stopPropagation()}>
+                        <div className="modal__header modal__header--primary">
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Icon icon={faShield} /> Zdrojová pasáž dokumentu
+                            </span>
+                            <button className="btn btn--sm btn--icon-only" style={{ background: 'transparent', border: 'none', color: '#fff' }} onClick={() => setIsSourceModalOpen(false)}>
+                                <Icon icon={faXmark} />
                             </button>
                         </div>
-                        <div className="p-6 bg-[#fdfdfc]">
-                            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                        <div className="modal__body" style={{ padding: 24 }}>
+                            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12 }}>
                                 Níže je zobrazen text studenta. Zvýrazněná pasáž posloužila AI k rozhodnutí.
                             </p>
-                            <div className="font-serif text-sm leading-relaxed text-slate-800 dark:text-slate-100 whitespace-pre-wrap max-w-prose mx-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-6 rounded-xl shadow-sm">
-                                <mark className="bg-yellow-200 px-1 rounded text-slate-900 font-medium">{activeSourceQuote}</mark>
+                            <div style={{ fontFamily: 'Georgia, serif', fontSize: '0.85rem', lineHeight: 1.7, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', background: 'var(--bg-surface-2)', border: '1px solid var(--border-color)', padding: 20, borderRadius: 6 }}>
+                                <mark style={{ background: 'rgba(226,132,19,0.25)', padding: '0 3px', borderRadius: 2 }}>{activeSourceQuote}</mark>
                             </div>
                         </div>
-                        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700 flex justify-end">
-                            <button
-                                onClick={() => setIsSourceModalOpen(false)}
-                                className="px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-100 transition-colors text-sm font-medium shadow-sm"
-                            >
-                                Zavřít
-                            </button>
+                        <div className="modal__footer">
+                            <div className="btn-group btn-group--end">
+                                <button className="btn btn--outline" onClick={() => setIsSourceModalOpen(false)}>Zavřít</button>
+                            </div>
                         </div>
                     </div>
                 </div>
             )}
-        </div >
+        </div>
     );
 }

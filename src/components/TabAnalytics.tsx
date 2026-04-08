@@ -2,21 +2,14 @@ import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL } from '../utils/api';
 
-import { Download, BarChart3, PieChart as PieChartIcon, Wand2, RefreshCw, AlertCircle, AlertTriangle, ExternalLink, X, CheckCircle2, FileText } from 'lucide-react';
-import { useDialog } from '../contexts/DialogContext';
 import {
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip as RechartsTooltip,
-    ResponsiveContainer,
-    PieChart,
-    Pie,
-    Cell,
-    Legend
-} from 'recharts';
+    faDownload, faChartBar, faChartPie, faWandMagicSparkles, faRotate,
+    faCircleExclamation, faTriangleExclamation, faArrowUpRightFromSquare,
+    faXmark, faCircleCheck, faFileLines,
+} from '@fortawesome/free-solid-svg-icons';
+import { Icon } from './Icon';
+import { useDialog } from '../contexts/DialogContext';
+import { Doughnut, Bar } from 'react-chartjs-2';
 
 /**
  * Formát dat pro analytiku třídy z backendu
@@ -33,16 +26,12 @@ interface AnalyticsData {
     scenario_id?: string;
 }
 
-// Barevná paleta pro grafy (Semafor: Červená, Jantarová, Zelená)
-const PIE_COLORS = ['#ef4444', '#f59e0b', '#10b981'];
+// NCIKT semaforová paleta pro grafy
+const PIE_COLORS = ['#c51515', '#e28413', '#178754'];
 
 interface TabAnalyticsProps {
     /** ID aktuálně vybrané modelové situace (scénáře) */
     scenarioId: string | null;
-    /** Zobrazovaný název studijní skupiny (pro PDF) */
-    className?: string;
-    /** Zobrazovaný název modelové situace (pro PDF) */
-    scenarioName?: string;
     /** Případná nacachovaná data pro okamžité zobrazení */
     cachedData?: any | null;
     /** Callback pro uložení dat do cache rodiče */
@@ -55,7 +44,7 @@ interface TabAnalyticsProps {
  * Komponenta pro zobrazení globální analýzy výsledků celé třídy.
  * Obsahuje interaktivní grafy (Recharts), AI doporučení a seznam studentů vyžadujících pomoc.
  */
-export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
+export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
     const { showAlert } = useDialog();
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -125,11 +114,9 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
      */
     const handleExportExcel = async () => {
         try {
-            const excelParams = new URLSearchParams();
-            if (scenarioId) excelParams.set('scenario_id', scenarioId);
-            if (className) excelParams.set('class_name', className);
-            if (scenarioName) excelParams.set('scenario_display_name', scenarioName);
-            const url = `${API_BASE_URL}/export/class/1/excel?${excelParams.toString()}`;
+            const url = scenarioId
+                ? `${API_BASE_URL}/export/class/1/excel?scenario_id=${scenarioId}`
+                : `${API_BASE_URL}/export/class/1/excel`;
 
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
@@ -170,11 +157,25 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
     const handleExportPDF = async () => {
         const token = localStorage.getItem('upvsp_token');
         const finalScenarioId = data?.scenario_id || scenarioId || 'Neznámý_scénář';
-        const params = new URLSearchParams({ token: token || '' });
-        if (className) params.set('class_name', className);
-        if (scenarioName) params.set('scenario_display_name', scenarioName);
-        const url = `${API_BASE_URL}/export/class-report/${finalScenarioId}?${params.toString()}`;
-        window.open(url, '_blank');
+        const url = `${API_BASE_URL}/export/class-report/${encodeURIComponent(finalScenarioId)}`;
+        try {
+            const response = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!response.ok) throw new Error(`Chyba při generování PDF: ${response.status}`);
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = `analyza_tridy_${finalScenarioId}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(blobUrl);
+        } catch (e: any) {
+            showAlert(e.message);
+            return;
+        }
 
         // Zápis exportu do historie
         try {
@@ -187,7 +188,7 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
                 body: JSON.stringify({
                     scenario_name: finalScenarioId,
                     type: 'PDF analýza (třída)',
-                    download_url: `/api/v1/export/class-report/${finalScenarioId}?token=${token}`
+                    download_url: `/api/v1/export/class-report/${finalScenarioId}`
                 })
             });
         } catch (e) { console.error("History log failed", e) }
@@ -240,270 +241,224 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
         }
     };
 
+    // Chart.js data pro Doughnut
+    const doughnutChartData = {
+        labels: pieData.map(d => d.name),
+        datasets: [{ data: pieData.map(d => d.value), backgroundColor: pieData.map((_, i) => PIE_COLORS[i % 3]), borderWidth: 0 }]
+    };
+
+    // Chart.js data pro horizontální Bar
+    const barLabels = data?.stats.map((_, i) => `K${i + 1}`) ?? [];
+    const barChartData = {
+        labels: barLabels,
+        datasets: [{
+            data: data?.stats.map(s => s.success_rate) ?? [],
+            backgroundColor: data?.stats.map(s => {
+                const isActive = selectedCriterion === null || selectedCriterion === s.full_name;
+                const base = s.success_rate < 50 ? '#c51515' : s.success_rate < 80 ? '#e28413' : '#178754';
+                return isActive ? base : base + '4D';
+            }) ?? [],
+            borderWidth: 0,
+            borderRadius: 3,
+            barThickness: 18,
+        }]
+    };
+    const barChartOptions = {
+        indexAxis: 'y' as const,
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    title: (items: any) => {
+                        const idx = items[0].dataIndex;
+                        return `K${idx + 1}: ${data?.stats[idx]?.name || ''}`;
+                    },
+                    label: (item: any) => `Splnilo: ${item.raw} %`
+                }
+            }
+        },
+        scales: {
+            x: { min: 0, max: 100, ticks: { callback: (v: any) => v + ' %' }, grid: { color: 'rgba(0,0,0,0.06)' } },
+            y: { ticks: { font: { size: 11, weight: 600 as const } } }
+        },
+        onClick: (_: any, elements: any) => {
+            if (elements.length > 0 && data) {
+                const identifier = data.stats[elements[0].index].full_name;
+                setSelectedCriterion(identifier === selectedCriterion ? null : identifier);
+            }
+        }
+    };
+
     return (
-        <div className="max-w-[1500px] w-full mx-auto px-4 xl:px-8 space-y-6">
-            {/* Man-in-the-Loop: Warning Banner — blokace analytiky dokud nejsou všechny záznamy schváleny */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Man-in-the-Loop: Warning Banner */}
             {pendingApprovals ? (
-                <div className="flex flex-col items-center justify-center min-h-[400px] bg-amber-50 border border-amber-200 rounded-xl p-10 text-center gap-4">
-                    <AlertTriangle className="w-16 h-16 text-amber-500" />
-                    <h2 className="text-xl font-bold text-amber-800">Analytika není dostupná</h2>
-                    <p className="text-amber-700 text-base max-w-lg">
-                        Analytika a exporty budou dostupné až po schválení všech záznamů ve studijní skupině.
-                    </p>
-                    <div className="bg-amber-100 border border-amber-300 rounded-lg px-6 py-3">
-                        <span className="text-2xl font-bold text-amber-800">{pendingApprovals.count}</span>
-                        <span className="text-amber-700 ml-2">
-                            {pendingApprovals.count === 1 ? 'záznam čeká' : pendingApprovals.count < 5 ? 'záznamy čekají' : 'záznamů čeká'} na schválení
-                            <span className="text-amber-500 ml-1">(z {pendingApprovals.total} vyhodnocených)</span>
-                        </span>
+                <div className="alert alert--warning" style={{ flexDirection: 'column', alignItems: 'center', padding: 40, textAlign: 'center', gap: 12, minHeight: 300, justifyContent: 'center' }}>
+                    <Icon icon={faTriangleExclamation} size="3x" />
+                    <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Analytika není dostupná</h2>
+                    <p style={{ margin: 0, maxWidth: 480 }}>Analytika a exporty budou dostupné až po schválení všech záznamů ve studijní skupině.</p>
+                    <div style={{ padding: '8px 24px', background: 'rgba(226,132,19,0.15)', border: '1px solid var(--color-warning)', borderRadius: 8, fontWeight: 700 }}>
+                        <span style={{ fontSize: '1.5rem' }}>{pendingApprovals.count}</span> {pendingApprovals.count === 1 ? 'záznam čeká' : pendingApprovals.count < 5 ? 'záznamy čekají' : 'záznamů čeká'} na schválení
+                        <span style={{ marginLeft: 4, opacity: 0.7 }}>(z {pendingApprovals.total} vyhodnocených)</span>
                     </div>
-                    <p className="text-amber-600 text-sm">
-                        Přejděte na kartu <strong>Vyhodnocení ÚZ</strong> a schvalte jednotlivá hodnocení.
-                    </p>
+                    <p style={{ margin: 0, fontSize: '0.85rem' }}>Přejděte na kartu <strong>Vyhodnocení ÚZ</strong> a schvalte jednotlivá hodnocení.</p>
                 </div>
             ) : (<>
-            {/* HLAVIČKA A EXPORTNÍ TLAČÍTKA */}
-            <div className="flex items-center justify-between">
+            {/* Hlavička a exportní tlačítka */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
-                    <h3 className="text-xl font-semibold text-[#002855] dark:text-blue-200">Globální analýza třídy</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                        Agregovaná data a pedagogické statistiky
-                    </p>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>Globální analýza třídy</h3>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Agregovaná data a pedagogické statistiky</p>
                 </div>
-                <div className="flex gap-3">
-                    <button
-                        onClick={() => fetchAnalytics(true)}
-                        disabled={loading}
-                        className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:bg-slate-800/50 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
-                    >
-                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                        Aktualizovat
+                <div className="btn-group">
+                    <button className="btn btn--outline btn--sm" onClick={() => fetchAnalytics(true)} disabled={loading}>
+                        <Icon icon={faRotate} spin={loading} /> Aktualizovat
                     </button>
-                    <button
-                        onClick={handleExportPDF}
-                        disabled={loading || !data}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
-                    >
-                        <FileText className="w-4 h-4" />
-                        Exportovat PDF report
+                    <button className="btn btn--secondary btn--sm" onClick={handleExportPDF} disabled={loading || !data}>
+                        <Icon icon={faFileLines} /> Exportovat PDF report
                     </button>
-                    <button
-                        onClick={handleExportExcel}
-                        className="flex items-center gap-2 px-4 py-2 bg-[#002855] text-white rounded-lg hover:bg-[#002855]/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
-                        disabled={loading || !data}
-                    >
-                        <Download className="w-4 h-4 text-[#D4AF37]" />
-                        Export do Excelu
+                    <button className="btn btn--primary btn--sm" onClick={handleExportExcel} disabled={loading || !data}>
+                        <Icon icon={faDownload} /> Export do Excelu
                     </button>
                 </div>
             </div>
 
             {loading ? (
-                <div className="w-full h-64 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center text-[#002855] dark:text-blue-300">
-                    <RefreshCw className="w-8 h-8 animate-spin mb-4" />
-                    <p className="font-semibold">Generuji analýzu, AI čte výsledky třídy...</p>
+                <div className="card" style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--color-primary)' }}>
+                    <span className="spinner spinner--lg" />
+                    <p style={{ margin: 0, fontWeight: 600 }}>Generuji analýzu, AI čte výsledky třídy...</p>
                 </div>
             ) : error ? (
-                <div className="w-full p-6 bg-red-50 text-red-600 rounded-xl border border-red-200 flex items-center gap-3">
-                    <AlertCircle className="w-6 h-6" />
-                    <p className="font-medium">{error}</p>
+                <div className="alert alert--negative" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Icon icon={faCircleExclamation} /> <span>{error}</span>
                 </div>
             ) : data && data.stats.length === 0 ? (
-                <div className="w-full h-64 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center justify-center text-slate-400">
-                    <AlertCircle className="w-12 h-12 mb-4 text-slate-300" />
-                    <p className="text-lg font-medium text-slate-500 dark:text-slate-400">Zatím nebyly zpracovány žádné úřední záznamy</p>
+                <div className="card" style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <div className="empty-state">
+                        <Icon icon={faCircleExclamation} size="2x" />
+                        <p>Zatím nebyly zpracovány žádné úřední záznamy</p>
+                    </div>
                 </div>
             ) : data ? (
                 <>
-                    {/* STATISTICKÉ KARTY (KPI) */}
-                    <div className="grid grid-cols-3 gap-6">
+                    {/* KPI karty */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
                         {/* Průměrné skóre */}
-                        <div className="col-span-1 bg-gradient-to-br from-[#002855] to-[#001a38] p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-center text-white relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4AF37] rounded-full mix-blend-multiply filter blur-2xl opacity-20 translate-x-1/2 -translate-y-1/2"></div>
-                            <h4 className="font-semibold text-lg text-slate-100 mb-2 z-10">Průměrné Skóre Třídy</h4>
-                            <div className="text-5xl font-bold tracking-tight z-10 text-[#D4AF37]">
-                                {data.average_score} <span className="text-xl text-slate-300 font-normal">b.</span>
+                        <div className="kpi-card kpi-card--primary" style={{ padding: 20, display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: 140 }}>
+                            <span style={{ fontSize: '0.82rem', fontWeight: 600, opacity: 0.8, marginBottom: 8 }}>Průměrné Skóre Třídy</span>
+                            <div style={{ fontSize: '3rem', fontWeight: 900, letterSpacing: '-0.02em', lineHeight: 1 }}>
+                                {data.average_score} <span style={{ fontSize: '1rem', fontWeight: 400, opacity: 0.7 }}>b.</span>
                             </div>
                         </div>
 
-                        {/* Roster studentů vyžadujících pomoc */}
-                        <div className="col-span-1 bg-red-50 p-6 rounded-xl border border-red-100 shadow-sm flex flex-col">
-                            <div className="flex items-center gap-2 mb-4">
-                                <AlertTriangle className="w-5 h-5 text-red-600" />
-                                <h4 className="font-semibold text-red-700">Individuální pomoc ({data.needs_help?.length || 0})</h4>
+                        {/* Studenti vyžadující pomoc */}
+                        <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', borderLeft: '3px solid var(--color-negative)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                                <Icon icon={faTriangleExclamation} style={{ color: 'var(--color-negative)' }} />
+                                <h4 style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem', color: 'var(--color-negative)' }}>Individuální pomoc ({data.needs_help?.length || 0})</h4>
                             </div>
-                            <p className="text-sm text-red-600 mb-3">
-                                Studenti s celkovým hodnocením pod 50 %, kteří mohou vyžadovat dodatečnou konzultaci.
-                            </p>
-                            <div className="flex-1 overflow-y-auto max-h-[160px] pr-2">
+                            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5 }}>Studenti s celkovým hodnocením pod 50 %, kteří mohou vyžadovat konzultaci.</p>
+                            <div style={{ flex: 1, overflowY: 'auto', maxHeight: 130 }}>
                                 {data.needs_help && data.needs_help.length > 0 ? (
-                                    <ul className="space-y-2">
+                                    <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
                                         {data.needs_help.map((name, idx) => (
-                                            <li key={idx} className="bg-white dark:bg-slate-800 px-3 py-2 rounded-md shadow-sm text-sm border border-red-100 font-medium text-slate-700 dark:text-slate-300 flex justify-between items-center">
-                                                <span>{name}</span>
-                                            </li>
+                                            <li key={idx} style={{ padding: '5px 10px', background: 'var(--bg-surface-2)', border: '1px solid var(--border-color)', borderRadius: 5, fontSize: '0.82rem', fontWeight: 600 }}>{name}</li>
                                         ))}
                                     </ul>
                                 ) : (
-                                    <div className="h-full flex items-center justify-center text-red-400/80 text-sm font-medium">
-                                        Všichni studenti prospěli.
-                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.82rem' }}>Všichni studenti prospěli.</div>
                                 )}
                             </div>
                         </div>
 
-                        {/* Koláčový graf rozložení ziskovosti */}
-                        <div className="col-span-1 bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
-                            <div className="flex items-center gap-2 mb-4">
-                                <PieChartIcon className="w-5 h-5 text-[#002855] dark:text-blue-400" />
-                                <h4 className="font-semibold text-[#002855] dark:text-blue-300">Percentuální ziskovost (rozložení studentů)</h4>
+                        {/* Doughnut chart */}
+                        <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                                <Icon icon={faChartPie} style={{ color: 'var(--color-primary)' }} />
+                                <h4 style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem', color: 'var(--color-primary)' }}>Percentuální ziskovost</h4>
                             </div>
-                            <div className="flex-1 w-full h-full min-h-[160px] flex items-center justify-center">
+                            <div style={{ flex: 1, minHeight: 140 }}>
                                 {pieData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height={160}>
-                                        <PieChart>
-                                            <Pie
-                                                data={pieData}
-                                                cx="50%"
-                                                cy="50%"
-                                                innerRadius={45}
-                                                outerRadius={65}
-                                                paddingAngle={5}
-                                                dataKey="value"
-                                            >
-                                                {pieData.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                                ))}
-                                            </Pie>
-                                            <RechartsTooltip formatter={(value) => [value, 'Studentů']} />
-                                            <Legend verticalAlign="middle" align="right" layout="vertical" />
-                                        </PieChart>
-                                    </ResponsiveContainer>
+                                    <Doughnut
+                                        data={doughnutChartData}
+                                        options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12 } } }, cutout: '60%' }}
+                                    />
                                 ) : (
-                                    <p className="text-slate-400 text-sm">Nedostatek dat pro graf</p>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center', marginTop: 20 }}>Nedostatek dat pro graf</p>
                                 )}
                             </div>
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-6">
-                        {/* SLOUPCOVÝ GRAF ÚSPĚŠNOSTI DLOUHÝCH KRITÉRIÍ */}
-                        <div className="col-span-1 bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-                            <div className="flex items-center gap-2 mb-6">
-                                <BarChart3 className="w-5 h-5 text-[#002855] dark:text-blue-400" />
-                                <h4 className="font-semibold text-[#002855] dark:text-blue-300">Úspěšnost jednotlivých kritérií</h4>
-                            </div>
-                            <div className="h-[500px] w-full relative -left-4">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={data.stats.map((s, i) => ({ ...s, shortLabel: `K${i + 1}`, fullLabel: `K${i + 1}: ${s.name}` }))} layout="vertical" margin={{ top: 5, right: 30, left: 30, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#E2E8F0" />
-                                        <XAxis type="number" domain={[0, 100]} unit=" %" />
-                                        <YAxis dataKey="shortLabel" type="category" width={40} interval={0} tick={{ fontSize: 11, fill: '#1e293b', fontWeight: 600 }} />
-                                        <RechartsTooltip
-                                            content={({ active, payload }) => {
-                                                if (active && payload && payload.length) {
-                                                    const pData = payload[0].payload;
-                                                    return (
-                                                        <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-md max-w-[250px] z-50">
-                                                            <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm mb-1 break-words">{pData.fullLabel}</p>
-                                                            <p className="text-[#002855] font-medium text-sm">Splnilo: {pData.success_rate} %</p>
-                                                        </div>
-                                                    );
-                                                }
-                                                return null;
-                                            }}
-                                            cursor={{ fill: '#F1F5F9' }}
-                                        />
-                                        <Bar
-                                            dataKey="success_rate"
-                                            radius={[0, 4, 4, 0]}
-                                            barSize={20}
-                                            onClick={(barData) => {
-                                                // Filtrace "Rychlého náhledu" neúspěšných podle kliknutí na sloupec grafu
-                                                const identifier = (barData as any).full_name;
-                                                setSelectedCriterion(identifier === selectedCriterion ? null : identifier);
-                                            }}
-                                            cursor="pointer"
-                                        >
-                                            {data.stats.map((entry, index) => {
-                                                const isActive = selectedCriterion === null || selectedCriterion === entry.full_name;
-                                                const baseColor = entry.success_rate < 50 ? '#ef4444' : entry.success_rate < 80 ? '#f59e0b' : '#10b981';
-
-                                                return <Cell key={`cell-${index}`} fill={baseColor} opacity={isActive ? 1 : 0.3} />;
-                                            })}
-                                        </Bar>
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </div>
+                    {/* Sloupcový graf úspěšnosti kritérií */}
+                    <div className="card" style={{ padding: 16, overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                            <Icon icon={faChartBar} style={{ color: 'var(--color-primary)' }} />
+                            <h4 style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem', color: 'var(--color-primary)' }}>Úspěšnost jednotlivých kritérií</h4>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 4 }}>— kliknutím filtrujete studenty</span>
                         </div>
+                        <div style={{ height: Math.max(300, data.stats.length * 28 + 40), width: '100%' }}>
+                            <Bar data={barChartData} options={barChartOptions} />
+                        </div>
+                    </div>
 
-                        {/* SEZNAM NEÚSPĚŠNÝCH VE FILTROVANÉM KRITÉRIU */}
-                        {selectedCriterion && (
-                            <div className="col-span-1 bg-slate-50 dark:bg-slate-800/50 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col mt-2">
-                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200 dark:border-slate-700">
-                                    <h4 className="font-semibold text-[#002855] flex items-center gap-2">
-                                        <AlertCircle className="w-5 h-5 text-[#f59e0b]" />
-                                        Neúspěšní studenti v kritériu: <span className="text-slate-600 dark:text-slate-300 font-normal truncate max-w-sm ml-1" title={selectedCriterion}>{selectedCriterion}</span>
-                                    </h4>
-                                    <button onClick={() => setSelectedCriterion(null)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 dark:text-slate-300 transition-colors" title="Zavřít filtr">
-                                        <X className="w-5 h-5" />
-                                    </button>
-                                </div>
-
-                                {data.criterion_failures && data.criterion_failures[selectedCriterion] && data.criterion_failures[selectedCriterion].length > 0 ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2">
-                                        {data.criterion_failures[selectedCriterion].map((student, idx) => (
-                                            <div key={idx} className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
-                                                <div>
-                                                    <h5 className="font-semibold text-slate-800 dark:text-slate-100 mb-1">{student.name}</h5>
-                                                    <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 italic" title={student.oduvodneni}>
-                                                        "{student.oduvodneni || 'Zdůvodnění chybí'}"
-                                                    </p>
-                                                </div>
-                                                <button
-                                                    onClick={() => handlePreviewStudent(student.id)}
-                                                    className="mt-3 flex items-center justify-center gap-1.5 w-full py-1.5 text-sm font-medium text-[#002855] bg-blue-50 border border-blue-100 rounded-md hover:bg-[#002855] hover:text-white transition-colors"
-                                                >
-                                                    Rychlý náhled <ExternalLink className="w-3.5 h-3.5" />
-                                                </button>
+                    {/* Seznam neúspěšných ve filtrovaném kritériu */}
+                    {selectedCriterion && (
+                        <div className="card" style={{ padding: 16 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
+                                <h4 style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <Icon icon={faCircleExclamation} style={{ color: 'var(--color-warning)' }} />
+                                    Neúspěšní v kritériu: <span style={{ fontWeight: 400, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 360, marginLeft: 4 }} title={selectedCriterion}>{selectedCriterion}</span>
+                                </h4>
+                                <button className="btn btn--sm btn--icon-only btn--outline" onClick={() => setSelectedCriterion(null)} title="Zavřít filtr">
+                                    <Icon icon={faXmark} />
+                                </button>
+                            </div>
+                            {data.criterion_failures && data.criterion_failures[selectedCriterion]?.length > 0 ? (
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, maxHeight: 280, overflowY: 'auto' }}>
+                                    {data.criterion_failures[selectedCriterion].map((student, idx) => (
+                                        <div key={idx} className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 6 }}>
+                                            <div>
+                                                <h5 style={{ margin: '0 0 4px', fontWeight: 700, fontSize: '0.85rem' }}>{student.name}</h5>
+                                                <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>"{student.oduvodneni || 'Zdůvodnění chybí'}"</p>
                                             </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center py-8 text-slate-400">
-                                        <CheckCircle2 className="w-10 h-10 text-emerald-400 mb-2 opacity-50" />
-                                        <p>V tomto kritériu uspěli všichni studenti.</p>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* AI PEDAGOGICKÁ DOPORUČENÍ (Analyzováno přes LLM) */}
-                    <div className="bg-gradient-to-br from-[#002855] to-[#001a38] rounded-xl p-6 text-white shadow-md relative overflow-hidden mb-6">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-[#D4AF37] rounded-full mix-blend-multiply filter blur-3xl opacity-20 translate-x-1/2 -translate-y-1/2"></div>
-                        <div className="relative z-10 flex items-center gap-2 mb-2 text-[#D4AF37]">
-                            <Wand2 className="w-6 h-6" />
-                            <h4 className="font-semibold text-lg">Pedagogické shrnutí od AI Asistenta</h4>
+                                            <button className="btn btn--outline btn--sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => handlePreviewStudent(student.id)}>
+                                                Rychlý náhled <Icon icon={faArrowUpRightFromSquare} size="xs" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="empty-state" style={{ padding: 20 }}>
+                                    <Icon icon={faCircleCheck} style={{ color: 'var(--color-positive)' }} />
+                                    <p>V tomto kritériu uspěli všichni studenti.</p>
+                                </div>
+                            )}
                         </div>
-                    </div>
+                    )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* AI pedagogická doporučení */}
+                    <div className="card__header card__header--primary" style={{ borderRadius: 6, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Icon icon={faWandMagicSparkles} />
+                        <span style={{ fontWeight: 700, fontSize: '1rem' }}>Pedagogické shrnutí od AI Asistenta</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                         {data.ai_insight.split('### ').filter(s => s.trim().length > 0).map((section, idx) => {
                             const lines = section.split('\n');
                             const title = lines[0].trim().replace(/\*\*/g, '');
                             const content = lines.slice(1).join('\n').trim();
                             return (
-                                <div key={idx} className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col hover:shadow-md transition-shadow">
-                                    <h5 className="font-bold text-slate-900 mb-4 text-lg border-b border-slate-100 pb-3">{title}</h5>
-                                    <div className="text-slate-700 dark:text-slate-300 text-[14px] leading-relaxed flex-1 font-sans">
+                                <div key={idx} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column' }}>
+                                    <h5 style={{ fontWeight: 700, fontSize: '0.95rem', margin: '0 0 10px', paddingBottom: 8, borderBottom: '1px solid var(--border-color)', color: 'var(--color-primary)' }}>{title}</h5>
+                                    <div style={{ fontSize: '0.83rem', lineHeight: 1.7, color: 'var(--text-secondary)', flex: 1 }}>
                                         <ReactMarkdown
                                             components={{
-                                                p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
-                                                strong: ({ node, ...props }) => <strong className="font-bold text-slate-900" {...props} />,
-                                                ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
-                                                li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                                ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />
+                                                p: ({ node, ...props }) => <p style={{ marginBottom: 8 }} {...props} />,
+                                                strong: ({ node, ...props }) => <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }} {...props} />,
+                                                ul: ({ node, ...props }) => <ul style={{ paddingLeft: 18, marginBottom: 8 }} {...props} />,
+                                                ol: ({ node, ...props }) => <ol style={{ paddingLeft: 18, marginBottom: 8 }} {...props} />,
                                             }}
                                         >
                                             {content}
@@ -516,81 +471,61 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
                 </>
             ) : null}
 
-            {/* RYCHLÝ NÁHLED MODÁL (Student v analytice) */}
+            {/* Rychlý náhled modál */}
             {previewStudentId && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-                    <div className="bg-white dark:bg-slate-800 max-w-2xl w-full max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                <div className="modal-overlay" onClick={() => { setPreviewStudentId(null); setPreviewStudentData(null); }}>
+                    <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+                        <div className="modal__header modal__header--primary">
                             <div>
-                                <h3 className="text-lg font-bold text-[#002855] dark:text-blue-200">
-                                    {previewStudentData?.name || 'Načítání...'}
-                                </h3>
-                                {previewStudentData && (
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                                        Skóre: <span className="font-semibold text-slate-700 dark:text-slate-300">{previewStudentData.score} / {data.max_score || '?'} bodů</span>
-                                    </p>
+                                <span style={{ fontWeight: 700 }}>{previewStudentData?.name || 'Načítání...'}</span>
+                                {previewStudentData && data && (
+                                    <span style={{ fontSize: '0.8rem', opacity: 0.8, marginLeft: 8 }}>Skóre: {previewStudentData.score} / {data.max_score || '?'} bodů</span>
                                 )}
                             </div>
-                            <button onClick={() => { setPreviewStudentId(null); setPreviewStudentData(null); }} className="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 rounded-full hover:bg-slate-100 transition-colors">
-                                <X className="w-5 h-5" />
+                            <button className="btn btn--sm btn--icon-only" style={{ background: 'transparent', border: 'none', color: '#fff' }} onClick={() => { setPreviewStudentId(null); setPreviewStudentData(null); }}>
+                                <Icon icon={faXmark} />
                             </button>
                         </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-slate-800">
+                        <div className="modal__body" style={{ padding: 20, overflowY: 'auto', maxHeight: '60vh' }}>
                             {previewLoading ? (
-                                <div className="flex flex-col items-center justify-center py-12">
-                                    <RefreshCw className="w-8 h-8 text-blue-500 animate-spin mb-4" />
-                                    <p className="text-slate-500 dark:text-slate-400">Načítám detail studenta...</p>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 40, gap: 10 }}>
+                                    <span className="spinner spinner--lg" />
+                                    <p style={{ margin: 0, color: 'var(--text-muted)' }}>Načítám detail studenta...</p>
                                 </div>
                             ) : previewStudentData ? (
-                                <div className="space-y-6">
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                                     <div>
-                                        <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2 border-b pb-2">
-                                            <Wand2 className="w-5 h-5 text-blue-600" />
-                                            Zpětná vazba AI
+                                        <h4 style={{ fontWeight: 700, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-primary)' }}>
+                                            <Icon icon={faWandMagicSparkles} /> Zpětná vazba AI
                                         </h4>
-                                        <div className="text-slate-700 dark:text-slate-300 text-sm leading-relaxed bg-slate-50 dark:bg-slate-800/50 p-4 rounded-lg border border-slate-100 font-sans">
-                                            <ReactMarkdown
-                                                components={{
-                                                    strong: ({ node, ...props }) => <strong className="font-bold text-slate-900" {...props} />,
-                                                }}
-                                            >
+                                        <div style={{ fontSize: '0.85rem', lineHeight: 1.7, background: 'var(--bg-surface-2)', padding: 12, borderRadius: 6, border: '1px solid var(--border-color)' }}>
+                                            <ReactMarkdown components={{ strong: ({ node, ...props }) => <strong style={{ fontWeight: 700 }} {...props} /> }}>
                                                 {previewStudentData.zpetna_vazba}
                                             </ReactMarkdown>
                                         </div>
                                     </div>
-
                                     <div>
-                                        <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2 border-b pb-2">
-                                            <AlertTriangle className="w-5 h-5 text-amber-500" />
-                                            Nesplněná kritéria
+                                        <h4 style={{ fontWeight: 700, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <Icon icon={faTriangleExclamation} style={{ color: 'var(--color-warning)' }} /> Nesplněná kritéria
                                         </h4>
-                                        <div className="space-y-2">
-                                            {(() => {
-                                                const failed = previewStudentData.vysledky.filter(
-                                                    (v: any) => v.splneno === false || (v.splneno == null && Number(v.body) === 0)
-                                                );
-                                                if (failed.length === 0) {
-                                                    return <p className="text-emerald-600 font-medium">Student splníl všechna kritéria.</p>;
-                                                }
-                                                return (
-                                                    <div className="space-y-2">
-                                                        {failed.map((v: any, i: number) => (
-                                                            <div key={i} className="bg-red-50 p-3 rounded-lg border border-red-100 text-sm">
-                                                                <p className="font-semibold text-red-800 mb-1">{v.nazev}</p>
-                                                                <p className="text-red-600">{v.oduvodneni || 'Bez zdůvodnění'}</p>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </div>
+                                        {(() => {
+                                            const failed = previewStudentData.vysledky.filter((v: any) => v.splneno === false || (v.splneno == null && Number(v.body) === 0));
+                                            if (failed.length === 0) return <p style={{ color: 'var(--color-positive)', fontWeight: 600, margin: 0 }}>Student splnil všechna kritéria.</p>;
+                                            return (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                    {failed.map((v: any, i: number) => (
+                                                        <div key={i} className="alert alert--negative" style={{ padding: '8px 12px' }}>
+                                                            <p style={{ fontWeight: 700, margin: '0 0 4px' }}>{v.nazev}</p>
+                                                            <p style={{ margin: 0, fontSize: '0.82rem' }}>{v.oduvodneni || 'Bez zdůvodnění'}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                             ) : (
-                                <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-                                    Detail se nepodařilo načíst.
-                                </div>
+                                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Detail se nepodařilo načíst.</div>
                             )}
                         </div>
                     </div>

@@ -1,151 +1,224 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User, ChevronDown, Settings, LogOut, UserPen, Moon, Sun, BarChart3 } from 'lucide-react';
+import {
+  faUser, faChevronDown, faGear, faRightFromBracket,
+  faUserPen, faMoon, faSun, faChartBar, faHouse,
+  faClipboardList, faFileLines, faChartPie, faLock,
+  faBars, faXmark,
+} from '@fortawesome/free-solid-svg-icons';
+import { Icon } from './Icon';
 import { Tab } from '../types';
 import { API_BASE_URL } from '../utils/api';
 
 interface HeaderProps {
-    setIsAdminOpen: (isOpen: boolean) => void;
-    lecturerName: string;
-    isAdminUser: boolean;
-    activeTab: Tab;
-    onOpenStatistics: () => void;
+  setIsAdminOpen: (isOpen: boolean) => void;
+  lecturerName: string;
+  isAdminUser: boolean;
+  activeTab: Tab;
+  onOpenStatistics: () => void;
+  setActiveTab: (tab: Tab) => void;
+  hasCriteria: boolean;
+  hasEvaluations: boolean;
+  isMobileMenuOpen: boolean;
+  setIsMobileMenuOpen: (open: boolean) => void;
 }
 
-export function Header({ setIsAdminOpen, lecturerName, isAdminUser, activeTab, onOpenStatistics }: HeaderProps) {
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-    const [appVersion, setAppVersion] = useState<string>("");
+const TAB_CONFIG: { id: Tab; label: string; icon: typeof faClipboardList; requiresCriteria?: boolean; requiresEvaluations?: boolean; adminOnly?: boolean }[] = [
+  { id: 'criteria',   label: 'Precizace hodnotících kritérií', icon: faClipboardList },
+  { id: 'evaluation', label: 'Vyhodnocování ÚZ',             icon: faFileLines,    requiresCriteria: true },
+  { id: 'analytics',  label: 'Analýza třídy',  icon: faChartPie,     requiresCriteria: true, requiresEvaluations: true },
+  { id: 'statistics', label: 'Statistiky',     icon: faChartBar,     adminOnly: true },
+];
 
-    useEffect(() => {
-        fetch(`http://127.0.0.1:8001/api/v1/version`)
-            .then(res => res.json())
-            .then(data => setAppVersion(data.version || ""))
-            .catch(() => setAppVersion(""));
-    }, []);
+export function Header({
+  setIsAdminOpen, lecturerName, isAdminUser,
+  activeTab, onOpenStatistics, setActiveTab,
+  hasCriteria, hasEvaluations,
+  isMobileMenuOpen, setIsMobileMenuOpen,
+}: HeaderProps) {
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [appVersion, setAppVersion] = useState<string>('');
 
-    const [isDarkMode, setIsDarkMode] = useState(() => {
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem('theme') === 'dark' ||
-                (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        }
-        return false;
-    });
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/version`)
+      .then(res => res.json())
+      .then(data => setAppVersion(data.version || ''))
+      .catch(() => setAppVersion(''));
+  }, []);
 
-    useEffect(() => {
-        if (isDarkMode) {
-            document.documentElement.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-            localStorage.setItem('theme', 'light');
-        }
-    }, [isDarkMode]);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'dark' ||
+        (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+    return false;
+  });
 
-    useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                setIsDropdownOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
 
-    return (
-        <header className="relative h-24 bg-[#002855] text-white flex items-center justify-between px-6 shadow-md z-10 shrink-0">
-            <div className="flex items-center gap-4 flex-1">
-                {/* Nové logo ÚPVSP bez okrajů */}
-                <div className="bg-white dark:bg-slate-800/10 rounded-lg p-1 flex items-center justify-center shrink-0">
-                    <img src="/logo-upvsp.png" alt="ÚPVSP Logo" className="h-14 w-auto object-contain rounded-sm" />
-                </div>
-                <div className="flex flex-col justify-center hidden md:flex flex-1 pr-12">
-                    <h1 className="text-sm font-medium tracking-wide text-[#facc15] leading-tight">Útvar policejního vzdělávání a služební přípravy</h1>
-                    <h1 className="text-xl font-bold tracking-tight text-[#facc15] leading-tight mb-0.5">EVALUZ: Vyhodnocování ÚZ účastníků ZOP</h1>
-                    <div className="text-xs text-blue-200/60 dark:text-blue-200/40 mt-0.5">
-                        <span>Vytvořeno interně na ÚPVSP. 2026. verze {appVersion}</span>
-                    </div>
-                </div>
-                <h1 className="text-xl font-bold tracking-widest md:hidden">EVALUZ</h1>
-            </div>
-            <div className="flex items-center gap-6">
-                <div className="relative" ref={dropdownRef}>
-                    <div
-                        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                        className="flex items-center gap-2 cursor-pointer group transition-all"
-                    >
-                        <span className="text-sm text-slate-300 font-medium">Přihlášený uživatel:</span>
-                        <div className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-[#facc15] hover:text-[#002855] text-white transition-colors duration-200">
-                            <div className="w-8 h-8 rounded-full bg-slate-700 group-hover:bg-[#002855]/20 flex items-center justify-center transition-colors">
-                                <User className="w-5 h-5 text-slate-300 group-hover:text-[#002855]" />
-                            </div>
-                            <span className="text-sm font-semibold">{lecturerName}</span>
-                            <ChevronDown className="w-4 h-4 ml-1 text-slate-300 group-hover:text-[#002855]" />
-                        </div>
-                    </div>
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-                    {/* Dropdown Menu */}
-                    {isDropdownOpen && (
-                        <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-100 py-1 z-50 animate-in fade-in slide-in-from-top-2">
-                            <button
-                                onClick={() => {
-                                    setIsDropdownOpen(false);
-                                    setIsAdminOpen(true);
-                                    setTimeout(() => window.dispatchEvent(new CustomEvent('openProfileTab')), 50);
-                                }}
-                                className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-800/50 hover:text-[#002855] transition-colors flex items-center gap-2"
-                            >
-                                <UserPen className="w-4 h-4" />
-                                Můj profil
-                            </button>
-                            <div className="border-t border-slate-100 my-1"></div>
-                            <button
-                                onClick={() => {
-                                    localStorage.removeItem('upvsp_token');
-                                    window.location.reload();
-                                }}
-                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
-                            >
-                                <LogOut className="w-4 h-4" />
-                                Odhlásit se
-                            </button>
-                        </div>
-                    )}
-                </div>
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={() => setIsDarkMode(!isDarkMode)}
-                        className="p-2 text-slate-300 hover:text-white hover:bg-white dark:bg-slate-800/10 rounded-lg transition-colors"
-                        aria-label="Přepnout tmavý režim"
-                    >
-                        {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                    </button>
-                    <button
-                        onClick={() => setIsAdminOpen(true)}
-                        className="flex items-center gap-2 text-sm font-medium text-white transition-colors bg-[#004085] dark:bg-slate-700/80 hover:bg-[#0050a0] dark:hover:bg-slate-600 px-3 py-2 rounded-lg border border-[#004e9c] dark:border-slate-600 shadow-sm"
-                    >
-                        <Settings className="w-4 h-4" />
-                        Administrace
-                    </button>
-                    {isAdminUser && (
-                        <button
-                            onClick={onOpenStatistics}
-                            className={`flex items-center gap-2 text-sm font-medium transition-colors px-3 py-2 rounded-lg border shadow-sm ${
-                                activeTab === 'statistics'
-                                    ? 'bg-white text-[#002855] border-white hover:bg-slate-100 hover:text-[#001f44]'
-                                    : 'bg-[#004085] dark:bg-slate-700/80 text-white hover:bg-[#0050a0] dark:hover:bg-slate-600 border-[#004e9c] dark:border-slate-600'
-                            }`}
-                        >
-                            <BarChart3 className="w-4 h-4" />
-                            {activeTab === 'statistics' ? "Zpět k evaluacím" : "Statistiky evaluací"}
-                        </button>
-                    )}
-                </div>
-            </div>
+  const isTabLocked = (tab: typeof TAB_CONFIG[0]) => {
+    if (tab.adminOnly && !isAdminUser) return true;
+    if (tab.requiresCriteria && !hasCriteria) return true;
+    if (tab.requiresEvaluations && !hasEvaluations) return true;
+    return false;
+  };
 
-            {/* Vzkaz umístěný fixně do pravého spodního okraje, přesně pod tlačítkem Administrace */}
-            <span className="hidden md:block absolute bottom-2 right-6 text-xs text-blue-200/50 italic">
-                ...vždycky EjÁj
-            </span>
-        </header>
-    );
+  const handleTabClick = (tab: typeof TAB_CONFIG[0]) => {
+    if (isTabLocked(tab)) return;
+    if (tab.id === 'statistics') {
+      onOpenStatistics();
+    } else {
+      setActiveTab(tab.id);
+    }
+    setIsMobileMenuOpen(false);
+  };
+
+  return (
+    <header className="app-header">
+      {/* ─── Horní pruh: Aplikační nabídka (sekundární barva, 44px) ─── */}
+      <div className="header-appbar">
+        {/* Levá část: Statický titulek organizace */}
+        <div className="header-appbar__home">
+          <img
+            src="/logo-upvsp.png"
+            alt="ÚPVSP"
+            className="header-appbar__home__logo-img"
+          />
+          <span className="header-appbar__home__label">Útvar policejního vzdělávání a služební přípravy</span>
+        </div>
+
+        {/* Středová část: Logo + název + podtitulek aplikace */}
+        <div className="header-appbar__logo">
+          <span className="header-appbar__logo__name">EVALUZ</span>
+          <span className="header-appbar__logo__subtitle">AI aplikace pro vyhodnocování ÚZ v rámci ZOP</span>
+        </div>
+
+        {/* Pravá část 41.67%: Uživatel, odhlášení, dark mode */}
+        <div className="header-appbar__user">
+          {appVersion && (
+            <span className="header-appbar__user__version">v{appVersion}</span>
+          )}
+
+          {/* Přepínač dark mode */}
+          <button
+            className="header-btn header-btn--icon-only"
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            aria-label="Přepnout tmavý režim"
+            title={isDarkMode ? 'Přepnout na světlý režim' : 'Přepnout na tmavý režim'}
+          >
+            <Icon icon={isDarkMode ? faSun : faMoon} />
+          </button>
+
+          {/* Dropdown uživatele */}
+          <div className="header-dropdown" ref={dropdownRef}>
+            <button
+              className="header-btn"
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              aria-haspopup="true"
+              aria-expanded={isDropdownOpen}
+            >
+              <Icon icon={faUser} />
+              <span className="header-appbar__user__name">{lecturerName}</span>
+              <Icon icon={faChevronDown} size="xs" />
+            </button>
+
+            {isDropdownOpen && (
+              <div className="header-dropdown__menu">
+                <button
+                  className="dropdown-item"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    setIsAdminOpen(true);
+                    setTimeout(() => window.dispatchEvent(new CustomEvent('openProfileTab')), 50);
+                  }}
+                >
+                  <Icon icon={faUserPen} />
+                  Můj profil
+                </button>
+                <div className="dropdown-item--separator" role="separator" />
+                <button
+                  className="dropdown-item dropdown-item--danger"
+                  onClick={() => {
+                    localStorage.removeItem('upvsp_token');
+                    window.location.reload();
+                  }}
+                >
+                  <Icon icon={faRightFromBracket} />
+                  Odhlásit se
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Dolní pruh: Navigační menu (primární barva, 44px) ─── */}
+      <nav className="header-navbar" role="navigation" aria-label="Hlavní navigace">
+        {/* Levá část 25%: hamburger na mobilu */}
+        <div className="header-navbar__left">
+          <button
+            className={`hamburger ${isMobileMenuOpen ? 'hamburger--open' : ''}`}
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            aria-label="Otevřít navigační menu"
+            aria-expanded={isMobileMenuOpen}
+          >
+            <span className="hamburger__line" />
+            <span className="hamburger__line" />
+            <span className="hamburger__line" />
+          </button>
+        </div>
+
+        {/* Středová část 50%: záložky */}
+        <div className={`header-navbar__tabs${isMobileMenuOpen ? ' header-navbar__tabs--open' : ''}`}>
+          {TAB_CONFIG.map(tab => {
+            if (tab.adminOnly && !isAdminUser) return null;
+            const locked = isTabLocked(tab);
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                className={`nav-tab${isActive ? ' nav-tab--active' : ''}${locked ? ' nav-tab--locked' : ''}`}
+                onClick={() => handleTabClick(tab)}
+                disabled={locked}
+                title={locked ? 'Tento krok ještě není dostupný' : tab.label}
+              >
+                <Icon icon={locked ? faLock : tab.icon} size="sm" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Pravá část 25%: admin, nastavení */}
+        <div className="header-navbar__right">
+          <button
+            className="header-btn"
+            onClick={() => setIsAdminOpen(true)}
+            title="Administrace systému"
+          >
+            <Icon icon={faGear} />
+            <span>Administrace</span>
+          </button>
+        </div>
+      </nav>
+    </header>
+  );
 }
