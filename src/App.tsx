@@ -377,6 +377,7 @@ export default function EvaluzDashboard() {
         setActiveTab={setActiveTab}
         hasCriteria={hasCriteria}
         hasEvaluations={hasEvaluations}
+        hasAnalytics={activeScenarioId ? scenariosWithAnalysis.includes(activeScenarioId) : false}
         isMobileMenuOpen={isMobileMenuOpen}
         setIsMobileMenuOpen={setIsMobileMenuOpen}
       />
@@ -439,6 +440,8 @@ export default function EvaluzDashboard() {
             <div style={{ display: activeTab === 'analytics' ? 'block' : 'none' }}>
               <TabAnalytics
                 scenarioId={activeScenarioId}
+                className={activeClass?.name ?? null}
+                scenarioName={activeScenario?.name ?? null}
                 cachedData={activeScenarioId ? cachedAnalytics[activeScenarioId] : null}
                 onCacheData={(data) => {
                   if (activeScenarioId) {

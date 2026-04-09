@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.6.0 (Man-in-the-Loop + PDF/Excel Professional Refactor)
-**Poslední aktualizace:** 2. dubna 2026
+**Verze:** 3.7.0 (Produkční stabilizace — Export opravy + scenario_display_name + Statistics)
+**Poslední aktualizace:** 9. dubna 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -63,11 +63,23 @@ V milníku 2.0.0 proběhl přechod ze SQLite na PostgreSQL. Klíčové body:
 - **Integrita**: Jsou vynuceny cizí klíče (`Lecturer` -> `Class` -> `Evaluation`).
 
 ### 3.2 Klíčové tabulky
-- `lecturers`: Správa identit lektorů a SuperAdminů (včetně `must_change_password`).
+- `lecturers`: Správa identit lektorů a SuperAdminů (včetně `must_change_password`, `rank_shortcut`, `rank_full`, `funkcni_zarazeni`).
 - `evaluation_criteria`: Definice metodik pro jednotlivé modelové situace, filtrováno podle `lecturer_id`.
-- `student_evaluations`: Výsledky AI a manuálních korekcí. Obsahuje `json_result` s detaily o každém splněném bodu a `lecturer_id`.
-- `class_analyses`: Globální (výkonové) statistiky třídy, izolované podle `lecturer_id` a `class_id`.
-- `app_settings`: Dynamická konfigurace systému (LLM URL, Klíče, Modely).
+- `student_evaluations`: Výsledky AI a manuálních korekcí. Klíčové sloupce: `json_result` (JSONType), `scenario_name` (ID scénáře), `scenario_display_name` (čitelný název, ukládán od v3.7.0), `is_approved`, `student_identity` (JSONType), `cleaned_name`, `source_text`.
+- `class_analyses`: Globální (výkonové) statistiky třídy, izolované podle `lecturer_id` a `class_id`. `content_json` je JSONType (ne string) — vždy ošetřit `isinstance(raw, dict)` před `json.loads()`.
+- `app_settings`: Dynamická konfigurace systému (LLM URL, Klíče, Modely, `LLM_CONCURRENCY_OPENROUTER`, `LLM_CONCURRENCY_VLLM`).
+
+### 3.3 Migrační strategie
+- **SQLite (dev):** `init_db()` + `run_migrations()` — "kobercový nálet" přidává chybějící sloupce při každém startu.
+- **PostgreSQL (prod):** `run_alembic_migrations()` — `alembic upgrade head`. Záložní `run_migrations()` se volá v případě selhání Alembic.
+- **Nové sloupce** musí být přidány na TŘECH místech: `db_models.py`, `database.py` (SQLite + PostgreSQL větve v `run_migrations()`), a nová Alembic migrace v `alembic/versions/`.
+
+### 3.4 Pravidla pro JSON sloupce
+`json_result` a `content_json` jsou deklarovány jako `JSONType` (custom type). SQLAlchemy vrací Python dict/list přímo bez nutnosti `json.loads()`. Při čtení vždy:
+```python
+raw = record.content_json
+data = raw if isinstance(raw, dict) else json.loads(raw)
+```
 
 ---
 

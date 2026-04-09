@@ -55,6 +55,19 @@
     color: $text-on-dark;
   }
 
+  // Policejní žlutá: primární akční tlačítko EVALUZ (Vyhodnotit ÚZ)
+  &--police {
+    @include btn-states($police-yellow);
+    color: #1a1200;  // tmavý text pro kontrast na žluté
+  }
+
+  // Probíhá vyhodnocování: světle modrá (tertiary)
+  &--eval-running {
+    @include btn-states($tertiary-color);
+    color: $text-on-dark;
+    opacity: 0.85;
+  }
+
   // Negativní: Zrušit, Smazat, Storno
   &--negative {
     @include btn-states($negative-color);

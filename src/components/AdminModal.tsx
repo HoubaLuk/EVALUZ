@@ -66,6 +66,8 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     const [vllmMaxTokens, setVllmMaxTokens] = useState(2048);
     const [vllmContextWindow, setVllmContextWindow] = useState(8192);
     const [vllmEnableThinking, setVllmEnableThinking] = useState(true);
+    const [concurrencyOpenRouter, setConcurrencyOpenRouter] = useState(2);
+    const [concurrencyVllm, setConcurrencyVllm] = useState(8);
 
     // MLOps & RAG
     const [enableRagModule, setEnableRagModule] = useState(false);
@@ -162,6 +164,8 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     if (s.key === 'THINKING_PHASE3') setThinkingPhase3(s.value === 'true');
 
                     if (s.key === 'ENABLE_RAG_MODULE') setEnableRagModule(s.value === 'true');
+                    if (s.key === 'LLM_CONCURRENCY_OPENROUTER') setConcurrencyOpenRouter(parseInt(s.value, 10) || 2);
+                    if (s.key === 'LLM_CONCURRENCY_VLLM') setConcurrencyVllm(parseInt(s.value, 10) || 8);
                 });
             }
 
@@ -391,7 +395,9 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                         { key: 'VLLM_PRESENCE_PENALTY', value: vllmPresence.toString() },
                         { key: 'VLLM_FREQUENCY_PENALTY', value: vllmFreq.toString() },
                         { key: 'VLLM_MAX_TOKENS', value: vllmMaxTokens.toString() },
-                        { key: 'LLM_CONTEXT_WINDOW', value: vllmContextWindow.toString() }
+                        { key: 'LLM_CONTEXT_WINDOW', value: vllmContextWindow.toString() },
+                        { key: 'LLM_CONCURRENCY_OPENROUTER', value: concurrencyOpenRouter.toString() },
+                        { key: 'LLM_CONCURRENCY_VLLM', value: concurrencyVllm.toString() }
                     ])
                 });
             } else if (adminTab === 'profile') {
@@ -724,28 +730,32 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                     <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Volba inferenčního enginu a mapování úloh na konkrétní modely.</p>
                                 </div>
 
-                                <div className="card" style={{ padding: 14 }}>
+                                <div className="card" style={{ padding: 14, flexShrink: 0 }}>
                                     <h4 style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
                                         <Icon icon={faPowerOff} style={{ color: 'var(--color-primary)' }} /> Hlavní připojení (Endpoint Node)
                                     </h4>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                                        <div className="form-group">
-                                            <label>Cílová Platforma</label>
-                                            <select value={llmPlatform} onChange={(e) => setLlmPlatform(e.target.value)} className="form-control">
-                                                <option value="vllm">vLLM (Produkce GPU)</option>
-                                                <option value="lmstudio">LM Studio (Lokální vývoj)</option>
-                                                <option value="ollama">Ollama (Lokální CLI)</option>
-                                            </select>
-                                        </div>
-                                        <div className="form-group">
-                                            <label>API Endpoint URL</label>
-                                            <input type="text" placeholder={llmPlatform === 'ollama' ? 'http://localhost:11434/v1' : 'http://localhost:8000/v1'} value={vllmUrl} onChange={(e) => setVllmUrl(e.target.value)} className="form-control" />
-                                        </div>
+                                    <div className="form-group" style={{ marginBottom: 8 }}>
+                                        <label>Cílová Platforma</label>
+                                        <select value={llmPlatform} onChange={(e) => setLlmPlatform(e.target.value)} className="form-control" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%236c757d' d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E\")", backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', backgroundSize: '12px', paddingRight: 32 }}>
+                                            <option value="vllm">vLLM (Produkce GPU)</option>
+                                            <option value="openrouter">OpenRouter (API Gateway)</option>
+                                            <option value="lmstudio">LM Studio (Lokální vývoj)</option>
+                                            <option value="ollama">Ollama (Lokální CLI)</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 8 }}>
+                                        <label>API Endpoint URL</label>
+                                        <input type="text" placeholder={
+                                            llmPlatform === 'ollama' ? 'http://localhost:11434/v1' :
+                                            llmPlatform === 'lmstudio' ? 'http://localhost:1234/v1' :
+                                            llmPlatform === 'openrouter' ? 'https://openrouter.ai/api/v1' :
+                                            'http://localhost:8000/v1'
+                                        } value={vllmUrl} onChange={(e) => setVllmUrl(e.target.value)} className="form-control" />
                                     </div>
                                     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
                                         <div className="form-group" style={{ flex: 1, margin: 0 }}>
-                                            <label>API Key (volitelné)</label>
-                                            <input type="text" autoComplete="off" placeholder="sk-..." value={isApiKeyFocused ? vllmApiKey : (vllmApiKey ? '••••••••••••••••' : '')} onChange={(e) => setVllmApiKey(e.target.value)} onFocus={() => setIsApiKeyFocused(true)} onBlur={() => setIsApiKeyFocused(false)} className="form-control" />
+                                            <label>API Key {llmPlatform === 'vllm' ? '(volitelné)' : '(povinné)'}</label>
+                                            <input type="text" autoComplete="off" placeholder={llmPlatform === 'openrouter' ? 'sk-or-v1-...' : 'sk-...'} value={isApiKeyFocused ? vllmApiKey : (vllmApiKey ? '••••••••••••••••' : '')} onChange={(e) => setVllmApiKey(e.target.value)} onFocus={() => setIsApiKeyFocused(true)} onBlur={() => setIsApiKeyFocused(false)} className="form-control" />
                                         </div>
                                         <button className="btn btn--outline" onClick={handleTestConnection} disabled={isTestingConnection || !vllmUrl}>
                                             {isTestingConnection ? <span className="spinner spinner--sm" /> : <Icon icon={faPowerOff} />}
@@ -794,6 +804,31 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                             <input type="number" min="1024" max="128000" step="1024" value={vllmContextWindow} onChange={e => setVllmContextWindow(parseInt(e.target.value) || 8192)} className="form-control" />
                                         </div>
                                     </div>
+
+                                    {/* Batch concurrency — rozděleno dle platformy */}
+                                    <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 12, marginBottom: 14, marginTop: 4 }}>
+                                        <h4 style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 2px' }}>Paralelní zpracování (Batch Concurrency)</h4>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Počet ÚZ vyhodnocovaných souběžně. Změna se projeví po restartu serveru.</p>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+                                        <div className="card" style={{ padding: 12 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem', display: 'block', marginBottom: 4 }}>
+                                                OpenRouter
+                                                <span className="badge badge--warning" style={{ fontSize: '0.6rem', marginLeft: 6 }}>Rate-limit</span>
+                                            </label>
+                                            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 6 }}>OpenRouter má rate limity. Doporučeno: 1–3.</p>
+                                            <input type="number" min="1" max="10" value={concurrencyOpenRouter} onChange={e => setConcurrencyOpenRouter(parseInt(e.target.value) || 2)} className="form-control" />
+                                        </div>
+                                        <div className="card" style={{ padding: 12 }}>
+                                            <label style={{ fontWeight: 600, fontSize: '0.82rem', display: 'block', marginBottom: 4 }}>
+                                                vLLM (GPU server)
+                                                <span className="badge badge--positive" style={{ fontSize: '0.6rem', marginLeft: 6 }}>Batch</span>
+                                            </label>
+                                            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 6 }}>L40S zvládne 8+ souběžných. Doporučeno: 8.</p>
+                                            <input type="number" min="1" max="32" value={concurrencyVllm} onChange={e => setConcurrencyVllm(parseInt(e.target.value) || 8)} className="form-control" />
+                                        </div>
+                                    </div>
+
                                     {llmPlatform !== 'ollama' && (
                                         <div className="alert alert--warning" style={{ marginBottom: 10, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                                             <Icon icon={faCircleExclamation} style={{ flexShrink: 0, marginTop: 2 }} />

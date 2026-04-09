@@ -6,6 +6,9 @@ Zajišťuje komunikaci přes WebSockety pro real-time stav a spravuje asynchronn
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from typing import List
+
+# Maximální velikost jednoho souboru (10 MB) — nginx limit je 50 MB, ale aplikační vrstva je přísnější
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 import json
 import asyncio
 import unicodedata
@@ -93,7 +96,7 @@ def save_golden_example(request: GoldenExampleRequest, db: Session = Depends(get
         lecturer_id=current_user.id, # Isolate golden examples per lecturer
         source_text=request.source_text,
         perfect_json=request.perfect_json,
-        created_at=datetime.datetime.utcnow()
+        created_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     )
     db.add(new_example)
     db.commit()
@@ -125,6 +128,9 @@ async def fast_scan_batch(
         student_name = unicodedata.normalize('NFC', file.filename)
         try:
             content_bytes = await file.read()
+            if len(content_bytes) > MAX_UPLOAD_SIZE:
+                print(f"[FAST-SCAN] Soubor {file.filename} překračuje limit {MAX_UPLOAD_SIZE // 1024 // 1024} MB, přeskakuji.")
+                return None
             # 1. Vytěžení textu
             extracted_text = await extract_text(content_bytes, file.filename)
             
@@ -182,10 +188,11 @@ async def fast_scan_batch(
             if existing_eval:
                 existing_eval.cleaned_name = cleaned_display_name
                 existing_eval.source_text = extracted_text
-                if scenario_display_name:
-                    existing_eval.scenario_display_name = scenario_display_name
                 if identita:
                     existing_eval.student_identity = identita
+                # Aktualizuj scenario_display_name pokud přišel neprázdný
+                if scenario_display_name:
+                    existing_eval.scenario_display_name = scenario_display_name
                 db.commit()
                 db.refresh(existing_eval)
                 eval_to_return = existing_eval
@@ -195,12 +202,12 @@ async def fast_scan_batch(
                     cleaned_name=cleaned_display_name,
                     class_id=class_id_to_use,
                     scenario_name=scenario_id,
-                    scenario_display_name=scenario_display_name,
+                    scenario_display_name=scenario_display_name or "",
                     source_text=extracted_text,
                     source_filename=student_name,
                     lecturer_id=current_user.id,
                     student_identity=identita if identita else {},
-                    created_at=datetime.datetime.utcnow()
+                    created_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
                 )
                 db.add(new_eval)
                 db.commit()
@@ -227,10 +234,11 @@ async def fast_scan_batch(
 
 @router.post("/batch")
 async def evaluate_batch(
-    files: List[UploadFile] = File(None), 
+    files: List[UploadFile] = File(None),
     scenario_id: str = Form(...),
+    scenario_display_name: str = Form(""),  # Čitelný název scénáře, např. "MS2: Vstup do obydlí"
     student_ids: str = Form(None), # Comma separated IDs
-    db: Session = Depends(get_db), 
+    db: Session = Depends(get_db),
     current_user: Lecturer = Depends(get_current_lecturer)
 ):
     """
@@ -326,6 +334,7 @@ async def evaluate_batch(
         criteria_markdown = task_data['criteria_markdown']
         current_user_id = task_data['lecturer_id']
         scen_id = task_data['scenario_id']
+        scen_display_name = task_data.get('scenario_display_name', '')
         
         student_name = unicodedata.normalize('NFC', file_data['filename'])
         
@@ -388,9 +397,13 @@ async def evaluate_batch(
                 
                 if existing_eval:
                     existing_eval.json_result = llm_result_dict
+                    existing_eval.is_approved = False  # Re-evaluace zruší předchozí schválení
                     if existing_eval.student_identity and identita and not "prijmeni" in (existing_eval.student_identity or {}):
                          existing_eval.student_identity = identita
                          existing_eval.cleaned_name = cleaned_eval_name
+                    # Aktualizuj scenario_display_name pokud zatím není uložen
+                    if scen_display_name and not existing_eval.scenario_display_name:
+                        existing_eval.scenario_display_name = scen_display_name
                 if not existing_eval:
                     # Pojistka pro asynchronní worker - třída 'Základní kurz' MUSÍ existovat pro lektora.
                     default_class = db_bg.query(ClassRoom).filter(
@@ -412,6 +425,7 @@ async def evaluate_batch(
                         student_name=student_name,
                         class_id=default_class.id if default_class else 1,
                         scenario_name=scen_id,
+                        scenario_display_name=scen_display_name or "",
                         lecturer_id=current_user_id,
                         json_result=llm_result_dict,
                         cleaned_name=cleaned_eval_name,
@@ -454,6 +468,7 @@ async def evaluate_batch(
             "system_prompt": system_prompt_str,
             "criteria_markdown": criteria_str,
             "scenario_id": scenario_id,
+            "scenario_display_name": scenario_display_name,
             "lecturer_id": current_user.id
         }
         await eval_queue.add_task(task)

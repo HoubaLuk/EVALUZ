@@ -32,6 +32,10 @@ const PIE_COLORS = ['#c51515', '#e28413', '#178754'];
 interface TabAnalyticsProps {
     /** ID aktuálně vybrané modelové situace (scénáře) */
     scenarioId: string | null;
+    /** Zobrazovaný název třídy (např. "ZOP 01/2026") — pro B2 v Excelu a PDF */
+    className?: string | null;
+    /** Zobrazovaný název scénáře (např. "MS2: Vstup do obydlí") — pro B3 v Excelu a PDF */
+    scenarioName?: string | null;
     /** Případná nacachovaná data pro okamžité zobrazení */
     cachedData?: any | null;
     /** Callback pro uložení dat do cache rodiče */
@@ -44,7 +48,7 @@ interface TabAnalyticsProps {
  * Komponenta pro zobrazení globální analýzy výsledků celé třídy.
  * Obsahuje interaktivní grafy (Recharts), AI doporučení a seznam studentů vyžadujících pomoc.
  */
-export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
+export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
     const { showAlert } = useDialog();
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -114,9 +118,12 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
      */
     const handleExportExcel = async () => {
         try {
-            const url = scenarioId
-                ? `${API_BASE_URL}/export/class/1/excel?scenario_id=${scenarioId}`
-                : `${API_BASE_URL}/export/class/1/excel`;
+            const baseUrl = `${API_BASE_URL}/export/class/1/excel`;
+            const params = new URLSearchParams();
+            if (scenarioId) params.set('scenario_id', scenarioId);
+            if (className) params.set('class_name', className);
+            if (scenarioName) params.set('scenario_display_name', scenarioName);
+            const url = `${baseUrl}?${params.toString()}`;
 
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
@@ -157,7 +164,11 @@ export function TabAnalytics({ scenarioId, cachedData, onCacheData, onNavigateTo
     const handleExportPDF = async () => {
         const token = localStorage.getItem('upvsp_token');
         const finalScenarioId = data?.scenario_id || scenarioId || 'Neznámý_scénář';
-        const url = `${API_BASE_URL}/export/class-report/${encodeURIComponent(finalScenarioId)}`;
+        const params = new URLSearchParams();
+        if (className) params.set('class_name', className);
+        if (scenarioName) params.set('scenario_display_name', scenarioName);
+        const queryString = params.toString() ? `?${params.toString()}` : '';
+        const url = `${API_BASE_URL}/export/class-report/${encodeURIComponent(finalScenarioId)}${queryString}`;
         try {
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }

@@ -263,6 +263,8 @@ DATABASE_URL=sqlite:///./upvsp_evaluator.db alembic upgrade head
 | `35e3a28e8797` | `created_at`: `VARCHAR` → `DateTime` (4 tabulky) |
 | `03bbfb3db9b0` | JSON sloupce: `TEXT` → `JSONB` na PostgreSQL |
 | `53fae6cde19e` | NOT NULL constraints + ClassAnalysis cache versioning |
+| `b4e9f1a2c3d5` | `is_approved` na `student_evaluations` |
+| `a1b2c3d4e5f6` | `scenario_display_name` na `student_evaluations` |
 
 ---
 

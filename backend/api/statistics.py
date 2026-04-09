@@ -108,9 +108,17 @@ def get_statistics_dashboard(
     if scenario_name:
         query = query.filter(StudentEvaluation.scenario_name == scenario_name)
     if start_date:
-        query = query.filter(StudentEvaluation.created_at >= start_date)
+        try:
+            from datetime import datetime as _dt
+            query = query.filter(StudentEvaluation.created_at >= _dt.fromisoformat(start_date))
+        except Exception:
+            pass
     if end_date:
-        query = query.filter(StudentEvaluation.created_at <= end_date + "T23:59:59")
+        try:
+            from datetime import datetime as _dt
+            query = query.filter(StudentEvaluation.created_at <= _dt.fromisoformat(end_date).replace(hour=23, minute=59, second=59))
+        except Exception:
+            pass
 
     records = query.all()
 
@@ -139,7 +147,12 @@ def get_statistics_dashboard(
 
         # Timeline stats
         if eval_record.created_at:
-            date_prefix = eval_record.created_at[:10]
+            # created_at může být datetime objekt (SQLite) nebo string (starší záznamy)
+            ca = eval_record.created_at
+            if hasattr(ca, 'strftime'):
+                date_prefix = ca.strftime('%Y-%m-%d')
+            else:
+                date_prefix = str(ca)[:10]
         else:
             date_prefix = "Archiv"
         timeline[date_prefix] = timeline.get(date_prefix, 0) + 1

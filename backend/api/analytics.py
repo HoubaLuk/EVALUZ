@@ -49,14 +49,18 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
 
     for eval_record in evaluations:
         try:
-            # Reconstruct the dict from stored JSON so it matches EvaluationResponse
-            data = eval_record.json_result if eval_record.json_result else {}
+            # DŮLEŽITÉ: Kopírujeme dict, aby nedošlo ke circular reference.
+            # eval_record.json_result je JSONB z DB (dict). Kdybychom ho přímo mutovali
+            # a pak přiřadili data["json_result"] = eval_record.json_result, vznikl by
+            # circular reference (data odkazuje sám na sebe).
+            raw_json = eval_record.json_result  # originál — NEZMĚNĚNÝ
+            data = dict(raw_json) if raw_json else {}  # mělká kopie pro mutace
             # Make sure we inject the student_name and ID into the payload just like the frontend expects it
             data["jmeno_studenta"] = eval_record.student_name
             data["id"] = eval_record.id
             data["cleaned_name"] = eval_record.cleaned_name
-            # Inject raw json_result so frontend quickview can access original splneno values
-            data["json_result"] = eval_record.json_result
+            # Inject raw json_result (originál, nikoli kopie data) pro frontend quickview
+            data["json_result"] = raw_json
             data["is_approved"] = eval_record.is_approved or False
 
             if eval_record.student_identity:

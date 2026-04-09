@@ -171,6 +171,7 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
             const formData = new FormData();
             validFiles.forEach(f => formData.append('files', f));
             formData.append('scenario_id', scen.id);
+            formData.append('scenario_display_name', scen.name || '');
             await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },

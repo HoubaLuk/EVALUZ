@@ -80,7 +80,7 @@ def export_class_report_pdf(
     class_name: str = "",
     scenario_display_name: str = "",
     db: Session = Depends(get_db),
-    current_user: Lecturer = Depends(get_current_lecturer_export)
+    current_user: Lecturer = Depends(get_current_lecturer)
 ):
     """
     Vygeneruje a vrátí PDF globální analýzy třídy pro danou modelovou situaci.
@@ -99,10 +99,15 @@ def export_class_report_pdf(
         if not cached_analysis:
             raise HTTPException(status_code=404, detail="Analýza pro toto téma zatím neexistuje. Obnovte a vygenerujte analýzu ve frontend aplikaci.")
             
-        data = json.loads(cached_analysis.content_json)
-        # Oprava double-encoded JSON (content_json může být string místo dict)
-        if isinstance(data, str):
-            data = json.loads(data)
+        # content_json může být dict (SQLAlchemy JSON type) nebo string (starší záznamy)
+        raw = cached_analysis.content_json
+        if isinstance(raw, dict):
+            data = raw
+        else:
+            data = json.loads(raw)
+            # Oprava double-encoded JSON
+            if isinstance(data, str):
+                data = json.loads(data)
 
         from models.db_models import ClassRoom, EvaluationCriteria, Criterion
         import re as _re_strip
@@ -144,7 +149,9 @@ def export_class_report_pdf(
                     class_name = _cr2.name
 
         # scenario_display_name: query param má nejvyšší prioritu
-        scenario_display = scenario_display_name  # z query param
+        scenario_display = scenario_display_name  # z query param (přichází z frontendu)
+
+        # Fallback 1: načíst z DB ze záznamu StudentEvaluation (uloženo při vyhodnocení)
         if not scenario_display:
             _eval_q = db.query(StudentEvaluation).filter(
                 StudentEvaluation.scenario_name == decoded_id,
@@ -155,7 +162,7 @@ def export_class_report_pdf(
             if _eval_sample and _eval_sample.scenario_display_name:
                 scenario_display = _eval_sample.scenario_display_name
 
-        # Fallback: parse markdown_content for first ## heading
+        # Fallback 2: parse markdown_content for first ## heading
         if not scenario_display and criteria_record and criteria_record.markdown_content:
             for _line in criteria_record.markdown_content.strip().split('\n'):
                 _line = _line.strip()
@@ -277,7 +284,8 @@ def save_export_history(history_entry: ExportHistoryCreate, db: Session = Depend
     Uloží nově proběhlý export do databáze (zavoláno z frontendu po úspěšném stažení nebo před otevřením).
     """
     prague_tz = pytz.timezone('Europe/Prague')
-    current_time = datetime.now(prague_tz).strftime('%Y-%m-%d %H:%M:%S')
+    # SQLite vyžaduje Python datetime objekt (ne string) — použijeme naive datetime bez tzinfo
+    current_time = datetime.now(prague_tz).replace(tzinfo=None)
 
     new_history = ExportHistory(
         user_id=current_user.id,

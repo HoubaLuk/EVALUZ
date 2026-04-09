@@ -8,6 +8,7 @@ $secondary-color: #13689f;  // aplikační nabídka (horní bar), produkční ve
 $tertiary-color:  #177fc1;  // podřízené prvky
 $positive-color:  #178754;  // uložit, schválit, Home Button, vývojová verze
 $warning-color:   #e28413;  // upozornění, abnormální stav
+$police-yellow:   #FFD100;  // policejní žlutá — primární akční tlačítka EVALUZ (dle vizuálního standardu PČR)
 $negative-color:  #c51515;  // chyba, smazat, zrušit
 $light-color:     #6c757d;  // stavová tlačítka, pozadí kontejnerů
 $dark-color:      #495057;  // stavová tlačítka
@@ -31,6 +32,8 @@ $text-on-dark:    #ffffff;
   --color-tertiary:   #{$tertiary-color};
   --color-positive:   #{$positive-color};
   --color-warning:    #{$warning-color};
+  --color-police-yellow: #{$police-yellow};
+  --color-police-yellow-text: #1a1200;  /* tmavý text pro kontrast na žluté */
   --color-negative:   #{$negative-color};
   --color-light:      #{$light-color};
   --color-dark:       #{$dark-color};

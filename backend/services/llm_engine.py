@@ -11,6 +11,39 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from models.db_models import AppSettings
 
+
+def _resolve_platform(platform: str, api_url: str) -> str:
+    """
+    Vrátí skutečnou platformu na základě URL — URL má přednost před nastavením.
+    Chrání před špatnou konfigurací (např. platform=vllm + OpenRouter URL).
+    """
+    if "openrouter.ai" in api_url:
+        return "openrouter"
+    if "openai.com" in api_url:
+        return "openai"
+    return platform  # vllm, ollama, lmstudio
+
+
+def _build_llm_kwargs(platform: str, enable_thinking: bool, context_window: int, response_format_json: bool) -> dict:
+    """
+    Vrátí platform-specifické extra kwargs pro OpenAI client.
+    - vllm: extra_body s enable_thinking (proprietární parametr vLLM serveru)
+    - ollama: extra_body s num_ctx (kontextové okno)
+    - openrouter / openai / lmstudio: žádné extra parametry
+    """
+    extra = {}
+    if response_format_json:
+        extra["response_format"] = {"type": "json_object"}
+    if platform == "vllm":
+        extra["extra_body"] = {
+            "enable_thinking": enable_thinking,
+            "chat_template_kwargs": {"enable_thinking": enable_thinking}
+        }
+    elif platform == "ollama":
+        extra["extra_body"] = {"num_ctx": context_window}
+    # openrouter, openai, lmstudio — žádné proprietární extra_body
+    return extra
+
 async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None) -> dict:
     """
     HLAVNÍ FUNKCE PRO EVALUACI (Fáze 2).
@@ -44,25 +77,26 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
     db_max_tokens = db.query(AppSettings).filter(AppSettings.key == "VLLM_MAX_TOKENS").first()
     
-    platform = db_platform.value if db_platform and db_platform.value else "vllm"
+    raw_platform = db_platform.value if db_platform and db_platform.value else "vllm"
     top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
     presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
     frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
     context_window = int(db_context.value) if db_context and db_context.value else 8192
     max_tokens = int(db_max_tokens.value) if db_max_tokens and db_max_tokens.value else 4096
-    
+
     if not api_url or not model_name:
         raise ValueError("LLM konfigurace (URL nebo Model) chybí v databázi. Nastavte je v Administraci.")
 
-    # Oprava URL pro OpenRouter (pokud uživatel zapomene přidat /api/v1).
+    # Normalizace OpenRouter URL
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
         api_url = "https://openrouter.ai/api/v1"
 
-    # Logování do terminálu pro kontrolu, kam požadavek zrovna teče.
-    prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
-    print(f"{prefix}LLM volání směřuje na: {api_url} s modelem: {model_name}")
+    # Skutečná platforma (URL má přednost před nastavením)
+    platform = _resolve_platform(raw_platform, api_url)
 
-    # Inicializace klienta dynamicikého pro každý požadavek (aby se projevily změny v URL u stejné instance serveru).
+    prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
+    print(f"{prefix}LLM volání: platform={platform}, url={api_url}, model={model_name}")
+
     client = AsyncOpenAI(
         base_url=api_url,
         api_key=api_key or "sk-no-key-required",
@@ -122,29 +156,9 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
             "max_tokens": max_tokens
         }
 
-        # Pokud model podporuje JSON mode a není to LM Studio/Ollama (které mívají nestandardní implementaci),
-        # můžeme ho zkusit aktivovat. Ale pro jistotu ho u local providerů vynecháme a spoléháme na prompt.
-        if platform == "vllm" and "openrouter.ai" not in api_url:
-            kwargs["response_format"] = {"type": "json_object"}
-        elif platform in ["lmstudio", "ollama"] or "openrouter.ai" in api_url:
-            # LM Studio a OpenRouter modely často selhávají při vynuceném JSON mode
-            pass 
-        else:
-            # Default pro OpenAI/ostatní
-            kwargs["response_format"] = {"type": "json_object"}
-
-        # vLLM specifické parametry pro uvažování posíláme jen tam, kde víme, že to API nezahodí s chybou
-        if platform == "vllm":
-            kwargs["extra_body"] = {
-                "enable_thinking": enable_thinking,
-                "chat_template_kwargs": {"enable_thinking": enable_thinking}
-            }
-        
-        # Pro Ollama přidáme nastavení kontextového okna přímo do požadavku
-        if platform == "ollama":
-            if "extra_body" not in kwargs:
-                kwargs["extra_body"] = {}
-            kwargs["extra_body"]["num_ctx"] = context_window
+        # JSON mode: vLLM a OpenAI ho podporují spolehlivě; OpenRouter/Ollama/LM Studio ne
+        use_json_mode = platform in ("vllm", "openai")
+        kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
             
         # Voláme model.
         response = await client.chat.completions.create(**kwargs)
@@ -208,17 +222,19 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
     db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
     db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
     
-    platform = db_platform.value if db_platform and db_platform.value else "vllm"
+    raw_platform = db_platform.value if db_platform and db_platform.value else "vllm"
     top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
     presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
     frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
     context_window = int(db_context.value) if db_context and db_context.value else 8192
-    
+
     if not api_url or not model_name:
         return {}
 
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
         api_url = "https://openrouter.ai/api/v1"
+
+    platform = _resolve_platform(raw_platform, api_url)
 
     client = AsyncOpenAI(
         base_url=api_url,
@@ -227,8 +243,8 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
         http_client=httpx.AsyncClient(timeout=60.0)
     )
     
-    print(f"[FAST-SCAN] Extrakce identity pomocí modelu: {model_name}")
-    
+    print(f"[FAST-SCAN] platform={platform}, model={model_name}")
+
     system_prompt = "Jsi asistent pro vytěžování dat z textu. Tvým úkolem je najít jméno, příjmení a hodnost studenta."
     
     # Use only the first and last ~500 chars to save tokens
@@ -267,22 +283,11 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
             "max_tokens": 1000 
         }
         
-        if platform == "vllm" and "openrouter.ai" not in api_url:
-            kwargs["response_format"] = {"type": "json_object"}
-        
-        if platform == "vllm":
-            kwargs["extra_body"] = {
-                "enable_thinking": enable_thinking,
-                "chat_template_kwargs": {"enable_thinking": enable_thinking}
-            }
-            
-        if platform == "ollama":
-            if "extra_body" not in kwargs:
-                kwargs["extra_body"] = {}
-            kwargs["extra_body"]["num_ctx"] = context_window
+        use_json_mode = platform in ("vllm", "openai")
+        kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
 
         response = await client.chat.completions.create(**kwargs)
-        
+
         msg_content = response.choices[0].message.content
         if not msg_content:
             print(f"[FAST-SCAN] Model vrátil prázdnou odpověď (content=None). Model: {model_name}")
@@ -347,14 +352,16 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
             enable_thinking = (db_thinking.value.lower() == 'true')
     
     api_url = db_url.value if db_url and db_url.value else ""
-    platform = db_platform.value if db_platform and db_platform.value else "vllm"
+    raw_platform = db_platform.value if db_platform and db_platform.value else "vllm"
     api_key = db_key.value if db_key and db_key.value else ""
-    
+
     if not api_url or not model_name:
         raise ValueError(f"LLM konfigurace chybí v databázi (Phase: {phase or 'Global'}).")
 
     if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
         api_url = "https://openrouter.ai/api/v1"
+
+    platform = _resolve_platform(raw_platform, api_url)
 
     top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
     presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
@@ -390,16 +397,7 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
             "max_tokens": max_tokens
         }
         
-        if platform == "vllm":
-            kwargs["extra_body"] = {
-                "enable_thinking": enable_thinking,
-                "chat_template_kwargs": {"enable_thinking": enable_thinking}
-            }
-            
-        if platform == "ollama":
-            if "extra_body" not in kwargs:
-                kwargs["extra_body"] = {}
-            kwargs["extra_body"]["num_ctx"] = context_window
+        kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, response_format_json=False))
 
         response = await client.chat.completions.create(**kwargs)
         return response.choices[0].message.content.strip()

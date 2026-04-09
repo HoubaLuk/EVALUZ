@@ -63,6 +63,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const [files, setFiles] = useState<File[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const wsConnectCountRef = useRef(0);
     const [isCancelling, setIsCancelling] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -96,6 +97,18 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             const wsToken = localStorage.getItem('upvsp_token') || '';
             const wsUrl = API_BASE_URL.replace('http', 'ws') + `/evaluate/ws?lecturer_id=${lecturerId}&token=${encodeURIComponent(wsToken)}`;
             ws = new WebSocket(wsUrl);
+            ws.onopen = () => {
+                wsConnectCountRef.current += 1;
+                if (wsConnectCountRef.current > 1) {
+                    // Backend restarted nebo spojení přerušeno — resetujeme zaseknutý stav
+                    setStudents(prev => prev.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
+                    setIsEvaluating(false);
+                    setEvaluationProgress(0);
+                    setTotalToEvaluate(0);
+                    setEvaluatedCount(0);
+                    fetchEvaluations();
+                }
+            };
             ws.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
                 // Backend posílá zprávy o startu (EVAL_START), úspěchu (EVAL_SUCCESS) nebo chybě (EVAL_ERROR).
@@ -216,6 +229,14 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         fetchEvaluations();
     }, [scenarioId]);
 
+    // Průběžně synchronizujeme hasEvaluations do App.tsx — kdykoli se změní seznam studentů.
+    // Tím se odemkne záložka "Analýza třídy" i bez page refresh po EVAL_SUCCESS nebo schválení.
+    useEffect(() => {
+        if (onEvaluatedChange) {
+            onEvaluatedChange(students.some(s => s.status === 'evaluated'));
+        }
+    }, [students]);
+
     const toggleStudent = (id: number) => {
         setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
@@ -278,6 +299,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         const formData = new FormData();
         validFiles.forEach(f => formData.append('files', f));
         formData.append('scenario_id', scenarioId || 'default');
+        formData.append('scenario_display_name', scenarioName || '');
 
         try {
             setToastMessage("Identifikuji autory úředních záznamů...");
@@ -400,6 +422,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             formData.append('student_ids', studentIdsFromDB.join(','));
         }
         formData.append('scenario_id', scenarioId);
+        formData.append('scenario_display_name', scenarioName || '');
 
 
 
@@ -438,13 +461,16 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 setTimeout(() => {
                     setIsEvaluating(false);
                     setEvaluationProgress(0);
-                    
+                    // Resetujeme všechny studenty kteří mohli zůstat zaseknutí ve stavu 'evaluating'
+                    setStudents(prev => prev.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
+                    fetchEvaluations();
+
                     if (errorCount > 0) {
                         setToastMessage(`Vyhodnocování dokončeno s ${errorCount} chybami. Zkontrolujte prosím seznam záznamů.`);
                     } else {
                         setToastMessage("Dávka úspěšně zpracována.");
                     }
-                    
+
                     setTimeout(() => {
                         setToastMessage(null);
                         setErrorCount(0);
@@ -739,10 +765,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
             {/* Toast */}
             {toastMessage && (
-                <div className="alert alert--positive" style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+                <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', background: 'var(--color-secondary)', color: '#fff', padding: '8px 14px', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.25)', fontSize: '0.875rem', fontWeight: 600 }}>
                     <Icon icon={faCircleCheck} />
                     <span>{toastMessage}</span>
-                    <button className="btn btn--sm btn--icon-only" style={{ marginLeft: 8, background: 'transparent', border: 'none', color: 'inherit' }} onClick={() => setToastMessage(null)}>
+                    <button className="btn btn--sm btn--icon-only" style={{ marginLeft: 4, background: 'transparent', border: 'none', color: '#fff' }} onClick={() => setToastMessage(null)}>
                         <Icon icon={faXmark} />
                     </button>
                 </div>
@@ -774,15 +800,15 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
-                        className={`btn btn--lg${canEvaluate ? ' btn--warning' : ''}`}
+                        className={`btn btn--lg${isEvaluating ? ' btn--eval-running' : (canEvaluate ? ' btn--police' : '')}`}
                         onClick={handleBatchEvaluate}
                         disabled={!canEvaluate}
                         style={{ minWidth: 200, position: 'relative', overflow: 'hidden' }}
                     >
                         {isEvaluating ? <span className="spinner spinner--sm spinner--white" /> : <Icon icon={faWandMagicSparkles} />}
-                        <span>{(isEvaluating && canEvaluate) ? 'Přidat do fronty AI' : isEvaluating ? 'Hromadně AI...' : 'Vyhodnotit označené ÚZ'}</span>
+                        <span>{(isEvaluating && canEvaluate) ? 'Přidat do fronty AI' : isEvaluating ? 'Vyhodnotit ÚZ' : 'Vyhodnotit označené ÚZ'}</span>
                         {isEvaluating && (
-                            <div style={{ position: 'absolute', bottom: 0, left: 0, height: 3, background: 'rgba(255,255,255,0.5)', width: `${evaluationProgress}%`, transition: 'width 0.3s' }} />
+                            <div style={{ position: 'absolute', bottom: 0, left: 0, height: 3, background: 'rgba(255,255,255,0.4)', width: `${evaluationProgress}%`, transition: 'width 0.3s' }} />
                         )}
                     </button>
                     {isEvaluating && (
@@ -827,7 +853,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                 />
                                 <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
                                     <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                        <p style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: selectedStudent === student.id ? 'var(--color-primary)' : 'var(--text-primary)' }}>
+                                        <p style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0, lineHeight: 1.3, color: selectedStudent === student.id ? 'var(--color-primary)' : 'var(--text-primary)' }}>
                                             {(student.cleanedName || student.name).split(',')[0].replace(/^(rtn\.|stržm\.|pprap\.|prap\.|nrtm\.|por\.|npor\.|kpt\.|mjr\.|pplk\.|plk\.|genmjr\.|genpor\.|gen\.)\s+/i, '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim()}
                                         </p>
                                         {!student.identita && student.status === 'evaluated' && (
@@ -856,7 +882,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         )}
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger asChild>
-                                                <button className="btn btn--sm btn--icon-only btn--outline" onClick={(e) => e.stopPropagation()} style={{ opacity: 0.5 }}>
+                                                <button className="btn btn--sm btn--icon-only btn--outline" onClick={(e) => e.stopPropagation()} style={{ opacity: student.status === 'evaluating' ? 0.4 : 1 }}>
                                                     <Icon icon={faEllipsisVertical} />
                                                 </button>
                                             </DropdownMenu.Trigger>
@@ -1016,7 +1042,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     )}
                                     {!activeStudentData.is_approved ? (
                                         <button
-                                            className="btn btn--positive btn--lg"
+                                            className="btn btn--secondary btn--lg"
                                             onClick={async () => {
                                                 if (activeStudentData) {
                                                     try {
@@ -1030,7 +1056,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                         setToastMessage("Hodnocení schváleno.");
                                                         setTimeout(() => setToastMessage(null), 3000);
                                                         const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
-                                                        const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
+                                                        const res = await fetch(`${API_BASE_URL}/export/evaluation/${activeStudentData.id}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
                                                             headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
                                                         });
                                                         if (!res.ok) throw new Error('PDF Export selhal');
@@ -1050,16 +1076,17 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                 }
                                             }}
                                         >
-                                            <Icon icon={faShieldHalved} /> Schválit a uložit jako PDF
+                                            <Icon icon={faShieldHalved} /> Schválit hodnocení ÚZ
                                         </button>
                                     ) : (
                                         <button
-                                            className="btn btn--outline"
+                                            className="btn btn--positive btn--lg"
+                                            style={{ flexDirection: 'column', height: 'auto', padding: '8px 20px', gap: 2, lineHeight: 1.3 }}
                                             onClick={async () => {
                                                 if (activeStudentData) {
                                                     try {
                                                         const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
-                                                        const res = await fetch(`${API_BASE_URL}/export/student/by-name/${encodeURIComponent(activeStudentData.name)}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
+                                                        const res = await fetch(`${API_BASE_URL}/export/evaluation/${activeStudentData.id}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
                                                             headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
                                                         });
                                                         if (!res.ok) throw new Error('PDF Export selhal');
@@ -1074,7 +1101,12 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                 }
                                             }}
                                         >
-                                            <Icon icon={faDownload} /> Stáhnout PDF znovu
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
+                                                <Icon icon={faCircleCheck} /> Vyhodnocení schváleno
+                                            </span>
+                                            <span style={{ fontSize: '0.75rem', fontWeight: 400, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <Icon icon={faDownload} size="xs" /> Znovu uložit PDF
+                                            </span>
                                         </button>
                                     )}
                                 </div>

@@ -1,12 +1,14 @@
-import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 import bcrypt
+from core.config import settings
 
-# Secret key should ideally be loaded from environment variables
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "b3a1a6b4d3d4b68ef5a4c9b9a67a0a03dcdfc7eab79883")
+# JWT_SECRET_KEY se načítá z .env nebo Docker environment variable.
+# PRODUKCE: vygenerujte silný klíč: openssl rand -hex 32
+SECRET_KEY = settings.JWT_SECRET_KEY
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days validity for local apps
+# Platnost tokenu: 8 hodin (bezpečný kompromis pro interní policejní aplikaci)
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     if not isinstance(plain_password, str):
@@ -24,10 +26,10 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

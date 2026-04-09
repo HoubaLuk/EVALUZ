@@ -27,6 +27,25 @@ def fix_schema():
             else:
                 print(f"Chyba při přidávání 'student_identity': {e}")
 
+        # class_analyses: computed_at + version (přidány do modelu po vytvoření tabulky)
+        try:
+            cursor.execute("ALTER TABLE class_analyses ADD COLUMN computed_at DATETIME;")
+            print("Sloupec 'computed_at' úspěšně přidán do class_analyses.")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" in str(e):
+                print("Sloupec 'computed_at' již existuje.")
+            else:
+                print(f"Chyba při přidávání 'computed_at': {e}")
+
+        try:
+            cursor.execute("ALTER TABLE class_analyses ADD COLUMN version INTEGER DEFAULT 1;")
+            print("Sloupec 'version' úspěšně přidán do class_analyses.")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" in str(e):
+                print("Sloupec 'version' již existuje.")
+            else:
+                print(f"Chyba při přidávání 'version': {e}")
+
         conn.commit()
         conn.close()
         print("Migrace dokončena.")

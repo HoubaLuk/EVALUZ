@@ -18,6 +18,7 @@ interface HeaderProps {
   setActiveTab: (tab: Tab) => void;
   hasCriteria: boolean;
   hasEvaluations: boolean;
+  hasAnalytics?: boolean;
   isMobileMenuOpen: boolean;
   setIsMobileMenuOpen: (open: boolean) => void;
 }
@@ -32,7 +33,7 @@ const TAB_CONFIG: { id: Tab; label: string; icon: typeof faClipboardList; requir
 export function Header({
   setIsAdminOpen, lecturerName, isAdminUser,
   activeTab, onOpenStatistics, setActiveTab,
-  hasCriteria, hasEvaluations,
+  hasCriteria, hasEvaluations, hasAnalytics = false,
   isMobileMenuOpen, setIsMobileMenuOpen,
 }: HeaderProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -78,6 +79,14 @@ export function Header({
     if (tab.adminOnly && !isAdminUser) return true;
     if (tab.requiresCriteria && !hasCriteria) return true;
     if (tab.requiresEvaluations && !hasEvaluations) return true;
+    return false;
+  };
+
+  // Záložka je "hotová" (zežloutne) jakmile byl příslušný krok dokončen
+  const isTabDone = (tab: typeof TAB_CONFIG[0]) => {
+    if (tab.id === 'criteria')   return hasCriteria;
+    if (tab.id === 'evaluation') return hasEvaluations;
+    if (tab.id === 'analytics')  return hasAnalytics;
     return false;
   };
 
@@ -192,10 +201,11 @@ export function Header({
             if (tab.adminOnly && !isAdminUser) return null;
             const locked = isTabLocked(tab);
             const isActive = activeTab === tab.id;
+            const done = !locked && isTabDone(tab);
             return (
               <button
                 key={tab.id}
-                className={`nav-tab${isActive ? ' nav-tab--active' : ''}${locked ? ' nav-tab--locked' : ''}`}
+                className={`nav-tab${isActive ? ' nav-tab--active' : ''}${locked ? ' nav-tab--locked' : ''}${done ? ' nav-tab--done' : ''}`}
                 onClick={() => handleTabClick(tab)}
                 disabled={locked}
                 title={locked ? 'Tento krok ještě není dostupný' : tab.label}

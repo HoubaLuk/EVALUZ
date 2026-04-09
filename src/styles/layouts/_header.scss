@@ -50,6 +50,7 @@
 
     &__label {
       font-weight: 600;
+      color: $police-yellow;
       @include text-ellipsis;
     }
 
@@ -83,6 +84,7 @@
       font-size: 1rem;
       letter-spacing: 0.04em;
       white-space: nowrap;
+      color: $police-yellow;
     }
 
     &__subtitle {
@@ -90,6 +92,7 @@
       font-weight: 400;
       opacity: 0.8;
       white-space: nowrap;
+      color: $police-yellow;
       max-width: 300px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -304,6 +307,21 @@
       right: 0;
       height: 3px;
       background-color: $positive-color;
+    }
+  }
+
+  // Hotová záložka — krok byl dokončen, nápis zežloutne (policejní žlutá)
+  &--done {
+    color: $police-yellow;
+
+    &:hover {
+      color: $police-yellow;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    // Aktivní + hotová — podtržení zůstane zelené, nápis bude žlutý
+    &.nav-tab--active {
+      color: $police-yellow;
     }
   }
 

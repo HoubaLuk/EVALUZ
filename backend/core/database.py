@@ -8,10 +8,19 @@ SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
-        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False},
     )
 else:
-    engine = create_engine(SQLALCHEMY_DATABASE_URL)
+    # PostgreSQL produkční nastavení connection poolu:
+    # pool_pre_ping=True zajistí, že se po restartu DB nepoužijí mrtvé spojení.
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,   # kritické pro Docker restart DB
+        pool_recycle=3600,    # recyklace spojení každou hodinu
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -70,7 +79,17 @@ def run_migrations(engine):
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='class_analyses') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='class_analyses' AND column_name='created_at') THEN
                         ALTER TABLE class_analyses ADD COLUMN created_at VARCHAR;
                     END IF;
-                    
+
+                    -- Add computed_at
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='class_analyses') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='class_analyses' AND column_name='computed_at') THEN
+                        ALTER TABLE class_analyses ADD COLUMN computed_at TIMESTAMP;
+                    END IF;
+
+                    -- Add version
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='class_analyses') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='class_analyses' AND column_name='version') THEN
+                        ALTER TABLE class_analyses ADD COLUMN version INTEGER DEFAULT 1;
+                    END IF;
+
                     -- Drop unique scenario_id
                     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'class_analyses_scenario_id_key') THEN
                         ALTER TABLE class_analyses DROP CONSTRAINT class_analyses_scenario_id_key;
@@ -78,17 +97,18 @@ def run_migrations(engine):
                 END $$;
             """))
         else:
-            # SQLITE: lecturer_id & class_id
+            # SQLITE: přidáme všechny chybějící sloupce class_analyses
+            for col_name, col_def in [
+                ("lecturer_id", "INTEGER REFERENCES lecturers(id) ON DELETE CASCADE"),
+                ("class_id",    "INTEGER REFERENCES classes(id) ON DELETE CASCADE"),
+                ("computed_at", "DATETIME"),
+                ("version",     "INTEGER DEFAULT 1"),
+            ]:
+                try:
+                    conn.execute(text(f"ALTER TABLE class_analyses ADD COLUMN {col_name} {col_def};"))
+                except Exception:
+                    pass
             try:
-                conn.execute(text("ALTER TABLE class_analyses ADD COLUMN lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE;"))
-            except Exception:
-                pass
-            try:
-                conn.execute(text("ALTER TABLE class_analyses ADD COLUMN class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE;"))
-            except Exception:
-                pass
-            try:
-                # Remove unique index if exists (SQLite specific)
                 conn.execute(text("DROP INDEX IF EXISTS ix_class_analyses_scenario_id;"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_class_analyses_scenario_id ON class_analyses(scenario_id);"))
             except Exception:
@@ -277,7 +297,46 @@ def run_migrations(engine):
         conn.commit()
 
 def init_db():
-    # 1. Create tables if they don't exist
+    """
+    Inicializace DB schématu.
+    - SQLite (dev): create_all + run_migrations (rychlé, bez Alembic overhead)
+    - PostgreSQL (prod): Alembic je primární, init_db() se nevolá z lifespan
+    """
     Base.metadata.create_all(bind=engine)
-    # 2. Run schema migrations for existing tables (adding missing columns)
     run_migrations(engine)
+
+
+def run_alembic_migrations() -> None:
+    """
+    Spustí Alembic migrace na PostgreSQL produkční DB.
+    Volá se jako první věc v lifespan() POUZE pro PostgreSQL.
+    SQLite dev prostředí používá init_db() + run_migrations() místo toho.
+    """
+    import logging
+    import os
+    logger = logging.getLogger("evaluz.migrations")
+
+    try:
+        from alembic.config import Config
+        from alembic import command
+
+        # Cesta k alembic.ini relativně od tohoto souboru (backend/alembic.ini)
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        alembic_cfg_path = os.path.join(backend_dir, "alembic.ini")
+
+        if not os.path.exists(alembic_cfg_path):
+            logger.warning(f"alembic.ini nenalezen na {alembic_cfg_path}, přeskakuji Alembic migrace.")
+            return
+
+        alembic_cfg = Config(alembic_cfg_path)
+        # Přepsat URL z nastavení (env.py to dělá taky, ale pro jistotu)
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
+        logger.info("Spouštím Alembic migrace (upgrade head)...")
+        command.upgrade(alembic_cfg, "head")
+        logger.info("Alembic migrace dokončeny.")
+
+    except Exception as e:
+        logger.error(f"Alembic migrace selhaly: {e}", exc_info=True)
+        # Neblokujeme start — run_migrations() jako záložní síť
+        raise

@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 python-docx
 openai
@@ -11,8 +11,10 @@ fpdf2
 psycopg2-binary>=2.9.9
 openpyxl
 pandas
-python-jose
+python-jose[cryptography]
 bcrypt
 pytz
 websockets
 alembic>=1.13.0
+slowapi>=0.1.9
+httpx

@@ -57,6 +57,7 @@ class StudentEvaluation(Base):
     student_name = Column(String, index=True)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"))
     scenario_name = Column(String, index=True, default="scen-1")
+    scenario_display_name = Column(String, default="")  # Čitelný název scénáře, např. "MS2: Vstup do obydlí"
     json_result = Column(JSONType)
     cleaned_name = Column(String, index=True) # "Příjmení Jméno, hodnost"
     student_identity = Column(JSONType) # JSON structure from LLM

@@ -18,7 +18,7 @@ class EvaluationResponse(BaseModel):
     celkove_skore: Any = 0
     zpetna_vazba: Optional[str] = ""
     identita: Optional[dict] = None
-    json_result: Optional[str] = None
+    json_result: Optional[Any] = None  # DB vrací JSONB jako dict — Optional[Any] akceptuje dict i str i None
     is_approved: bool = False
 
 class BatchEvaluationResponse(BaseModel):

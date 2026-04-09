@@ -1,5 +1,24 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.0] - 2026-04-09
+
+### Přidáno
+- **`scenario_display_name` v DB:** Nový sloupec `StudentEvaluation.scenario_display_name` — čitelný název scénáře (např. "MS2: Vstup do obydlí") se nyní ukládá do DB při každém fast-scan i vyhodnocení. Alembic migrace `a1b2c3d4e5f6` pro PostgreSQL produkci. Frontend posílá `scenario_display_name` jako Form param do `/evaluate/fast-scan` i `/evaluate/batch` (včetně Sidebar hromadného importu).
+- **Statistiky — filter-options + dashboard:** Endpoint `/api/v1/statistics/dashboard` a `/api/v1/statistics/filter-options` plně funkční.
+- **Rozdělenou souběžnost LLM:** Admin nastavení `LLM_CONCURRENCY_OPENROUTER` (výchozí 2, Rate-limit) a `LLM_CONCURRENCY_VLLM` (výchozí 8, Batch) — konfigurace zobrazena ve 2-sloupcovém gridu v `AdminModal`.
+
+### Opraveno
+- **PDF export třídy (422 → 200):** Endpoint `/export/class-report/{scenario_id}` používal `get_current_lecturer_export` (URL query token) místo `get_current_lecturer` (Authorization header). Frontend volá přes `fetch()` s hlavičkou — opraveno.
+- **PDF export třídy (500 — dict):** `content_json` v `ClassAnalysis` je ukládán jako dict (SQLAlchemy JSON type), ne string — `json.loads(dict)` způsobovalo `TypeError`. Ošetřeno `isinstance(raw, dict)`.
+- **PDF export třídy (500 — scenario_display_name):** Fallback dotaz v `export.py` se odkazoval na `StudentEvaluation.scenario_display_name` který neexistoval v DB modelu — odstraněno, nahrazeno DB fallbackem přes nový sloupec.
+- **Excel B2 (Třída) a B3 (Modelová situace):** Frontend nyní předává `class_name` a `scenario_display_name` jako query params do `/export/class/1/excel` — generátor je zapíše do správných buněk.
+- **Statistiky (500 — datetime[:10]):** `created_at` je `datetime` objekt (ne string) — `eval_record.created_at[:10]` způsobovalo `TypeError: 'datetime.datetime' object is not subscriptable`. Opraveno na `ca.strftime('%Y-%m-%d')`.
+- **Statistiky — date range filtr:** `start_date` / `end_date` jsou URL string parametry porovnávané s `DateTime` sloupcem — parsovány přes `datetime.fromisoformat()` s ošetřením výjimek.
+- **Re-evaluace neresetovala schválení:** Při opakovaném vyhodnocení existujícího záznamu zůstal `is_approved = True` — přidáno `existing_eval.is_approved = False` při uložení nového `json_result`.
+- **Student PDF — spolehlivý endpoint:** Tlačítka "Schválit a uložit PDF" a "Znovu uložit PDF" volala `/export/student/by-name/{name}/pdf` (náchylné na diakritiku) — přepnuto na `/export/evaluation/{id}/pdf`.
+- **`datetime.utcnow()` deprecated:** Dva výskyty v `evaluate.py` nahrazeny `datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)`.
+- **`scenario_display_name` neexistoval v ORM modelu:** Sloupec přidán do `StudentEvaluation` v `db_models.py` (migrace v `database.py` už existovala pro oba DB typy).
+
 ## [v3.6.0] - 2026-04-02
 ### Přidáno
 - **Man-in-the-Loop schvalovací workflow:** Nový sloupec `is_approved` na `StudentEvaluation`. Lektor musí explicitně schválit hodnocení před zahrnutím do globální analýzy třídy. Nové schvalovací endpointy, vizuální odlišení stavů v UI (badge "K revizi" / "Schváleno"), zamčení vstupů pro schválená hodnocení.

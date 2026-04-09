@@ -4,13 +4,8 @@
     {
       "name": "Frontend (Vite)",
       "runtimeExecutable": "/opt/homebrew/bin/node",
-<<<<<<< HEAD
-      "runtimeArgs": ["/Users/lukashribnak/Vyhodnocování ÚZ pomocí AI/EVALUZ/node_modules/.bin/vite", "--host=0.0.0.0", "--port", "3001"],
-      "port": 3001
-=======
       "runtimeArgs": ["/Users/lukashribnak/Vyhodnocování ÚZ pomocí AI/EVALUZ/node_modules/.bin/vite", "--host=0.0.0.0", "--port", "3002"],
       "port": 3002
->>>>>>> 097cdf4 (feat: NCIKT Visual Standards v1.1 — kompletní migrace frontendu)
     },
     {
       "name": "Backend (FastAPI)",

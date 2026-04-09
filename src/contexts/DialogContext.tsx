@@ -70,14 +70,31 @@ function DialogModal({ dialog, onClose }: { dialog: DialogOptions; onClose: (val
     const [inputValue, setInputValue] = useState(dialog.defaultValue || '');
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                <div className="bg-[#002855] px-6 py-4 flex items-center justify-between">
-                    <h3 className="text-white font-semibold text-lg">{dialog.title}</h3>
+        <div style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.5)', padding: 16
+        }}>
+            <div className="card" style={{
+                width: '100%', maxWidth: 440, borderRadius: 12,
+                boxShadow: 'var(--shadow-lg)', overflow: 'hidden'
+            }}>
+                {/* Záhlaví — primární barva dle NCIKT */}
+                <div style={{
+                    background: 'var(--color-primary)',
+                    padding: '14px 20px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                }}>
+                    <h3 style={{ color: '#fff', fontWeight: 700, fontSize: '1rem', margin: 0 }}>
+                        {dialog.title}
+                    </h3>
                 </div>
 
-                <div className="p-6">
-                    <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{dialog.message}</p>
+                {/* Tělo */}
+                <div style={{ padding: '20px 24px' }}>
+                    <p style={{ color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.5 }}>
+                        {dialog.message}
+                    </p>
 
                     {dialog.type === 'prompt' && (
                         <input
@@ -85,7 +102,8 @@ function DialogModal({ dialog, onClose }: { dialog: DialogOptions; onClose: (val
                             type="text"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
-                            className="mt-4 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#002855] focus:border-transparent"
+                            className="form-control"
+                            style={{ marginTop: 12 }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') onClose(inputValue);
                                 if (e.key === 'Escape') onClose(null);
@@ -94,19 +112,24 @@ function DialogModal({ dialog, onClose }: { dialog: DialogOptions; onClose: (val
                     )}
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800/50 px-6 py-4 flex justify-end gap-3 border-t border-slate-100">
+                {/* Zápatí s tlačítky — dle NCIKT pořadí: Negativní → Pozitivní */}
+                <div style={{
+                    padding: '12px 24px 16px',
+                    display: 'flex', justifyContent: 'flex-end', gap: 8,
+                    borderTop: '1px solid var(--border-color)',
+                    background: 'var(--bg-surface-2)'
+                }}>
                     {(dialog.type === 'confirm' || dialog.type === 'prompt') && (
                         <button
+                            className="btn btn--light btn--sm"
                             onClick={() => onClose(dialog.type === 'prompt' ? null : false)}
-                            className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:bg-slate-800/50 transition-colors"
                         >
                             Zrušit
                         </button>
                     )}
-
                     <button
+                        className={`btn btn--sm ${dialog.type === 'confirm' ? 'btn--positive' : 'btn--primary'}`}
                         onClick={() => onClose(dialog.type === 'prompt' ? inputValue : true)}
-                        className="px-4 py-2 text-sm font-medium text-white bg-[#002855] rounded-md hover:bg-[#001f44] transition-colors"
                     >
                         OK
                     </button>
