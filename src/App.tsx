@@ -9,6 +9,7 @@ import { Tab, ClassData, DEFAULT_CLASS_DATA } from './types';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { AdminModal } from './components/AdminModal';
+import { ProfileModal } from './components/ProfileModal';
 import { TabCriteria } from './components/TabCriteria';
 import { TabEvaluation } from './components/TabEvaluation';
 import { TabAnalytics } from './components/TabAnalytics';
@@ -24,6 +25,7 @@ export default function EvaluzDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('evaluation');
   const [selectedStudent, setSelectedStudent] = useState<number | null>(1); // Default to first student for demo
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Auth State
@@ -370,6 +372,7 @@ export default function EvaluzDashboard() {
     <div className="main-layout">
       <Header
         setIsAdminOpen={setIsAdminOpen}
+        setIsProfileOpen={setIsProfileOpen}
         lecturerName={lecturerName}
         isAdminUser={isAdminUser}
         activeTab={activeTab}
@@ -468,6 +471,7 @@ export default function EvaluzDashboard() {
       </div>
 
       <AdminModal isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} />
+      <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
     </div>
   );
 }

@@ -19,7 +19,7 @@
 
 .header-appbar {
   height: $header-appbar-height;
-  background-color: $secondary-color;
+  background-color: $header-bg;
   display: flex;
   align-items: stretch;
   width: 100%;
@@ -132,10 +132,10 @@
       font-size: 0.875rem;
       font-weight: 600;
       @include text-ellipsis;
-      max-width: 160px;
+      max-width: 280px;
 
       @include small-pc {
-        max-width: 100px;
+        max-width: 180px;
       }
     }
 
@@ -153,8 +153,8 @@
   gap: 6px;
   height: 30px;
   padding: 0 12px;
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: $radius-sm;
   color: $text-on-dark;
   font-family: inherit;
@@ -165,8 +165,8 @@
   @include transition(background-color, border-color);
 
   &:hover {
-    background: rgba(255, 255, 255, 0.25);
-    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.22);
+    border-color: rgba(255, 255, 255, 0.38);
   }
 
   &--icon-only {
@@ -205,7 +205,8 @@
 // 3 části: 25% | 50% | 25%
 .header-navbar {
   height: $header-navbar-height;
-  background-color: $primary-color;
+  background-color: $header-bg;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: stretch;
   width: 100%;
@@ -281,7 +282,7 @@
   padding: 0 18px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.75);
+  color: rgba(255, 255, 255, 0.88);
   font-family: inherit;
   font-size: 0.85rem;
   font-weight: 600;
@@ -292,7 +293,7 @@
 
   &:hover {
     color: $text-on-dark;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.1);
   }
 
   // Aktivní záložka — spodní pruh $positive-color

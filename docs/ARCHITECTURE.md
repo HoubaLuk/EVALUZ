@@ -7,7 +7,11 @@
 
 ## Analýza & Monitoring
 1.  **TabAnalytics (Třída):** Detailní pedagogický pohled na konkrétní třídu/scénář. Generuje `ClassAnalysis` s AI vhledem. Analytická gate: analytika dostupná až po schválení všech hodnocení.
-2.  **TabMonitor (Organizační):** Celkový přehled využití AI pro management útvaru. Dostupné pouze Adminům/SuperAdminům.
+2.  **TabMonitor (Organizační):** Celkový přehled využití AI pro management útvaru. Dostupné pouze Adminům/SuperAdminům. Filtry: datum, vzdělávací zařízení (superadmin only), třída, modelová situace.
+
+## Profil uživatele
+- **ProfileModal:** Samostatná komponenta (ne součást AdminModal). Otevírá se z user dropdownu v záhlaví (`setIsProfileOpen` prop). Obsahuje editaci osobních údajů, živý náhled doložky, historii exportů a změnu hesla (`PUT /api/v1/auth/password`).
+- **AdminModal:** Po refaktoringu obsahuje pouze systémovou správu (prompty, LLM, uživatelé). Profil byl odstraněn. Titulek: "Administrace systému EVALUZ". Tlačítko "Administrace" v navigaci viditelné pouze správcům.
 
 ## Exporty
 - **PDF student:** `/export/evaluation/{id}/pdf` — spolehlivý export podle ID záznamu.

@@ -1,5 +1,5 @@
 # Projektový Kontext - Evaluátor ÚZ
-**Verze: 3.7.0 | Poslední aktualizace: 2026-04-09**
+**Verze: 3.7.1 | Poslední aktualizace: 2026-04-10**
 
 ## 📅 Aktuální Stav
 Všechny hlavní moduly jsou dokončeny a otestovány. Systém je v produkčním provozu na ÚPVSP. Verze 3.7.0 uzavírá produkční stabilizaci — opraveny všechny známé chyby exportů, statistik a datového modelu.
@@ -18,9 +18,15 @@ Automatizace vyhodnocování Úředních záznamů (ÚZ) na ÚPVSP. AI asistent 
 - **Precizace:** Tvorba kritérií z PDF zadání (Sokratovský AI asistent).
 - **Evaluace:** Hromadné AI vyhodnocování s Man-in-the-Loop schvalováním — badge "K revizi"/"Schváleno", zamčené vstupy, analytická gate. Re-evaluace automaticky zruší schválení.
 - **Analýza třídy:** Dashboard s grafy (Chart.js), police 5-stupňová škála, PDF Protokol o hodnocení skupiny, Excel export — třída a modelová situace ukládány do DB i předávány z frontendu.
-- **Monitor (TabMonitor):** Statistiky využití pro Adminy a Superadminy, Excel export aktivity.
+- **Monitor (TabMonitor):** Statistiky využití pro Adminy a Superadminy, Excel export aktivity. Filtry: datum, vzdělávací zařízení (superadmin), třída, modelová situace.
+- **ProfileModal:** Samostatná komponenta profilu (osobní údaje, doložka, změna hesla, exporty). Dostupná z user dropdownu v záhlaví — oddělena od AdminModal.
 
-## 4. Klíčové technické detaily
+## 4. UI/UX
+- **Záhlaví:** Jednotná barva `$header-bg: #003057` (námořnická modrá) pro oba pruhy. Nová proměnná v `_colors.scss` — nedotýká se primárních tlačítek (`$primary-color: #0f527d`).
+- **ProfileModal:** Otevírá se přes `setIsProfileOpen` prop v `Header.tsx`. Obsahuje 2 záložky: "Osobní údaje a doložka" + "Změna hesla". AdminModal již profil neobsahuje.
+- **Administrace:** Tlačítko v navigaci viditelné pouze pro `isAdminUser` (is_admin || is_superadmin).
+
+## 5. Klíčové technické detaily
 - **JSON parsing:** `content_json` / `json_result` mohou být dict nebo string (SQLAlchemy JSON type) — vždy ošetřeno `isinstance(raw, dict)`.
 - **Identita studenta:** Prioritní řetězec `student_identity` JSON → `cleaned_name` → `student_name`.
 - **scenario_display_name:** Ukládá se do DB (`StudentEvaluation.scenario_display_name`) při fast-scan i batch evaluaci. Export PDF/Excel čte z DB jako fallback, query param má prioritu.

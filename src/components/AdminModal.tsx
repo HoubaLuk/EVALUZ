@@ -96,11 +96,8 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     // History data
     const [exportsHistory, setExportsHistory] = useState<any[]>([]);
 
-    useEffect(() => {
-        const handleOpenProfileTab = () => setAdminTab('profile');
-        window.addEventListener('openProfileTab', handleOpenProfileTab);
-        return () => window.removeEventListener('openProfileTab', handleOpenProfileTab);
-    }, []);
+    // Poznámka: openProfileTab event byl odstraněn — profil se nyní otevírá
+    // v samostatném ProfileModal (viz Header.tsx → setIsProfileOpen).
 
     // UI states
     const [isLoading, setIsLoading] = useState(false);
@@ -464,7 +461,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 {/* Modal Header */}
                 <div className="modal__header modal__header--primary">
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Icon icon={faGear} /> {isSetupMode ? "První spuštění: Vytvoření hlavního účtu vyučujícího" : "Administrace systému EVALUZ & Prompt Engineering"}
+                        <Icon icon={faGear} /> {isSetupMode ? "První spuštění: Vytvoření hlavního účtu vyučujícího" : "Administrace systému EVALUZ"}
                     </span>
                     {!isSetupMode && (
                         <button className="btn btn--sm btn--icon-only" style={{ background: 'transparent', border: 'none', color: '#fff' }} onClick={onClose}>
@@ -496,10 +493,6 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                     <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />
                                 </>
                             )}
-                            <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 2px' }}>Uživatelský účet</span>
-                            <button onClick={() => setAdminTab('profile')} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === 'profile' ? 700 : 500, background: adminTab === 'profile' ? 'rgba(15,82,125,0.1)' : 'transparent', color: adminTab === 'profile' ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === 'profile' ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === 'profile' ? '3px solid var(--color-primary)' : '3px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <Icon icon={faUserPen} size="xs" /> Profil a podpisová doložka
-                            </button>
                             {profile.is_superadmin && (
                                 <>
                                     <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />

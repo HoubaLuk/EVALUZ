@@ -11,6 +11,7 @@ import { API_BASE_URL } from '../utils/api';
 
 interface HeaderProps {
   setIsAdminOpen: (isOpen: boolean) => void;
+  setIsProfileOpen: (isOpen: boolean) => void;
   lecturerName: string;
   isAdminUser: boolean;
   activeTab: Tab;
@@ -31,7 +32,7 @@ const TAB_CONFIG: { id: Tab; label: string; icon: typeof faClipboardList; requir
 ];
 
 export function Header({
-  setIsAdminOpen, lecturerName, isAdminUser,
+  setIsAdminOpen, setIsProfileOpen, lecturerName, isAdminUser,
   activeTab, onOpenStatistics, setActiveTab,
   hasCriteria, hasEvaluations, hasAnalytics = false,
   isMobileMenuOpen, setIsMobileMenuOpen,
@@ -155,8 +156,7 @@ export function Header({
                   className="dropdown-item"
                   onClick={() => {
                     setIsDropdownOpen(false);
-                    setIsAdminOpen(true);
-                    setTimeout(() => window.dispatchEvent(new CustomEvent('openProfileTab')), 50);
+                    setIsProfileOpen(true);
                   }}
                 >
                   <Icon icon={faUserPen} />
@@ -217,16 +217,18 @@ export function Header({
           })}
         </div>
 
-        {/* Pravá část 25%: admin, nastavení */}
+        {/* Pravá část 25%: admin, nastavení — zobrazuje se pouze správcům */}
         <div className="header-navbar__right">
-          <button
-            className="header-btn"
-            onClick={() => setIsAdminOpen(true)}
-            title="Administrace systému"
-          >
-            <Icon icon={faGear} />
-            <span>Administrace</span>
-          </button>
+          {isAdminUser && (
+            <button
+              className="header-btn"
+              onClick={() => setIsAdminOpen(true)}
+              title="Administrace systému"
+            >
+              <Icon icon={faGear} />
+              <span>Administrace</span>
+            </button>
+          )}
         </div>
       </nav>
     </header>

@@ -1,5 +1,23 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.1] - 2026-04-10
+
+### Přidáno
+- **`ProfileModal.tsx` — samostatný profil uživatele:** Nová komponenta dostupná z dropdownu uživatele v záhlaví. Obsahuje: editaci osobních údajů (tituly, hodnosti, org. článek, funkční zařazení), živý náhled podpisové doložky, historii exportů a sekci **Změna hesla** (dříve zcela chyběla v UI). Volá `PUT /api/v1/auth/me` a `PUT /api/v1/auth/password`.
+- **Filtry v TabMonitor:** Panel filtrů (datum od/do, vzdělávací zařízení, třída, modelová situace) nyní viditelný i při načítání — loading/error stav je inline pod filtry.
+
+### Změněno
+- **Záhlaví — jednotná barva:** Oba pruhy (`header-appbar` i `header-navbar`) nyní sdílejí jednu barvu pozadí `$header-bg: #003057` (námořnická modrá, dle vzoru CZ Anonymizer). Nová proměnná v `_colors.scss` — primární barva tlačítek a ostatních prvků zůstává `#0f527d`.
+- **Záhlaví — světlejší text záložek:** Navigační záložky mají barvu `rgba(255,255,255,0.88)` (dříve 0.75) pro lepší čitelnost na tmavém pozadí.
+- **Jméno uživatele v záhlaví:** `max-width` zvětšen z 160 px na 280 px — plné jméno s titulem a rolí se zobrazuje bez ořezu.
+- **AdminModal — přejmenování:** Titulek změněn z "Administrace systému EVALUZ & Prompt Engineering" na "Administrace systému EVALUZ".
+- **AdminModal — odstranění profilu ze sidebaru:** Sekce "Profil a podpisová doložka" přesunuta do samostatného `ProfileModal`. V AdminModal zůstává pouze správa systému (prompty, LLM, uživatelé).
+- **Header — "Můj profil":** Tlačítko nyní otevírá přímo `ProfileModal` místo obcházení přes `AdminModal` + custom event `openProfileTab`.
+- **Header — "Administrace":** Tlačítko se zobrazuje pouze správcům (`isAdminUser = is_admin || is_superadmin`). Běžný Vyučující ho nevidí.
+
+### Opraveno
+- **TabMonitor crash (prázdná obrazovka):** Chart data (`lineChartData`, `orgBarData`, `lecBarData`) se počítala při každém renderu i když `data === null` — způsobovalo pád celé stránky. Opraveno ternárním guardem `data ? {...} : null`. Přístup `data.org_unit` mimo ochrannou podmínku ošetřen wrappem `{data && ...}`.
+
 ## [v3.7.0] - 2026-04-09
 
 ### Přidáno
