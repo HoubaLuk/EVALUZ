@@ -1,5 +1,17 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.2] - 2026-04-10
+
+### Přidáno
+- **Samoregistrace nového uživatele:** Nový veřejný endpoint `POST /api/v1/auth/register` — vytvoří účet s rolí `vyučující` (hardcoded, nikdy admin/superadmin). Validace hesla (min. 12 znaků, A, a, 1), kontrola duplicity e-mailu, rate-limit 5/min.
+- **Registrační formulář na login obrazovce:** Link "Nemám účet — registrovat se jako Vyučující" zobrazuje formulář s polem pro jméno, příjmení, tituly, funkční zařazení, org. článek, e-mail a heslo. Info box jasně informuje, že povýšení role může provést pouze SuperAdmin.
+
+### Opraveno
+- **Šipka v role selectu (AdminModal — Správa uživatelů):** Inline styl `padding: '3px 6px'` přepisoval `padding-right: 32px` z CSS — šipka dropdownu nebyla viditelná. Opraveno na `padding: '3px 28px 3px 6px'`.
+
+### Bezpečnost / RBAC
+- **Role management** — potvrzeno: backend chrání všechny `/admin/users/*` endpointy pomocí `verify_superadmin()`. Změna role na Admin nebo SuperAdmin je možná výhradně pro SuperAdmina — jak v UI (sekce Správa uživatelů je za `profile.is_superadmin` guardem), tak na backendu (HTTP 403 pro nižší role).
+
 ## [v3.7.1] - 2026-04-10
 
 ### Přidáno

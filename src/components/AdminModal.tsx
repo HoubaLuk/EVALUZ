@@ -670,7 +670,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                                     <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{u.email}</td>
                                                     <td style={{ padding: '10px 12px' }}>
                                                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                                            <select value={u.is_superadmin ? 'superadmin' : (u.is_admin ? 'admin' : 'vyucujici')} onChange={(e) => handleRoleChange(u.id, e.target.value)} className="form-control" style={{ width: 'auto', fontSize: '0.78rem', padding: '3px 6px' }}>
+                                                            <select value={u.is_superadmin ? 'superadmin' : (u.is_admin ? 'admin' : 'vyucujici')} onChange={(e) => handleRoleChange(u.id, e.target.value)} className="form-control" style={{ width: 'auto', fontSize: '0.78rem', padding: '3px 28px 3px 6px' }}>
                                                                 <option value="vyucujici">Vyučující</option>
                                                                 <option value="admin">Admin</option>
                                                                 <option value="superadmin">SuperAdmin</option>

@@ -1,5 +1,5 @@
 # Projektový Kontext - Evaluátor ÚZ
-**Verze: 3.7.1 | Poslední aktualizace: 2026-04-10**
+**Verze: 3.7.2 | Poslední aktualizace: 2026-04-10**
 
 ## 📅 Aktuální Stav
 Všechny hlavní moduly jsou dokončeny a otestovány. Systém je v produkčním provozu na ÚPVSP. Verze 3.7.0 uzavírá produkční stabilizaci — opraveny všechny známé chyby exportů, statistik a datového modelu.
@@ -21,7 +21,13 @@ Automatizace vyhodnocování Úředních záznamů (ÚZ) na ÚPVSP. AI asistent 
 - **Monitor (TabMonitor):** Statistiky využití pro Adminy a Superadminy, Excel export aktivity. Filtry: datum, vzdělávací zařízení (superadmin), třída, modelová situace.
 - **ProfileModal:** Samostatná komponenta profilu (osobní údaje, doložka, změna hesla, exporty). Dostupná z user dropdownu v záhlaví — oddělena od AdminModal.
 
-## 4. UI/UX
+## 4. Autentizace & RBAC
+- **Registrace:** `POST /auth/register` — veřejný, role vždy `vyučující`, hardcoded `is_admin=False`, `is_superadmin=False`. Rate-limit 5/min.
+- **Povýšení role:** Výhradně SuperAdmin přes AdminModal → Správa uživatelů (`verify_superadmin()` guard na backendu). Nelze ani přes registraci, ani přes profil.
+- **Přihlášení:** `POST /auth/login` (OAuth2 password flow), rate-limit 10/min.
+- **Správa uživatelů v UI:** Skryta za `profile.is_superadmin` — Admin (is_admin) ji nevidí.
+
+## 5. UI/UX
 - **Záhlaví:** Jednotná barva `$header-bg: #003057` (námořnická modrá) pro oba pruhy. Nová proměnná v `_colors.scss` — nedotýká se primárních tlačítek (`$primary-color: #0f527d`).
 - **ProfileModal:** Otevírá se přes `setIsProfileOpen` prop v `Header.tsx`. Obsahuje 2 záložky: "Osobní údaje a doložka" + "Změna hesla". AdminModal již profil neobsahuje.
 - **Administrace:** Tlačítko v navigaci viditelné pouze pro `isAdminUser` (is_admin || is_superadmin).

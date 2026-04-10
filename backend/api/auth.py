@@ -52,6 +52,16 @@ class ProfileUpdate(BaseModel):
 class PasswordUpdate(BaseModel):
     new_password: str
 
+class RegisterData(BaseModel):
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    title_before: str = ""
+    title_after: str = ""
+    school_location: str = ""
+    funkcni_zarazeni: str = ""
+
 # --- Dependency ---
 def decode_lecturer_token(token: str, db: Session):
     credentials_exception = HTTPException(
@@ -257,6 +267,47 @@ def update_password(data: PasswordUpdate, db: Session = Depends(get_db), current
     current_user.must_change_password = False
     db.commit()
     return {"status": "success", "message": "Heslo bylo úspěšně změněno."}
+
+
+@router.post("/register")
+@limiter.limit("5/minute")
+def register_new_user(request: Request, data: RegisterData, db: Session = Depends(get_db)):
+    """
+    Veřejná registrace nového uživatele — role je vždy 'vyučující'.
+    Nelze se sám ustanovit administrátorem ani superadminem.
+    Vyžaduje existenci alespoň jednoho uživatele v systému (tzn. setup byl dokončen).
+    """
+    # Systém musí být nastavený — setup endpoint platí pouze pro prázdnou DB
+    if db.query(Lecturer).count() == 0:
+        raise HTTPException(status_code=400, detail="Systém ještě nebyl nastaven. Použijte /setup.")
+
+    # Jedinečnost e-mailu
+    if db.query(Lecturer).filter(Lecturer.email == data.email).first():
+        raise HTTPException(status_code=409, detail="Tento e-mail je již registrován.")
+
+    # Validace hesla
+    import re
+    password = str(data.password).strip()
+    if len(password) < 12 or not re.search(r"[a-z]", password) or not re.search(r"[A-Z]", password) or not re.search(r"\d", password):
+        raise HTTPException(status_code=400, detail="Heslo musí mít min. 12 znaků a obsahovat velká, malá písmena a číslice.")
+
+    new_user = Lecturer(
+        email=data.email,
+        password_hash=get_password_hash(password),
+        first_name=data.first_name,
+        last_name=data.last_name,
+        title_before=data.title_before,
+        title_after=data.title_after,
+        school_location=data.school_location,
+        funkcni_zarazeni=data.funkcni_zarazeni,
+        is_superadmin=False,   # NIKDY nelze přes registraci
+        is_admin=False,        # NIKDY nelze přes registraci
+        is_active=True,
+        must_change_password=False
+    )
+    db.add(new_user)
+    db.commit()
+    return {"status": "success", "message": "Účet byl vytvořen. Přihlaste se svými přihlašovacími údaji."}
 
 
 @router.get("/school-locations")
