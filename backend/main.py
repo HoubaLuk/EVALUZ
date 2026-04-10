@@ -55,12 +55,15 @@ async def lifespan(app: FastAPI):
     3. Spuštění async workeru pro frontu vyhodnocování
     """
     # 1. Migrace
+    # SQLite (dev): init_db() vytvoří tabulky přímo přes SQLAlchemy metadata.
+    # PostgreSQL (prod): migrace proběhly jako první krok v Dockerfile CMD
+    #   ("alembic upgrade head && exec uvicorn ...") — jedno spuštění, jeden
+    #   proces, žádná race condition mezi workery. Zde již není co dělat.
     if settings.is_sqlite:
-        logger.info("SQLite dev prostředí — spouštím init_db() + run_migrations()")
+        logger.info("SQLite dev prostředí — spouštím init_db()")
         init_db()
     else:
-        logger.info("PostgreSQL — spouštím Alembic migrace")
-        run_alembic_migrations()
+        logger.info("PostgreSQL — migrace proběhly před startem uvicorn (Dockerfile CMD)")
 
     # 2. Seed — vlastní session se správným lifecycle
     db = SessionLocal()

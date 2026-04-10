@@ -1,5 +1,13 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.5] - 2026-04-10
+
+### Architektura — zásadní změna spuštění migrací
+- **Migrace přesunuty z `lifespan()` do `Dockerfile CMD`:** Alembic migrace nyní běží jako separátní krok *před* startem uvicorn workerů: `alembic upgrade head && exec uvicorn ...`. Jeden proces, jedno spuštění, žádná race condition.
+- **Odstraněno volání `run_alembic_migrations()` z `lifespan()`:** PostgreSQL workery se při startu migrací vůbec nedotýkají — mohou startovat paralelně bez koordinace. SQLite dev prostředí nadále používá `init_db()`.
+- **Odstraněna potřeba advisory locku pro koordinaci workerů:** pg_advisory_lock v `database.py` zůstává jako utility funkce, ale není volána při startu aplikace. Architektonicky správné řešení eliminuje problém u kořene místo symptomatické opravy.
+- **Důsledek:** Pokud `alembic upgrade head` selže, kontejner se zastaví s nenulovým exit kódem a workery se vůbec nespustí — chyba je okamžitě viditelná v `docker logs evaluz_backend`, žádný crash loop.
+
 ## [v3.7.4] - 2026-04-10
 
 ### Opraveno

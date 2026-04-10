@@ -24,14 +24,20 @@ USER evaluz
 EXPOSE 8000
 
 # Produkční spuštění:
+# Migrace DB proběhnou jako PRVNÍ krok (jeden proces, žádná race condition).
+# Teprve po jejich úspěšném dokončení se spustí uvicorn workery.
+# Pokud alembic upgrade head selže, kontejner se zastaví s nenulovým exit kódem
+# a workery se vůbec nespustí — chyba je jasně viditelná v docker logs.
+#
+# exec: předání signálů (SIGTERM) přímo uvicornu pro čisté vypnutí.
 # --proxy-headers: respektovat X-Forwarded-For / X-Forwarded-Proto z nginx
 # --forwarded-allow-ips=*: důvěřovat proxy (nginx je ve stejné Docker síti)
 # --workers 2: 2 procesy pro paralelní requesty (eval worker je async, takže 2 stačí)
-CMD ["uvicorn", "main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "2", \
-     "--proxy-headers", \
-     "--forwarded-allow-ips", "*", \
-     "--log-level", "info", \
-     "--access-log"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app \
+     --host 0.0.0.0 \
+     --port 8000 \
+     --workers 2 \
+     --proxy-headers \
+     --forwarded-allow-ips '*' \
+     --log-level info \
+     --access-log"]
