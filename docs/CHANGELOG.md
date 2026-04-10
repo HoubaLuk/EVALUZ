@@ -1,5 +1,10 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.6] - 2026-04-10
+
+### Opraveno
+- **Migrace `f1e2d3c4b5a6` — `DatatypeMismatch` při `computed_at = created_at`:** Sloupec `created_at` v tabulce `class_analyses` je uložen jako `VARCHAR` (migrace `35e3a28e8797` ho nepřevedla na TIMESTAMP). Přidán explicitní cast `created_at::TIMESTAMP` + guard `created_at ~ '^\d{4}-\d{2}-\d{2}'` aby se přeskočily prázdné/nevalidní hodnoty.
+
 ## [v3.7.5] - 2026-04-10
 
 ### Architektura — zásadní změna spuštění migrací

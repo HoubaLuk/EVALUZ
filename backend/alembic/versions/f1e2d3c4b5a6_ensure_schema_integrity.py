@@ -44,7 +44,13 @@ def upgrade() -> None:
                     WHERE table_name = 'class_analyses' AND column_name = 'computed_at'
                 ) THEN
                     ALTER TABLE class_analyses ADD COLUMN computed_at TIMESTAMP;
-                    UPDATE class_analyses SET computed_at = created_at WHERE computed_at IS NULL;
+                    -- created_at může být VARCHAR (migrace 35e3a28e8797 ji nemusela převést)
+                    -- explicitní cast zajistí kompatibilitu s oběma typy
+                    UPDATE class_analyses
+                       SET computed_at = created_at::TIMESTAMP
+                     WHERE computed_at IS NULL
+                       AND created_at IS NOT NULL
+                       AND created_at ~ '^\d{4}-\d{2}-\d{2}';
                 END IF;
 
                 -- class_analyses.version
