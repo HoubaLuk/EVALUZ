@@ -1,5 +1,14 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.4] - 2026-04-10
+
+### Opraveno
+- **500 na `/analytics/class/{id}/summary`:** Chybějící sloupce `class_analyses.computed_at` a `class_analyses.version` způsobovaly `UndefinedColumn` při každém dotazu na analytiku. Příčina: migrace `53fae6cde19e` byla přeskočena přes `alembic stamp head` (PostgreSQL transactional DDL rollback při prvním selhání).
+- **Chybné parsování starých záznamů (`Error parsing json for evaluation X`):** Záznamy uložené před migrací na JSONB měly `json_result` a `student_identity` jako JSON string (TEXT). `dict(string)` → `dictionary update sequence element #0 has length 1`; Pydantic `identita: dict` → `Input should be a valid dictionary`. Přidána defensivní deserializace přes `json.loads()` s try/except před předáním do Pydantic.
+
+### Přidáno
+- **Nová Alembic migrace `f1e2d3c4b5a6` — `ensure_schema_integrity`:** Idempotentní záchranná migrace (IF NOT EXISTS pro každý sloupec), která zajistí přítomnost sloupců `computed_at`, `version`, `scenario_display_name` a `is_approved` bez ohledu na historii předchozích nasazení. Bezpečná pro opakované spuštění.
+
 ## [v3.7.3] - 2026-04-10
 
 ### Opraveno

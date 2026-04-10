@@ -54,6 +54,16 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
             # a pak přiřadili data["json_result"] = eval_record.json_result, vznikl by
             # circular reference (data odkazuje sám na sebe).
             raw_json = eval_record.json_result  # originál — NEZMĚNĚNÝ
+
+            # Defensivní deserializace: starší záznamy mohou mít json_result jako
+            # JSON string (TEXT sloupec před migrací na JSONB). dict(string) by způsobilo
+            # "dictionary update sequence element #0 has length 1; 2 is required".
+            if isinstance(raw_json, str):
+                try:
+                    raw_json = json.loads(raw_json)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    raw_json = {}
+
             data = dict(raw_json) if raw_json else {}  # mělká kopie pro mutace
             # Make sure we inject the student_name and ID into the payload just like the frontend expects it
             data["jmeno_studenta"] = eval_record.student_name
@@ -63,10 +73,16 @@ def get_class_evaluations(class_id: int, scenario_id: str = None, db: Session = 
             data["json_result"] = raw_json
             data["is_approved"] = eval_record.is_approved or False
 
-            if eval_record.student_identity:
-                data["identita"] = eval_record.student_identity
-            else:
-                data["identita"] = None
+            # Defensivní deserializace identity: starší záznamy mohou mít student_identity
+            # jako JSON string (TEXT) místo dict (JSONB). Pydantic EvaluationResponse
+            # vyžaduje Optional[dict] — string způsobí ValidationError.
+            identity = eval_record.student_identity
+            if isinstance(identity, str):
+                try:
+                    identity = json.loads(identity)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    identity = None
+            data["identita"] = identity if isinstance(identity, dict) else None
                 
             if "vysledky" not in data:
                 data["vysledky"] = []
