@@ -311,14 +311,26 @@ def run_alembic_migrations() -> None:
     Spustí Alembic migrace na PostgreSQL produkční DB.
     Volá se jako první věc v lifespan() POUZE pro PostgreSQL.
     SQLite dev prostředí používá init_db() + run_migrations() místo toho.
+
+    Bezpečnost při více uvicorn workerech (--workers N):
+    Každý worker zavolá tuto funkci nezávisle při startu.
+    Používáme PostgreSQL session-level advisory lock (pg_advisory_lock),
+    aby migrace provedl právě jeden worker — ostatní čekají na uvolnění
+    zámku, pak zkontrolují verzi a případně přeskočí (DB je již na head).
+    Zámek je vždy uvolněn v bloku finally, i při výjimce.
     """
     import logging
     import os
     logger = logging.getLogger("evaluz.migrations")
 
+    # Unikátní číslo zámku pro tuto aplikaci (libovolné int64, musí být konzistentní)
+    _ADVISORY_LOCK_ID = 8_473_625_190  # EVALUZ migration lock
+
     try:
         from alembic.config import Config
         from alembic import command
+        from alembic.script import ScriptDirectory
+        from alembic.runtime.migration import MigrationContext
 
         # Cesta k alembic.ini relativně od tohoto souboru (backend/alembic.ini)
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -332,11 +344,59 @@ def run_alembic_migrations() -> None:
         # Přepsat URL z nastavení (env.py to dělá taky, ale pro jistotu)
         alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
-        logger.info("Spouštím Alembic migrace (upgrade head)...")
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Alembic migrace dokončeny.")
+        # Zjistit head revizi ze skriptů (bez přístupu do DB)
+        script = ScriptDirectory.from_config(alembic_cfg)
+        head_revision = script.get_current_head()
+
+        # ── Advisory lock: blokuje ostatní workery, dokud jsme hotovi ──────────
+        with engine.connect() as lock_conn:
+            logger.info(
+                f"Čekám na advisory lock pro Alembic migrace (lock_id={_ADVISORY_LOCK_ID})…"
+            )
+            lock_conn.execute(
+                text("SELECT pg_advisory_lock(:lock_id)"),
+                {"lock_id": _ADVISORY_LOCK_ID},
+            )
+            logger.info("Advisory lock získán.")
+
+            try:
+                # Zkontrolovat aktuální verzi DB (po získání zámku)
+                try:
+                    migration_ctx = MigrationContext.configure(lock_conn)
+                    current_heads = migration_ctx.get_current_heads()
+                    current_revision = current_heads[0] if current_heads else None
+                except Exception:
+                    current_revision = None
+
+                if current_revision == head_revision:
+                    logger.info(
+                        f"DB je již na aktuální verzi ({head_revision}), "
+                        "přeskakuji migrace."
+                    )
+                    return
+
+                logger.info(
+                    f"Spouštím Alembic migrace: {current_revision} → {head_revision}"
+                )
+                command.upgrade(alembic_cfg, "head")
+                logger.info("Alembic migrace dokončeny.")
+
+            except Exception as e:
+                logger.error(f"Alembic migrace selhaly: {e}", exc_info=True)
+                raise
+
+            finally:
+                # Explicitní uvolnění — session-level lock se jinak drží do
+                # konce spojení, které může pooler recyklovat mnohem později.
+                try:
+                    lock_conn.execute(
+                        text("SELECT pg_advisory_unlock(:lock_id)"),
+                        {"lock_id": _ADVISORY_LOCK_ID},
+                    )
+                    logger.info("Advisory lock uvolněn.")
+                except Exception as unlock_err:
+                    logger.warning(f"pg_advisory_unlock selhal: {unlock_err}")
 
     except Exception as e:
-        logger.error(f"Alembic migrace selhaly: {e}", exc_info=True)
-        # Neblokujeme start — run_migrations() jako záložní síť
+        logger.error(f"run_alembic_migrations: neočekávaná chyba: {e}", exc_info=True)
         raise

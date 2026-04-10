@@ -1,5 +1,12 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.3] - 2026-04-10
+
+### Opraveno
+- **Crash loop při startu s více uvicorn workery (`--workers N`):** Každý worker volal `run_alembic_migrations()` nezávisle při startu. Při první instalaci (nebo po `alembic stamp`) se všechny workery potkaly u DDL příkazů a PostgreSQL vyhodil `DuplicateTable` / `DuplicateColumn` → worker padal → crash loop.
+  - **Řešení:** `run_alembic_migrations()` nyní používá PostgreSQL session-level advisory lock (`pg_advisory_lock`). První worker, který lock získá, spustí migrace. Ostatní workery čekají na uvolnění zámku, poté zkontrolují verzi DB — pokud je již na `head`, migrace přeskočí. Lock je vždy uvolněn v bloku `finally`, i při výjimce — nehrozí deadlock.
+  - **Bezpečná detekce verze:** Po získání locku se před spuštěním migrací zkontroluje aktuální revize DB přes `MigrationContext` — migrace se spustí jen pokud DB ještě není na aktuálním `head`.
+
 ## [v3.7.2] - 2026-04-10
 
 ### Přidáno
