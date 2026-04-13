@@ -8,8 +8,12 @@ class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     # pydantic-settings automaticky čte z .env nebo Docker environment variables.
-    VLLM_API_URL: str = "http://localhost:8000/v1"
-    VLLM_MODEL_NAME: str = "qwen2.5-32b-instruct"
+    # LLM backend URL — nastavte v Administraci nebo přes .env
+    # Příklady:
+    #   OpenRouter:  https://openrouter.ai/api/v1
+    #   lokální vLLM: http://localhost:8001/v1  (NIKOLI port 8000 = FastAPI!)
+    VLLM_API_URL: str = ""
+    VLLM_MODEL_NAME: str = ""
 
     # SQLite pro lokální vývoj; přepsat v .env nebo Docker:
     #   DATABASE_URL=postgresql://evaluz_admin:HESLO@db:5432/evaluz_db

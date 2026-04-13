@@ -1,5 +1,16 @@
 # CHANGELOG - EVALUZ
 
+## [v3.7.7] - 2026-04-13
+
+### Opraveno
+- **Špatný výchozí `VLLM_API_URL = "http://localhost:8000/v1"`:** Default v `config.py` ukazoval na port FastAPI backendu samotného — každé LLM volání (evaluace, fast-scan identity) se posílalo na sebe a vracelo 404. Výchozí hodnota změněna na `""` (prázdný string); správné URL je nutné nastavit v Administraci nebo přes `.env`. Přidán komentář s příklady (`https://openrouter.ai/api/v1`, `http://localhost:8001/v1`).
+- **`POST /admin/test-llm` vracel 500 bez informace o příčině:**
+  - Synchronní `openai.OpenAI` blokoval async event loop — přepnuto na `AsyncOpenAI`.
+  - Přidány specifické handlery pro `AuthenticationError` (401), `NotFoundError` (404), `RateLimitError` (429).
+  - Chyba se nyní loguje přes `logger.error(..., exc_info=True)` — viditelná v server logu.
+  - Odstraněny automatické retry (`max_retries=0`) pro test endpoint — test musí být rychlý a deterministický.
+  - Přidána validace prázdného URL před pokusem o připojení (vrátí 400 místo 500).
+
 ## [v3.7.6] - 2026-04-10
 
 ### Opraveno

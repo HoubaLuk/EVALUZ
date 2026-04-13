@@ -2,12 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
+import logging
 import openai
+from openai import AsyncOpenAI
 import httpx
 
 from core.database import get_db
 from core.security import get_password_hash
 from models.db_models import SystemPrompt, AppSettings, Lecturer
+
+logger = logging.getLogger("evaluz.admin")
 from api.auth import get_current_lecturer
 
 router = APIRouter(
@@ -108,41 +112,54 @@ def update_settings(updates: List[AppSettingUpdateInfo], db: Session = Depends(g
 async def test_connection(config: TestConfigRequest, current_user: Lecturer = Depends(get_current_lecturer)):
     """
     Tests connection to a vLLM/OpenAI-compatible provider.
+    Používá AsyncOpenAI — neblokuje event loop.
     """
     try:
-        api_url = config.base_url
+        api_url = config.base_url.strip()
+        if not api_url:
+            raise HTTPException(status_code=400, detail="URL LLM providera není nastavena.")
+
         if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
             api_url = "https://openrouter.ai/api/v1"
 
-        # We use a short timeout for the test
-        client = openai.OpenAI(
-            api_key=config.api_key or "sk-no-key-required",
+        api_key = config.api_key or "sk-no-key-required"
+
+        logger.info(f"Test LLM: url={api_url}, model={config.model_id}")
+
+        client = AsyncOpenAI(
+            api_key=api_key,
             base_url=api_url,
-            default_headers={"Authorization": f"Bearer {config.api_key}"} if config.api_key else None,
-            http_client=httpx.Client(timeout=10.0)
+            default_headers={"Authorization": f"Bearer {api_key}"},
+            http_client=httpx.AsyncClient(timeout=20.0),
+            max_retries=0,  # Bez retries — test musí být rychlý
         )
-        
-        # Perform a minimal completion test
-        response = client.chat.completions.create(
+
+        response = await client.chat.completions.create(
             model=config.model_id,
-            messages=[{"role": "user", "content": "say hi"}],
-            max_tokens=1
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=5,
         )
-        
+
         if response:
             return {
                 "status": "success",
-                "message": f"Připojení k modelu '{config.model_id}' je v pořádku."
+                "message": f"Připojení k modelu '{config.model_id}' je v pořádku.",
             }
-            
-    except openai.AuthenticationError:
-        raise HTTPException(status_code=401, detail="Neplatný API klíč.")
-    except openai.NotFoundError:
+
+    except openai.AuthenticationError as e:
+        logger.warning(f"Test LLM — auth chyba: {e}")
+        raise HTTPException(status_code=401, detail="Neplatný API klíč (AuthenticationError).")
+    except openai.NotFoundError as e:
+        logger.warning(f"Test LLM — model nenalezen: {e}")
         raise HTTPException(status_code=404, detail=f"Model '{config.model_id}' nebyl na tomto URL nalezen.")
+    except openai.RateLimitError as e:
+        logger.warning(f"Test LLM — rate limit: {e}")
+        raise HTTPException(status_code=429, detail="Překročen rate limit poskytovatele. Zkuste za chvíli.")
     except Exception as e:
         error_msg = str(e)
-        if "Connection error" in error_msg or "ConnectError" in error_msg:
-            raise HTTPException(status_code=503, detail=f"Nepodařilo se připojit k URL: {config.base_url}")
+        logger.error(f"Test LLM — neočekávaná chyba: {error_msg}", exc_info=True)
+        if "Connection" in error_msg or "Connect" in error_msg or "connect" in error_msg:
+            raise HTTPException(status_code=503, detail=f"Nepodařilo se připojit k URL: {config.base_url} — {error_msg}")
         raise HTTPException(status_code=500, detail=f"Chyba při testování: {error_msg}")
 
 

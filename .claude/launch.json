@@ -3,14 +3,14 @@
   "configurations": [
     {
       "name": "Frontend (Vite)",
-      "runtimeExecutable": "/opt/homebrew/bin/node",
-      "runtimeArgs": ["/Users/lukashribnak/Vyhodnocování ÚZ pomocí AI/EVALUZ/node_modules/.bin/vite", "--host=0.0.0.0", "--port", "3002"],
-      "port": 3002
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
     },
     {
-      "name": "Backend (FastAPI)",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+      "name": "Backend (FastAPI dev)",
+      "runtimeExecutable": "/Users/lukashribnak/Vyhodnocování ÚZ pomocí AI/EVALUZ/backend/venv/bin/uvicorn",
+      "runtimeArgs": ["main:app", "--app-dir", "/Users/lukashribnak/Vyhodnocování ÚZ pomocí AI/EVALUZ/backend", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "info"],
       "port": 8000
     }
   ]
