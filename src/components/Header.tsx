@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   faUser, faChevronDown, faGear, faRightFromBracket,
-  faUserPen, faMoon, faSun, faChartBar, faHouse,
-  faClipboardList, faFileLines, faChartPie, faLock,
+  faUserPen, faMoon, faSun, faChartBar,
+  faClipboardList, faFileLines, faChartPie, faLock, faCheck,
   faBars, faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { Icon } from './Icon';
@@ -24,11 +24,10 @@ interface HeaderProps {
   setIsMobileMenuOpen: (open: boolean) => void;
 }
 
-const TAB_CONFIG: { id: Tab; label: string; icon: typeof faClipboardList; requiresCriteria?: boolean; requiresEvaluations?: boolean; adminOnly?: boolean }[] = [
+const STEPPER_TABS: { id: Tab; label: string; icon: typeof faClipboardList; requiresCriteria?: boolean; requiresEvaluations?: boolean }[] = [
   { id: 'criteria',   label: 'Precizace hodnotících kritérií', icon: faClipboardList },
-  { id: 'evaluation', label: 'Vyhodnocování ÚZ',             icon: faFileLines,    requiresCriteria: true },
-  { id: 'analytics',  label: 'Analýza třídy',  icon: faChartPie,     requiresCriteria: true, requiresEvaluations: true },
-  { id: 'statistics', label: 'Statistiky',     icon: faChartBar,     adminOnly: true },
+  { id: 'evaluation', label: 'Vyhodnocování ÚZ',              icon: faFileLines,    requiresCriteria: true },
+  { id: 'analytics',  label: 'Analýza třídy',                 icon: faChartPie,     requiresCriteria: true, requiresEvaluations: true },
 ];
 
 export function Header({
@@ -76,58 +75,46 @@ export function Header({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const isTabLocked = (tab: typeof TAB_CONFIG[0]) => {
-    if (tab.adminOnly && !isAdminUser) return true;
+  const isTabLocked = (tab: typeof STEPPER_TABS[0]) => {
     if (tab.requiresCriteria && !hasCriteria) return true;
     if (tab.requiresEvaluations && !hasEvaluations) return true;
     return false;
   };
 
-  // Záložka je "hotová" (zežloutne) jakmile byl příslušný krok dokončen
-  const isTabDone = (tab: typeof TAB_CONFIG[0]) => {
+  const isTabDone = (tab: typeof STEPPER_TABS[0]) => {
     if (tab.id === 'criteria')   return hasCriteria;
     if (tab.id === 'evaluation') return hasEvaluations;
     if (tab.id === 'analytics')  return hasAnalytics;
     return false;
   };
 
-  const handleTabClick = (tab: typeof TAB_CONFIG[0]) => {
+  const handleStepClick = (tab: typeof STEPPER_TABS[0]) => {
     if (isTabLocked(tab)) return;
-    if (tab.id === 'statistics') {
-      onOpenStatistics();
-    } else {
-      setActiveTab(tab.id);
-    }
+    setActiveTab(tab.id);
     setIsMobileMenuOpen(false);
   };
 
   return (
     <header className="app-header">
-      {/* ─── Horní pruh: Aplikační nabídka (sekundární barva, 44px) ─── */}
+
+      {/* ─── Jediný řádek záhlaví ─── */}
       <div className="header-appbar">
-        {/* Levá část: Statický titulek organizace */}
-        <div className="header-appbar__home">
-          <img
-            src="/logo-upvsp.png"
-            alt="ÚPVSP"
-            className="header-appbar__home__logo-img"
-          />
-          <span className="header-appbar__home__label">Útvar policejního vzdělávání a služební přípravy</span>
+
+        {/* Levá část: Logo + název aplikace + podtitulek */}
+        <div className="header-appbar__brand">
+          <img src="/logo-upvsp.png" alt="ÚPVSP" className="header-appbar__brand__logo" />
+          <div className="header-appbar__brand__text">
+            <span className="header-appbar__brand__name">EVALUZ</span>
+            <span className="header-appbar__brand__subtitle">Aplikace pro vyhodnocování ÚZ v ZOP pomocí AI</span>
+          </div>
         </div>
 
-        {/* Středová část: Logo + název + podtitulek aplikace */}
-        <div className="header-appbar__logo">
-          <span className="header-appbar__logo__name">EVALUZ</span>
-          <span className="header-appbar__logo__subtitle">AI aplikace pro vyhodnocování ÚZ v rámci ZOP</span>
-        </div>
-
-        {/* Pravá část 41.67%: Uživatel, odhlášení, dark mode */}
-        <div className="header-appbar__user">
+        {/* Pravá část: verze, dark mode, uživatel, statistiky, administrace */}
+        <div className="header-appbar__controls">
           {appVersion && (
-            <span className="header-appbar__user__version">v{appVersion}</span>
+            <span className="header-appbar__controls__version">v{appVersion}</span>
           )}
 
-          {/* Přepínač dark mode */}
           <button
             className="header-btn header-btn--icon-only"
             onClick={() => setIsDarkMode(!isDarkMode)}
@@ -137,7 +124,6 @@ export function Header({
             <Icon icon={isDarkMode ? faSun : faMoon} />
           </button>
 
-          {/* Dropdown uživatele */}
           <div className="header-dropdown" ref={dropdownRef}>
             <button
               className="header-btn"
@@ -146,7 +132,7 @@ export function Header({
               aria-expanded={isDropdownOpen}
             >
               <Icon icon={faUser} />
-              <span className="header-appbar__user__name">{lecturerName}</span>
+              <span className="header-appbar__controls__name">{lecturerName}</span>
               <Icon icon={faChevronDown} size="xs" />
             </button>
 
@@ -154,83 +140,84 @@ export function Header({
               <div className="header-dropdown__menu">
                 <button
                   className="dropdown-item"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    setIsProfileOpen(true);
-                  }}
+                  onClick={() => { setIsDropdownOpen(false); setIsProfileOpen(true); }}
                 >
-                  <Icon icon={faUserPen} />
-                  Můj profil
+                  <Icon icon={faUserPen} /> Můj profil
                 </button>
                 <div className="dropdown-item--separator" role="separator" />
                 <button
                   className="dropdown-item dropdown-item--danger"
-                  onClick={() => {
-                    localStorage.removeItem('upvsp_token');
-                    window.location.reload();
-                  }}
+                  onClick={() => { localStorage.removeItem('upvsp_token'); window.location.reload(); }}
                 >
-                  <Icon icon={faRightFromBracket} />
-                  Odhlásit se
+                  <Icon icon={faRightFromBracket} /> Odhlásit se
                 </button>
               </div>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* ─── Dolní pruh: Navigační menu (primární barva, 44px) ─── */}
-      <nav className="header-navbar" role="navigation" aria-label="Hlavní navigace">
-        {/* Levá část 25%: hamburger na mobilu */}
-        <div className="header-navbar__left">
+          {isAdminUser && (
+            <>
+              <button className="header-btn" onClick={onOpenStatistics} title="Statistiky">
+                <Icon icon={faChartBar} />
+                <span>Statistiky</span>
+              </button>
+              <button className="header-btn" onClick={() => setIsAdminOpen(true)} title="Administrace systému">
+                <Icon icon={faGear} />
+                <span>Administrace</span>
+              </button>
+            </>
+          )}
+
+          {/* Hamburger pro mobilní zařízení */}
           <button
-            className={`hamburger ${isMobileMenuOpen ? 'hamburger--open' : ''}`}
+            className={`hamburger header-btn header-btn--icon-only${isMobileMenuOpen ? ' hamburger--open' : ''}`}
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             aria-label="Otevřít navigační menu"
             aria-expanded={isMobileMenuOpen}
           >
-            <span className="hamburger__line" />
-            <span className="hamburger__line" />
-            <span className="hamburger__line" />
+            <Icon icon={isMobileMenuOpen ? faXmark : faBars} />
           </button>
         </div>
+      </div>
 
-        {/* Středová část 50%: záložky */}
-        <div className={`header-navbar__tabs${isMobileMenuOpen ? ' header-navbar__tabs--open' : ''}`}>
-          {TAB_CONFIG.map(tab => {
-            if (tab.adminOnly && !isAdminUser) return null;
-            const locked = isTabLocked(tab);
-            const isActive = activeTab === tab.id;
-            const done = !locked && isTabDone(tab);
-            return (
+      {/* ─── Stepper: 3 fáze pracovního postupu ─── */}
+      <nav
+        className={`header-stepper${isMobileMenuOpen ? ' header-stepper--mobile-open' : ''}`}
+        role="navigation"
+        aria-label="Pracovní postup"
+      >
+        {STEPPER_TABS.map((tab, i) => {
+          const locked = isTabLocked(tab);
+          const done = isTabDone(tab);
+          const isActive = activeTab === tab.id;
+          const prevDone = i === 0 ? true : isTabDone(STEPPER_TABS[i - 1]);
+
+          return (
+            <React.Fragment key={tab.id}>
+              {i > 0 && (
+                <div className={`stepper-line${prevDone ? ' stepper-line--done' : ''}`} />
+              )}
               <button
-                key={tab.id}
-                className={`nav-tab${isActive ? ' nav-tab--active' : ''}${locked ? ' nav-tab--locked' : ''}${done ? ' nav-tab--done' : ''}`}
-                onClick={() => handleTabClick(tab)}
+                className={`stepper-step${isActive ? ' stepper-step--active' : ''}${done ? ' stepper-step--done' : ''}${locked ? ' stepper-step--locked' : ''}`}
+                onClick={() => handleStepClick(tab)}
                 disabled={locked}
-                title={locked ? 'Tento krok ještě není dostupný' : tab.label}
+                title={locked ? 'Dokončete předchozí krok' : tab.label}
               >
-                <Icon icon={locked ? faLock : tab.icon} size="sm" />
-                {tab.label}
+                <span className="stepper-step__circle">
+                  {locked
+                    ? <Icon icon={faLock} size="xs" />
+                    : done
+                      ? <Icon icon={faCheck} size="xs" />
+                      : i + 1
+                  }
+                </span>
+                <span className="stepper-step__label">{tab.label}</span>
               </button>
-            );
-          })}
-        </div>
-
-        {/* Pravá část 25%: admin, nastavení — zobrazuje se pouze správcům */}
-        <div className="header-navbar__right">
-          {isAdminUser && (
-            <button
-              className="header-btn"
-              onClick={() => setIsAdminOpen(true)}
-              title="Administrace systému"
-            >
-              <Icon icon={faGear} />
-              <span>Administrace</span>
-            </button>
-          )}
-        </div>
+            </React.Fragment>
+          );
+        })}
       </nav>
+
     </header>
   );
 }
