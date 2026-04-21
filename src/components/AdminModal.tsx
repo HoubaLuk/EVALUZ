@@ -158,7 +158,6 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     if (s.key === 'MODEL_PHASE3') setModelPhase3(s.value);
                     if (s.key === 'THINKING_PHASE3') setThinkingPhase3(s.value === 'true');
 
-                    if (s.key === 'ENABLE_RAG_MODULE') setEnableRagModule(s.value === 'true');
                     if (s.key === 'LLM_CONCURRENCY_OPENROUTER') setConcurrencyOpenRouter(parseInt(s.value, 10) || 2);
                     if (s.key === 'LLM_CONCURRENCY_VLLM') setConcurrencyVllm(parseInt(s.value, 10) || 8);
                 });
