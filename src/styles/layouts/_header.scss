@@ -21,21 +21,29 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 0 20px;
-  gap: 12px;
+  padding: 0 24px;
+  gap: 16px;
 
   // Levá část: Logo + EVALUZ + podtitulek
   &__brand {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 18px;
     flex: 1;
     min-width: 0;
 
     &__logo {
-      height: 40px;
+      height: 56px;
       width: auto;
       object-fit: contain;
+      flex-shrink: 0;
+    }
+
+    // Jemný svislý oddělovač mezi logem a textem
+    &__divider {
+      width: 1px;
+      height: 44px;
+      background: rgba(255, 255, 255, 0.18);
       flex-shrink: 0;
     }
 
@@ -43,26 +51,27 @@
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: 1px;
+      gap: 3px;
       min-width: 0;
     }
 
     &__name {
-      font-size: 1.35rem;
+      font-size: 2.1rem;
       font-weight: 800;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
       color: $police-yellow;
-      line-height: 1.1;
+      line-height: 1;
       white-space: nowrap;
     }
 
     &__subtitle {
-      font-size: 0.72rem;
+      font-size: 0.78rem;
       font-weight: 400;
-      color: rgba(255, 255, 255, 0.75);
+      color: rgba(255, 255, 255, 0.7);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      letter-spacing: 0.01em;
 
       @include small-pc {
         display: none;
@@ -70,60 +79,65 @@
     }
 
     @include tablet {
-      gap: 10px;
+      gap: 12px;
 
-      &__logo {
-        height: 32px;
-      }
-
-      &__name {
-        font-size: 1.1rem;
-      }
+      &__logo { height: 38px; }
+      &__divider { height: 32px; }
+      &__name { font-size: 1.4rem; }
     }
   }
 
-  // Pravá část: ovládací prvky
+  // Pravá část: skupiny ovládacích prvků
   &__controls {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 0;
     flex-shrink: 0;
+
+    // Skupina = logicky sdružené prvky
+    &__group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 14px;
+
+      &:first-child { padding-left: 0; }
+      &:last-child  { padding-right: 0; }
+    }
+
+    // Svislý oddělovač mezi skupinami
+    &__sep {
+      width: 1px;
+      height: 32px;
+      background: rgba(255, 255, 255, 0.16);
+      flex-shrink: 0;
+    }
 
     &__version {
       font-size: 0.72rem;
-      opacity: 0.6;
-      font-weight: 400;
-      color: $text-on-dark;
-      margin-right: 4px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.45);
+      white-space: nowrap;
+      letter-spacing: 0.02em;
 
-      @include small-pc {
-        display: none;
-      }
+      @include small-pc { display: none; }
     }
 
     &__name {
-      font-size: 0.85rem;
+      font-size: 0.875rem;
       font-weight: 600;
       color: $text-on-dark;
       @include text-ellipsis;
       max-width: 200px;
 
-      @include small-pc {
-        max-width: 120px;
-      }
-
-      @include tablet {
-        display: none;
-      }
+      @include small-pc { max-width: 120px; }
+      @include tablet   { display: none; }
     }
 
-    // Hamburger — zobrazuje se jen na tabletu/mobilu
+    // Hamburger — jen na tabletu/mobilu
     .hamburger {
       display: none;
-
-      @include tablet {
-        display: inline-flex;
-      }
+      @include tablet { display: inline-flex; }
     }
   }
 }
@@ -155,6 +169,19 @@
     width: 32px;
     padding: 0;
     justify-content: center;
+  }
+
+  // Zvýrazněná varianta pro primární admin akci
+  &--accent {
+    background: rgba($police-yellow, 0.15);
+    border-color: rgba($police-yellow, 0.35);
+    color: $police-yellow;
+
+    &:hover {
+      background: rgba($police-yellow, 0.25);
+      border-color: rgba($police-yellow, 0.55);
+      color: $police-yellow;
+    }
   }
 
   @include tablet {

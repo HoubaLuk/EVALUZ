@@ -100,80 +100,85 @@ export function Header({
       {/* ─── Jediný řádek záhlaví ─── */}
       <div className="header-appbar">
 
-        {/* Levá část: Logo + název aplikace + podtitulek */}
+        {/* Levá část: Logo + oddělovač + název + podtitulek */}
         <div className="header-appbar__brand">
           <img src="/logo-upvsp.png" alt="ÚPVSP" className="header-appbar__brand__logo" />
+          <div className="header-appbar__brand__divider" />
           <div className="header-appbar__brand__text">
             <span className="header-appbar__brand__name">EVALUZ</span>
             <span className="header-appbar__brand__subtitle">Aplikace pro vyhodnocování ÚZ v ZOP pomocí AI</span>
           </div>
         </div>
 
-        {/* Pravá část: verze, dark mode, uživatel, statistiky, administrace */}
+        {/* Pravá část: 3 skupiny oddělené separátory */}
         <div className="header-appbar__controls">
-          {appVersion && (
-            <span className="header-appbar__controls__version">v{appVersion}</span>
-          )}
 
-          <button
-            className="header-btn header-btn--icon-only"
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            aria-label="Přepnout tmavý režim"
-            title={isDarkMode ? 'Přepnout na světlý režim' : 'Přepnout na tmavý režim'}
-          >
-            <Icon icon={isDarkMode ? faSun : faMoon} />
-          </button>
-
-          <div className="header-dropdown" ref={dropdownRef}>
-            <button
-              className="header-btn"
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              aria-haspopup="true"
-              aria-expanded={isDropdownOpen}
-            >
-              <Icon icon={faUser} />
-              <span className="header-appbar__controls__name">{lecturerName}</span>
-              <Icon icon={faChevronDown} size="xs" />
-            </button>
-
-            {isDropdownOpen && (
-              <div className="header-dropdown__menu">
-                <button
-                  className="dropdown-item"
-                  onClick={() => { setIsDropdownOpen(false); setIsProfileOpen(true); }}
-                >
-                  <Icon icon={faUserPen} /> Můj profil
-                </button>
-                <div className="dropdown-item--separator" role="separator" />
-                <button
-                  className="dropdown-item dropdown-item--danger"
-                  onClick={() => { localStorage.removeItem('upvsp_token'); window.location.reload(); }}
-                >
-                  <Icon icon={faRightFromBracket} /> Odhlásit se
-                </button>
-              </div>
+          {/* Skupina 1: verze + dark mode */}
+          <div className="header-appbar__controls__group">
+            {appVersion && (
+              <span className="header-appbar__controls__version">v{appVersion}</span>
             )}
+            <button
+              className="header-btn header-btn--icon-only"
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              title={isDarkMode ? 'Přepnout na světlý režim' : 'Přepnout na tmavý režim'}
+            >
+              <Icon icon={isDarkMode ? faSun : faMoon} />
+            </button>
           </div>
 
+          <div className="header-appbar__controls__sep" />
+
+          {/* Skupina 2: přihlášený uživatel */}
+          <div className="header-appbar__controls__group">
+            <div className="header-dropdown" ref={dropdownRef}>
+              <button
+                className="header-btn"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                aria-haspopup="true"
+                aria-expanded={isDropdownOpen}
+              >
+                <Icon icon={faUser} />
+                <span className="header-appbar__controls__name">{lecturerName}</span>
+                <Icon icon={faChevronDown} size="xs" />
+              </button>
+              {isDropdownOpen && (
+                <div className="header-dropdown__menu">
+                  <button className="dropdown-item" onClick={() => { setIsDropdownOpen(false); setIsProfileOpen(true); }}>
+                    <Icon icon={faUserPen} /> Můj profil
+                  </button>
+                  <div className="dropdown-item--separator" role="separator" />
+                  <button className="dropdown-item dropdown-item--danger" onClick={() => { localStorage.removeItem('upvsp_token'); window.location.reload(); }}>
+                    <Icon icon={faRightFromBracket} /> Odhlásit se
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Skupina 3: admin akce (pouze pro adminy) */}
           {isAdminUser && (
             <>
-              <button className="header-btn" onClick={onOpenStatistics} title="Statistiky">
-                <Icon icon={faChartBar} />
-                <span>Statistiky</span>
-              </button>
-              <button className="header-btn" onClick={() => setIsAdminOpen(true)} title="Administrace systému">
-                <Icon icon={faGear} />
-                <span>Administrace</span>
-              </button>
+              <div className="header-appbar__controls__sep" />
+              <div className="header-appbar__controls__group">
+                <button className="header-btn" onClick={onOpenStatistics} title="Statistiky">
+                  <Icon icon={faChartBar} />
+                  <span>Statistiky</span>
+                </button>
+                <button className="header-btn header-btn--accent" onClick={() => setIsAdminOpen(true)} title="Administrace systému">
+                  <Icon icon={faGear} />
+                  <span>Administrace</span>
+                </button>
+              </div>
             </>
           )}
 
-          {/* Hamburger pro mobilní zařízení */}
+          {/* Hamburger — jen mobil */}
+          <div className="header-appbar__controls__sep" style={{ marginLeft: 8 }} />
           <button
             className={`hamburger header-btn header-btn--icon-only${isMobileMenuOpen ? ' hamburger--open' : ''}`}
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             aria-label="Otevřít navigační menu"
-            aria-expanded={isMobileMenuOpen}
           >
             <Icon icon={isMobileMenuOpen ? faXmark : faBars} />
           </button>
