@@ -33,11 +33,24 @@ EXPOSE 8000
 # --proxy-headers: respektovat X-Forwarded-For / X-Forwarded-Proto z nginx
 # --forwarded-allow-ips=*: důvěřovat proxy (nginx je ve stejné Docker síti)
 # --workers 2: 2 procesy pro paralelní requesty (eval worker je async, takže 2 stačí)
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app \
-     --host 0.0.0.0 \
-     --port 8000 \
-     --workers 2 \
-     --proxy-headers \
-     --forwarded-allow-ips '*' \
-     --log-level info \
-     --access-log"]
+CMD ["sh", "-c", "\
+  python -c \"\
+import os, psycopg2; \
+conn = psycopg2.connect(os.environ['DATABASE_URL']); \
+cur = conn.cursor(); \
+cur.execute(\\\"SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='alembic_version')\\\"); \
+av = cur.fetchone()[0]; \
+cur.execute(\\\"SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='app_settings')\\\"); \
+tabs = cur.fetchone()[0]; \
+conn.close(); \
+exit(0 if av or not tabs else 1) \
+\" || alembic stamp head && \
+  alembic upgrade head && \
+  exec uvicorn main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 2 \
+    --proxy-headers \
+    --forwarded-allow-ips '*' \
+    --log-level info \
+    --access-log"]
