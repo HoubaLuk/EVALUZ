@@ -175,12 +175,12 @@
   &--accent {
     background: rgba($police-yellow, 0.15);
     border-color: rgba($police-yellow, 0.35);
-    color: $police-yellow;
+    color: $text-on-dark;
 
     &:hover {
       background: rgba($police-yellow, 0.25);
       border-color: rgba($police-yellow, 0.55);
-      color: $police-yellow;
+      color: $text-on-dark;
     }
   }
 
