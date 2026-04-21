@@ -33,7 +33,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
      * Aktuálně aktivní záložka v administraci.
      * V režimu setup se začíná na profilu.
      */
-    const [adminTab, setAdminTab] = useState<'prompt1' | 'prompt2' | 'prompt3' | 'vllm' | 'profile' | 'users' | 'rag'>(isSetupMode ? 'profile' : 'prompt1');
+    const [adminTab, setAdminTab] = useState<'prompt1' | 'prompt2' | 'prompt3' | 'vllm' | 'profile' | 'users'>(isSetupMode ? 'profile' : 'prompt1');
 
     // States for Prompts
     const [prompt1, setPrompt1] = useState('');
@@ -69,8 +69,6 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     const [concurrencyOpenRouter, setConcurrencyOpenRouter] = useState(2);
     const [concurrencyVllm, setConcurrencyVllm] = useState(8);
 
-    // MLOps & RAG
-    const [enableRagModule, setEnableRagModule] = useState(false);
 
     // Profile State
     const [profile, setProfile] = useState({
@@ -406,17 +404,6 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     },
                     body: JSON.stringify(profile)
                 });
-            } else if (adminTab === 'rag') {
-                await fetch(`${API_BASE_URL}/admin/settings`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}`
-                    },
-                    body: JSON.stringify([
-                        { key: 'ENABLE_RAG_MODULE', value: enableRagModule ? 'true' : 'false' }
-                    ])
-                });
             } else {
                 await fetch(`${API_BASE_URL}/admin/prompts`, {
                     method: 'PUT',
@@ -480,15 +467,12 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                     <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 2px' }}>Kategorie promptů</span>
                                     {(['prompt1', 'prompt2', 'prompt3'] as const).map((tab, i) => (
                                         <button key={tab} onClick={() => setAdminTab(tab)} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === tab ? 700 : 500, background: adminTab === tab ? 'var(--color-primary-light, rgba(15,82,125,0.1))' : 'transparent', color: adminTab === tab ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === tab ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === tab ? `3px solid var(--color-primary)` : '3px solid transparent', cursor: 'pointer' }}>
-                                            Fáze {i + 1}: {['Precizace kritérií', 'Evaluace ÚZ (JSON)', 'Globální analýza'][i]}
+                                            Fáze {i + 1}: {['Precizace kritérií', 'Evaluace ÚZ', 'Globální analýza'][i]}
                                         </button>
                                     ))}
                                     <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />
                                     <button onClick={() => setAdminTab('vllm')} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === 'vllm' ? 700 : 500, background: adminTab === 'vllm' ? 'rgba(15,82,125,0.1)' : 'transparent', color: adminTab === 'vllm' ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === 'vllm' ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === 'vllm' ? '3px solid var(--color-primary)' : '3px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                                         <Icon icon={faSliders} size="xs" /> Napojení na vLLM (API)
-                                    </button>
-                                    <button onClick={() => setAdminTab('rag')} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === 'rag' ? 700 : 500, background: adminTab === 'rag' ? 'rgba(15,82,125,0.1)' : 'transparent', color: adminTab === 'rag' ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === 'rag' ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === 'rag' ? '3px solid var(--color-primary)' : '3px solid transparent', cursor: 'pointer' }}>
-                                        AI Laboratoř & MLOps
                                     </button>
                                     <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />
                                 </>
@@ -844,29 +828,6 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                                             </div>
                                         </div>
                                     ))}
-                                </div>
-                            </div>
-                        ) : adminTab === 'rag' ? (
-                            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
-                                <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 12, marginBottom: 16 }}>
-                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>AI Laboratoř & MLOps (Zlaté příklady)</h3>
-                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Experimentální funkce pro učení se z vlastních (perfektních) hodnocení. Využívá RAG.</p>
-                                </div>
-                                <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 12 }}>
-                                    <div>
-                                        <h4 style={{ fontWeight: 700, fontSize: '0.9rem', margin: '0 0 8px' }}>Zapnout sdílenou paměť Zlatých příkladů (RAG)</h4>
-                                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0, maxWidth: 420, lineHeight: 1.6 }}>Jazyk nebo pokyny pro doporučení studentovi (ukáže se vyučujícím u každé úspěšné evaluace jako návrh postupu).</p>
-                                    </div>
-                                    <div style={{ flexShrink: 0, paddingTop: 4 }}>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
-                                            <input type="checkbox" checked={enableRagModule} onChange={(e) => setEnableRagModule(e.target.checked)} style={{ width: 18, height: 18, accentColor: 'var(--color-positive)', cursor: 'pointer' }} />
-                                            {enableRagModule ? 'Zapnuto' : 'Vypnuto'}
-                                        </label>
-                                    </div>
-                                </div>
-                                <div className="alert alert--primary" style={{ fontSize: '0.82rem', lineHeight: 1.6 }}>
-                                    <strong style={{ display: 'block', marginBottom: 4 }}>Jak to funguje technicky?</strong>
-                                    Zlaté příklady jsou ukládány do databáze (Cosine podoba, či textová filtrace podle Scenario ID). Připojený LLM při zapnutí Fáze 2 stáhne nejbližší zlatý příklad do historie chatu a naformátuje z něj bezchybnou JSON ukázku pro model. To drasticky redukuje halucinace Fáze 2.
                                 </div>
                             </div>
                         ) : null}
