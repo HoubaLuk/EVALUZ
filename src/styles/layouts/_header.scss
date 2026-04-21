@@ -296,18 +296,28 @@
     }
   }
 
-  // Aktivní krok (právě otevřená fáze)
+  // ── Stavová matice kroužků ──────────────────────────────────
+  //
+  //  Stav           | Kroužek            | Text popisku
+  //  ────────────────┼────────────────────┼──────────────────
+  //  Locked          | šedý obrys        | 35 % opacity
+  //  Odemčený        | bílý obrys        | 55 % bílá
+  //  Aktivní         | bílá výplň        | plná bílá
+  //  Hotový          | žlutá výplň + ✓   | police-yellow
+  //  Hotový + aktivní| žlutá výplň + halo| police-yellow
+
+  // Aktivní krok — bílý plný kroužek, výrazný text
   &--active {
     color: $text-on-dark;
 
     .stepper-step__circle {
-      background: $positive-color;
-      border-color: $positive-color;
-      color: $text-on-dark;
+      background: $text-on-dark;
+      border-color: $text-on-dark;
+      color: $primary-color;
     }
   }
 
-  // Hotový krok — zežloutí (PČR vizuální standard)
+  // Hotový krok — police-yellow (PČR vizuální standard)
   &--done {
     color: $police-yellow;
 
@@ -318,10 +328,10 @@
     }
 
     &:hover:not(:disabled) {
-      color: darken($police-yellow, 8%);
+      color: $police-yellow;
     }
 
-    // Hotový + aktivní — kroužek zůstane žlutý, ale aktivní je zdůrazněné
+    // Hotový + aktivní — žlutý kroužek + jemný halo
     &.stepper-step--active {
       color: $police-yellow;
 
@@ -329,7 +339,7 @@
         background: $police-yellow;
         border-color: $police-yellow;
         color: #1a1200;
-        box-shadow: 0 0 0 3px rgba($police-yellow, 0.25);
+        box-shadow: 0 0 0 3px rgba($police-yellow, 0.28);
       }
     }
   }
