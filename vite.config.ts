@@ -15,6 +15,7 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
+      port: 3000,
       proxy: {
         // Forward /api/ requests to backend in local dev (mirrors Nginx proxy in production)
         '/api': {

@@ -152,6 +152,9 @@ async def test_connection(config: TestConfigRequest, current_user: Lecturer = De
     except openai.NotFoundError as e:
         logger.warning(f"Test LLM — model nenalezen: {e}")
         raise HTTPException(status_code=404, detail=f"Model '{config.model_id}' nebyl na tomto URL nalezen.")
+    except openai.BadRequestError as e:
+        logger.warning(f"Test LLM — špatný model nebo parametry: {e}")
+        raise HTTPException(status_code=400, detail=f"Neplatné ID modelu nebo parametry: {str(e)}")
     except openai.RateLimitError as e:
         logger.warning(f"Test LLM — rate limit: {e}")
         raise HTTPException(status_code=429, detail="Překročen rate limit poskytovatele. Zkuste za chvíli.")

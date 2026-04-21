@@ -6,6 +6,7 @@ Zajišťuje komunikaci přes WebSockety pro real-time stav a spravuje asynchronn
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from typing import List
+import logging
 
 # Maximální velikost jednoho souboru (10 MB) — nginx limit je 50 MB, ale aplikační vrstva je přísnější
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -17,6 +18,8 @@ from core.database import get_db, SessionLocal
 from models.db_models import SystemPrompt, EvaluationCriteria, StudentEvaluation, Lecturer, Criterion, AppSettings, GoldenExample, ClassRoom
 from api.auth import get_current_lecturer
 import datetime
+
+logger = logging.getLogger("evaluz.evaluate")
 
 from services.doc_parser import extract_text
 from services.llm_engine import evaluate_report, extract_identity
@@ -373,14 +376,16 @@ async def evaluate_batch(
                 lecturer_id=current_user_id # Přidáno pro filtraci v LLM enginu / RAGu
             )
             
+            logger.info(f"[QUEUE] LLM hotovo pro '{student_name}', ukládám do DB. Klíče: {list(llm_result_dict.keys())[:5]}")
             async with evaluate_db_lock:
                 identita = llm_result_dict.get('identita', {})
-                
+
                 existing_eval = db_bg.query(StudentEvaluation).filter(
                     StudentEvaluation.student_name == student_name,
                     StudentEvaluation.lecturer_id == current_user_id,
                     StudentEvaluation.scenario_name == scen_id
                 ).order_by(StudentEvaluation.id.desc()).first()
+                logger.info(f"[QUEUE] existing_eval id={existing_eval.id if existing_eval else 'None'}")
                 
                 hodnost = identita.get('hodnost', '').strip()
                 jmeno = identita.get('jmeno', '').strip()
@@ -434,7 +439,8 @@ async def evaluate_batch(
                     db_bg.add(eval_record)
                     
                 db_bg.commit()
-            
+                logger.info(f"[QUEUE] DB commit OK pro '{student_name}'")
+
             end_time = datetime.datetime.now()
             duration = (end_time - start_time).total_seconds()
             print(f">>> [QUEUE] Vyhodnocení hotovo: {student_name} v {end_time.strftime('%H:%M:%S')} (trvalo {duration:.1f}s)")
@@ -446,12 +452,14 @@ async def evaluate_batch(
             }, lecturer_id=current_user_id)
 
         except SecurityException as se:
+            logger.error(f"[QUEUE] Bezpečnostní chyba při vyhodnocování '{student_name}': {se}", exc_info=True)
             await eval_queue.broadcast({
                 "type": "EVAL_ERROR",
                 "student_name": student_name,
                 "error": str(se)
             }, lecturer_id=current_user_id)
         except Exception as e:
+            logger.error(f"[QUEUE] Chyba při vyhodnocování '{student_name}': {e}", exc_info=True)
             await eval_queue.broadcast({
                 "type": "EVAL_ERROR",
                 "student_name": student_name,

@@ -5,11 +5,86 @@ přípravu promptů a následné čištění (parsování) odpovědí tak, aby z
 """
 
 import json
+import re
 import httpx
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from core.config import settings
 from models.db_models import AppSettings
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """
+    Pokusí se obnovit JSON oříznutý LLM tokenovým limitem.
+    Najde všechny kompletní záznamy v poli 'vysledky' a sestaví validní JSON.
+    """
+    vysledky_match = re.search(r'"vysledky"\s*:\s*\[', text)
+    if not vysledky_match:
+        return None
+
+    arr_start = vysledky_match.end()
+    entries = []
+    depth = 0
+    entry_start = None
+
+    for i, c in enumerate(text[arr_start:], arr_start):
+        if c == '{':
+            if depth == 0:
+                entry_start = i
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0 and entry_start is not None:
+                try:
+                    entries.append(json.loads(text[entry_start:i + 1]))
+                except Exception:
+                    pass
+                entry_start = None
+
+    if not entries:
+        return None
+
+    try:
+        identita_match = re.search(r'"identita"\s*:\s*(\{[^}]+\})', text)
+        identita = json.loads(identita_match.group(1)) if identita_match else {}
+    except Exception:
+        identita = {}
+
+    total_score = sum(
+        e.get("body", 0) for e in entries
+        if isinstance(e.get("body"), (int, float))
+    )
+    return {
+        "identita": identita,
+        "vysledky": entries,
+        "celkove_skore": total_score,
+        "zpetna_vazba": f"[Odpověď modelu byla zkrácena tokenovým limitem — obnoveno {len(entries)} kritérií]",
+    }
+
+
+async def _llm_call_with_overflow_retry(client, kwargs: dict, prefix: str) -> object:
+    """
+    Provede LLM volání; při HTTP 400 'context length exceeded' zredukuje
+    max_tokens na hodnotu, která se do okna vejde, a zkusí to znovu.
+    """
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        err = str(e)
+        if "maximum context length" in err:
+            m = re.search(
+                r"maximum context length is (\d+).*?(\d+) in the messages",
+                err, re.DOTALL
+            )
+            if m:
+                limit = int(m.group(1))
+                input_tokens = int(m.group(2))
+                safe_tokens = max(512, limit - input_tokens - 300)
+                print(f"{prefix}Context overflow ({input_tokens}+{kwargs['max_tokens']}>{limit})"
+                      f" — retry s max_tokens={safe_tokens}")
+                retry_kwargs = {**kwargs, "max_tokens": safe_tokens}
+                return await client.chat.completions.create(**retry_kwargs)
+        raise
 
 
 def _resolve_platform(platform: str, api_url: str) -> str:
@@ -160,34 +235,45 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         use_json_mode = platform in ("vllm", "openai")
         kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
             
-        # Voláme model.
-        response = await client.chat.completions.create(**kwargs)
-        
+        # Voláme model (s automatickým retry při context overflow).
+        response = await _llm_call_with_overflow_retry(client, kwargs, prefix)
+
         # 3. PARSOVÁNÍ VÝSLEDKU: AI modely občas píší víc, než chceme. Tady odpověď čistíme.
         msg_content = response.choices[0].message.content or ""
         raw_response = msg_content.strip()
 
-        
-        import re
+        # Logování délky surové odpovědi pro diagnostiku
+        reasoning = getattr(response.choices[0].message, 'reasoning', None)
+        print(f"{prefix}LLM odpověď: content_len={len(raw_response)}, reasoning_len={len(reasoning) if reasoning else 0}")
+        if not raw_response:
+            print(f"{prefix}VAROVÁNÍ: content je prázdný! model={model_name}, reasoning={'ANO' if reasoning else 'NE'}")
+
         # ODSTRANĚNÍ THOUGHT BLOKŮ: Některé modely (jako Qwen nebo DeepSeek) píší své "myšlenky" mezi <think> a </think>.
-        # Tyto bloky musíme odstranit předtím, než se pokusíme text vyparsovat jako JSON.
         clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
-        
-        # Najdeme první '{' a poslední '}', abychom odsekli případný balast okolo (např. pokud model napsal "Here is the JSON: { ... }").
+
+        # Najdeme první '{' a poslední '}', abychom odsekli případný balast okolo.
         start_idx = clean_text.find('{')
         end_idx = clean_text.rfind('}')
-        
+
         if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
-            print(f"{prefix}CRITICAL ERROR: Odpověď LLM neobsahuje JSON (chybí {{ nebo }}). RAW RESPONSE:\n{raw_response}\n--- END RAW ---")
+            print(f"{prefix}CRITICAL ERROR: Odpověď LLM neobsahuje JSON (chybí {{ nebo }}). RAW RESPONSE (first 500):\n{raw_response[:500]}\n--- END RAW ---")
             raise ValueError("V odpovědi LLM nebyl nalezen žádný JSON objekt.")
-            
+
         clean_response = clean_text[start_idx:end_idx+1]
-        
-        return json.loads(clean_response)
-        
-    except json.JSONDecodeError as e:
-        print(f"{prefix}Failed to parse LLM response as JSON: {e}\nRaw Response: {raw_response}")
-        raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
+        try:
+            parsed = json.loads(clean_response)
+        except json.JSONDecodeError as e:
+            print(f"{prefix}Failed to parse LLM response as JSON: {e} — pokus o opravu zkráceného JSON")
+            parsed = _repair_truncated_json(clean_text)
+            if parsed:
+                print(f"{prefix}JSON obnoven: {len(parsed.get('vysledky', []))} kritérií zachráněno")
+            else:
+                print(f"{prefix}Oprava selhala. Raw Response:\n{raw_response}")
+                raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
+
+        print(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
+        return parsed
+
     except Exception as e:
         print(f"{prefix}Error communicating with vLLM at {api_url}: {e}")
         raise
@@ -294,7 +380,6 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
             return {}
         
         raw_response = msg_content.strip()
-        import re
         clean_text = re.sub(r"<(think|thought)>.*?</\1>", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
         
         start_idx = clean_text.find('{')

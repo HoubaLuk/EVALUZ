@@ -171,15 +171,15 @@
     justify-content: center;
   }
 
-  // Zvýrazněná varianta pro primární admin akci
+  // Zvýrazněná varianta pro primární admin akci — bílá
   &--accent {
-    background: rgba($police-yellow, 0.15);
-    border-color: rgba($police-yellow, 0.35);
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
     color: $text-on-dark;
 
     &:hover {
-      background: rgba($police-yellow, 0.25);
-      border-color: rgba($police-yellow, 0.55);
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.6);
       color: $text-on-dark;
     }
   }
