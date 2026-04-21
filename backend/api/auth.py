@@ -180,33 +180,28 @@ def setup_main_account(data: SetupData, db: Session = Depends(get_db)):
     }}
 
 
+class LoginData(BaseModel):
+    username: str
+    password: str
+
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
-def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login_for_access_token(request: Request, data: LoginData, db: Session = Depends(get_db)):
     """
-    Standard OAuth2 Login endpoint.
+    JSON Login endpoint.
     """
-    user = db.query(Lecturer).filter(Lecturer.email == form_data.username).first()
-    
-    if not user:
+    user = db.query(Lecturer).filter(Lecturer.email == data.username).first()
+
+    if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-        
-    is_valid = verify_password(form_data.password, user.password_hash)
-    
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        
+
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Tento účet byl deaktivován administrátorem.")
-        
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires

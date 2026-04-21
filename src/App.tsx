@@ -196,14 +196,10 @@ export default function EvaluzDashboard() {
     setAuthError('');
     setAuthLoading(true);
     try {
-      const formData = new URLSearchParams();
-      formData.append('username', authEmail);
-      formData.append('password', authPassword);
-
       const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData.toString()
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: authEmail, password: authPassword })
       });
 
       if (!res.ok) {
