@@ -222,15 +222,17 @@
 }
 
 // ─── Stepper: pracovní postup (3 fáze) ───────────────────────
+// Světlý podklad, tmavé kruhy — dle vzoru PČR aplikací
 .header-stepper {
   height: $header-navbar-height;
-  background-color: $primary-color;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background-color: var(--bg-surface);
+  border-top: 3px solid $header-bg;          // silnější dělicí linie od tmavého záhlaví
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  padding: 0 32px;
+  padding: 0 40px;
   gap: 0;
 
   @include tablet {
@@ -240,17 +242,17 @@
       display: flex;
       flex-direction: column;
       height: auto;
-      padding: 12px 0;
+      padding: 8px 0;
       position: absolute;
       top: $header-appbar-height;
       left: 0;
       right: 0;
       z-index: 999;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
       box-shadow: var(--shadow-md);
 
-      .stepper-line {
-        display: none;
-      }
+      .stepper-line { display: none; }
 
       .stepper-step {
         width: 100%;
@@ -263,12 +265,12 @@
   }
 }
 
-// Spojovací čára mezi kroky
+// Spojovací čára mezi kroky — tenká šedá, žlutá pokud předchozí krok hotov
 .stepper-line {
   flex: 1;
-  max-width: 100px;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.2);
+  max-width: 120px;
+  height: 1px;
+  background: var(--border-color);
   border-radius: 1px;
   transition: background-color $transition-speed $transition-ease;
 
@@ -282,71 +284,66 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 0 14px;
+  padding: 0 16px;
   height: $header-navbar-height;
   background: transparent;
   border: none;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-muted);
   font-family: inherit;
   @include transition(color, background-color);
   white-space: nowrap;
-  border-radius: $radius-sm;
+  border-radius: $radius-md;
 
   &:hover:not(:disabled) {
-    color: rgba(255, 255, 255, 0.9);
-    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-primary);
+    background: var(--bg-surface-2);
   }
 
-  // Číslovaný/ikonový kroužek
+  // Kroužek s číslem / ikonou
   &__circle {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    border: 2px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 0.88rem;
     font-weight: 700;
     flex-shrink: 0;
-    color: rgba(255, 255, 255, 0.55);
-    @include transition(background-color, border-color, color);
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    @include transition(background-color, border-color, color, box-shadow);
   }
 
   &__label {
-    font-size: 0.85rem;
+    font-size: 0.875rem;
     font-weight: 600;
 
-    @include small-pc {
-      font-size: 0.78rem;
-    }
+    @include small-pc { font-size: 0.8rem; }
   }
 
-  // ── Stavová matice kroužků ──────────────────────────────────
-  //
-  //  Stav           | Kroužek            | Text popisku
-  //  ────────────────┼────────────────────┼──────────────────
-  //  Locked          | šedý obrys        | 35 % opacity
-  //  Odemčený        | bílý obrys        | 55 % bílá
-  //  Aktivní         | bílá výplň        | plná bílá
-  //  Hotový          | žlutá výplň + ✓   | police-yellow
-  //  Hotový + aktivní| žlutá výplň + halo| police-yellow
+  // ── Stavová matice ──────────────────────────────────────────
+  //  locked:          šedý obrys, 40% opacity
+  //  available:       šedý obrys, normální text
+  //  active:          tmavě plný kroužek ($header-bg), bílé číslo
+  //  done:            žlutý kroužek + ✓, zlatý text
+  //  done + active:   žlutý kroužek + halo, zlatý text
 
-  // Aktivní krok — bílý plný kroužek, výrazný text
   &--active {
-    color: $text-on-dark;
+    color: var(--text-primary);
 
     .stepper-step__circle {
-      background: $text-on-dark;
-      border-color: $text-on-dark;
-      color: $primary-color;
+      background: $header-bg;
+      border-color: $header-bg;
+      color: $text-on-dark;
+      box-shadow: 0 2px 8px rgba($header-bg, 0.35);
     }
   }
 
-  // Hotový krok — police-yellow (PČR vizuální standard)
   &--done {
-    color: $police-yellow;
+    color: darken($police-yellow, 18%);
 
     .stepper-step__circle {
       background: $police-yellow;
@@ -355,29 +352,27 @@
     }
 
     &:hover:not(:disabled) {
-      color: $police-yellow;
+      color: darken($police-yellow, 10%);
     }
 
-    // Hotový + aktivní — žlutý kroužek + jemný halo
     &.stepper-step--active {
-      color: $police-yellow;
+      color: darken($police-yellow, 18%);
 
       .stepper-step__circle {
         background: $police-yellow;
         border-color: $police-yellow;
         color: #1a1200;
-        box-shadow: 0 0 0 3px rgba($police-yellow, 0.28);
+        box-shadow: 0 0 0 3px rgba($police-yellow, 0.3);
       }
     }
   }
 
-  // Zamčený krok
   &--locked {
-    opacity: 0.35;
+    opacity: 0.4;
     cursor: not-allowed;
 
     &:hover {
-      color: rgba(255, 255, 255, 0.55);
+      color: var(--text-muted);
       background: transparent;
     }
   }
