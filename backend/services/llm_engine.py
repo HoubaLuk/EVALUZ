@@ -121,9 +121,18 @@ def _build_llm_kwargs(platform: str, enable_thinking: bool, context_window: int,
     return extra
 
 def _split_criteria_chunks(criteria_markdown: str, chunk_size: int = 8) -> list[str]:
-    """Splits criteria markdown (separated by blank lines) into chunks of at most chunk_size."""
-    blocks = [b.strip() for b in criteria_markdown.strip().split('\n\n') if b.strip()]
-    return ['\n\n'.join(blocks[i:i + chunk_size]) for i in range(0, len(blocks), chunk_size)]
+    """
+    Splits criteria markdown into chunks of at most chunk_size criteria each.
+    Splits on '---' separator lines and keeps only sections that contain a criterion header
+    ('**N. Kritérium:**'). Falls back to blank-line splitting if no criteria found.
+    """
+    sections = re.split(r'\n\s*---\s*\n', criteria_markdown)
+    criteria_blocks = [s.strip() for s in sections if re.search(r'\*\*\d+\.\s*Kritérium', s)]
+    if not criteria_blocks:
+        # Fallback: old blank-line split
+        blocks = [b.strip() for b in criteria_markdown.strip().split('\n\n') if b.strip()]
+        return ['\n\n'.join(blocks[i:i + chunk_size]) for i in range(0, len(blocks), chunk_size)]
+    return ['\n\n---\n\n'.join(criteria_blocks[i:i + chunk_size]) for i in range(0, len(criteria_blocks), chunk_size)]
 
 
 async def _evaluate_chunk(
