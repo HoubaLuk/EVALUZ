@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from models.db_models import SystemPrompt, EvaluationCriteria, AppSettings
+from models.db_models import SystemPrompt, AppSettings
 from core.config import settings
 
 # Default Prompts
@@ -36,11 +36,6 @@ Výstup naformátuj jako čtivý a profesionální text rozdělený na (dodržuj
 2. Nejčastější chyby (konkrétně jmenuj problémová kritéria a v čem studenti selhávají u konkrétní MS).
 3. Pedagogická doporučení pro další výuku (konkrétní návrhy na opakovací bloky a metodická zlepšení)."""
 
-# Default Criteria
-DEFAULT_MS2_CRITERIA = """- **Kritérium 1: Kdo vyslal hlídku.** (5 bodů) Student musí explicitně uvést, zda hlídku vyslal operační důstojník, jak se dozvěděli o incidentu.
-- **Kritérium 2: Označení místa události.** (5 bodů) Musí být přesně popsána adresa události podle standardů ÚZ účastníků ZOP.
-- **Kritérium 3: Zákonná výzva před použitím DP.** (10 bodů) Hmaty a chvaty (donucovací prostředky) lze použít jen po předchozí zákonné výzvě.
-- **Kritérium 4: Poučení osoby.** (5 bodů) Osoba musí být poučena."""
 
 def seed_database(db: Session):
     # Seed Prompts
@@ -53,10 +48,6 @@ def seed_database(db: Session):
     if not db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt3").first():
         db.add(SystemPrompt(phase_name="prompt3", content=DEFAULT_PROMPT_PHASE3, temperature=0.1))
         
-    # Seed Criteria
-    if not db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == "MS2").first():
-        db.add(EvaluationCriteria(scenario_name="MS2", markdown_content=DEFAULT_MS2_CRITERIA))
-
     # Seed Settings
     if not db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first():
         db.add(AppSettings(key="VLLM_API_URL", value=settings.VLLM_API_URL))
