@@ -4,6 +4,7 @@ Tento soubor je srdcem celé AI analýzy. Obsahuje logiku pro komunikaci s model
 přípravu promptů a následné čištění (parsování) odpovědí tak, aby z nich systém mohl vyčerpat data.
 """
 
+import asyncio
 import json
 import re
 import httpx
@@ -119,6 +120,109 @@ def _build_llm_kwargs(platform: str, enable_thinking: bool, context_window: int,
     # openrouter, openai, lmstudio — žádné proprietární extra_body
     return extra
 
+def _split_criteria_chunks(criteria_markdown: str, chunk_size: int = 8) -> list[str]:
+    """Splits criteria markdown (separated by blank lines) into chunks of at most chunk_size."""
+    blocks = [b.strip() for b in criteria_markdown.strip().split('\n\n') if b.strip()]
+    return ['\n\n'.join(blocks[i:i + chunk_size]) for i in range(0, len(blocks), chunk_size)]
+
+
+async def _evaluate_chunk(
+    client, chunk_criteria: str, report_text: str,
+    system_prompt: str, platform: str, enable_thinking: bool,
+    context_window: int, max_tokens: int, top_p: float,
+    presence_penalty: float, frequency_penalty: float,
+    model_name: str, prefix: str, chunk_idx: int
+) -> dict:
+    """Evaluates one chunk of criteria. Returns partial dict with 'identita' and 'vysledky'."""
+    user_prompt = f"""
+    ### SEZNAM KRITÉRIÍ K VYHODNOCENÍ (POUZE TATO KRITÉRIA):
+    {chunk_criteria}
+
+    ### TEXT ÚŘEDNÍHO ZÁZNAMU (ÚZ) K VYHODNOCENÍ:
+    {report_text}
+
+    Požadovaná struktura JSON odpovědi — vyhodnoť POUZE výše uvedená kritéria:
+    {{
+        "identita": {{
+            "hodnost": "prap.",
+            "jmeno": "Jan",
+            "prijmeni": "Novák"
+        }},
+        "vysledky": [
+            {{
+                "nazev": "název kritéria",
+                "splneno": true/false,
+                "body": počet_bodů,
+                "oduvodneni": "zdůvodnění",
+                "citace": "přesná věta z textu nebo Chybí"
+            }}
+        ]
+    }}
+
+    IMPORTANT: Výsledkem tvé odpovědi MUSÍ být validní JSON! Žádný jiný text okolo.
+    """
+    use_json_mode = platform in ("vllm", "openai")
+    kwargs = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.1,
+        "top_p": top_p,
+        "presence_penalty": presence_penalty,
+        "frequency_penalty": frequency_penalty,
+        "max_tokens": max_tokens,
+    }
+    kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
+
+    chunk_prefix = f"{prefix}[chunk {chunk_idx}] "
+    response = await _llm_call_with_overflow_retry(client, kwargs, chunk_prefix)
+
+    msg_content = response.choices[0].message.content or ""
+    raw = msg_content.strip()
+    reasoning = getattr(response.choices[0].message, 'reasoning', None)
+    print(f"{chunk_prefix}content_len={len(raw)}, reasoning_len={len(reasoning) if reasoning else 0}")
+
+    clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+    start_idx = clean_text.find('{')
+    end_idx = clean_text.rfind('}')
+
+    if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
+        print(f"{chunk_prefix}CRITICAL: JSON nenalezen")
+        return {"identita": {}, "vysledky": []}
+
+    clean_response = clean_text[start_idx:end_idx + 1]
+    try:
+        parsed = json.loads(clean_response)
+    except json.JSONDecodeError as e:
+        print(f"{chunk_prefix}JSON parse error: {e} — pokus o opravu")
+        parsed = _repair_truncated_json(clean_text) or {"identita": {}, "vysledky": []}
+
+    print(f"{chunk_prefix}{len(parsed.get('vysledky', []))} kritérií OK")
+    return parsed
+
+
+def _merge_chunk_results(chunk_results: list[dict]) -> dict:
+    """Merges partial chunk results into one evaluation dict."""
+    all_vysledky = []
+    identita = {}
+    for result in chunk_results:
+        if not identita and result.get("identita"):
+            identita = result["identita"]
+        all_vysledky.extend(result.get("vysledky", []))
+    total_score = sum(
+        e.get("body", 0) for e in all_vysledky
+        if isinstance(e.get("body"), (int, float))
+    )
+    return {
+        "identita": identita,
+        "vysledky": all_vysledky,
+        "celkove_skore": total_score,
+        "zpetna_vazba": "",
+    }
+
+
 async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None) -> dict:
     """
     HLAVNÍ FUNKCE PRO EVALUACI (Fáze 2).
@@ -180,7 +284,37 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     )
     
     strict_system_prompt = system_prompt
-    
+
+    # CHUNKING: Pokud je kritérií více než CHUNK_SIZE, rozdělíme je a zpracujeme paralelně.
+    # Každý chunk → samostatný vLLM request → vLLM continuous batching → maximální využití GPU.
+    CHUNK_SIZE = 8
+    chunks = _split_criteria_chunks(criteria_markdown, CHUNK_SIZE)
+    if len(chunks) > 1:
+        print(f"{prefix}Chunking: {len(chunks)} chunks á max {CHUNK_SIZE} kritérií — asyncio.gather")
+        tasks = [
+            _evaluate_chunk(
+                client=client,
+                chunk_criteria=chunk,
+                report_text=report_text,
+                system_prompt=strict_system_prompt,
+                platform=platform,
+                enable_thinking=enable_thinking,
+                context_window=context_window,
+                max_tokens=max_tokens,
+                top_p=top_p,
+                presence_penalty=presence_penalty,
+                frequency_penalty=frequency_penalty,
+                model_name=model_name,
+                prefix=prefix,
+                chunk_idx=i + 1,
+            )
+            for i, chunk in enumerate(chunks)
+        ]
+        chunk_results = await asyncio.gather(*tasks)
+        merged = _merge_chunk_results(list(chunk_results))
+        print(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
+        return merged
+
     # 2. PŘÍPRAVA PROMPTU: Tady dáváme modelu přesné instrukce, jak má JSON vypadat.
     # Používáme F-stringy pro vložení textu ÚZ a kritérií přímo do pokynů.
     user_prompt = f"""
