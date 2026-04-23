@@ -237,6 +237,18 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         }
     }, [students]);
 
+    // SELF-HEALING: Pokud isEvaluating=true ale žádný student už nemá status 'evaluating',
+    // znamená to, že všechna WS oznámení dorazila (nebo se ztratila) a UI zůstalo zaseklé.
+    // V takovém případě resetujeme spinner — obrana proti ztrátě WS zprávy při reconnectu.
+    useEffect(() => {
+        if (!isEvaluating || students.length === 0 || evaluatedCount === 0) return;
+        const anyStillRunning = students.some(s => s.status === 'evaluating');
+        if (!anyStillRunning) {
+            setIsEvaluating(false);
+            setEvaluationProgress(0);
+        }
+    }, [students, isEvaluating, evaluatedCount]);
+
     const toggleStudent = (id: number) => {
         setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };

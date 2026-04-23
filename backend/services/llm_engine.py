@@ -120,7 +120,7 @@ def _build_llm_kwargs(platform: str, enable_thinking: bool, context_window: int,
     # openrouter, openai, lmstudio — žádné proprietární extra_body
     return extra
 
-def _split_criteria_chunks(criteria_markdown: str, chunk_size: int = 8) -> list[str]:
+def _split_criteria_chunks(criteria_markdown: str, chunk_size: int = 6) -> list[str]:
     """
     Splits criteria markdown into chunks of at most chunk_size criteria each.
 
@@ -306,7 +306,8 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
 
     # CHUNKING: Pokud je kritérií více než CHUNK_SIZE, rozdělíme je a zpracujeme paralelně.
     # Každý chunk → samostatný vLLM request → vLLM continuous batching → maximální využití GPU.
-    CHUNK_SIZE = 8
+    # chunk_size=6: menší JSON pole → méně chyb struktury (model spolehlivěji dokončí všechna kritéria).
+    CHUNK_SIZE = 6
     chunks = _split_criteria_chunks(criteria_markdown, CHUNK_SIZE)
     if len(chunks) > 1:
         print(f"{prefix}Chunking: {len(chunks)} chunks á max {CHUNK_SIZE} kritérií — asyncio.gather")
