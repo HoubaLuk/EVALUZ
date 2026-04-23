@@ -196,27 +196,45 @@ async def _evaluate_chunk(
 
     chunk_prefix = f"{prefix}[chunk {chunk_idx}] "
     print(f"{chunk_prefix}n_criteria={n_criteria}, max_tokens={chunk_max_tokens}")
-    response = await _llm_call_with_overflow_retry(client, kwargs, chunk_prefix)
 
-    msg_content = response.choices[0].message.content or ""
-    raw = msg_content.strip()
-    reasoning = getattr(response.choices[0].message, 'reasoning', None)
-    print(f"{chunk_prefix}content_len={len(raw)}, reasoning_len={len(reasoning) if reasoning else 0}")
+    async def _call_and_parse(call_kwargs: dict, attempt_label: str) -> dict:
+        response = await _llm_call_with_overflow_retry(client, call_kwargs, chunk_prefix)
+        msg_content = response.choices[0].message.content or ""
+        raw = msg_content.strip()
+        reasoning = getattr(response.choices[0].message, 'reasoning', None)
+        print(f"{chunk_prefix}[{attempt_label}] content_len={len(raw)}, reasoning_len={len(reasoning) if reasoning else 0}")
 
-    clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
-    start_idx = clean_text.find('{')
-    end_idx = clean_text.rfind('}')
+        clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+        s = clean_text.find('{')
+        e = clean_text.rfind('}')
+        if s == -1 or e == -1 or s > e:
+            print(f"{chunk_prefix}[{attempt_label}] CRITICAL: JSON nenalezen")
+            return {"identita": {}, "vysledky": []}
 
-    if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
-        print(f"{chunk_prefix}CRITICAL: JSON nenalezen")
-        return {"identita": {}, "vysledky": []}
+        try:
+            return json.loads(clean_text[s:e + 1])
+        except json.JSONDecodeError as err:
+            print(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — pokus o opravu")
+            return _repair_truncated_json(clean_text) or {"identita": {}, "vysledky": []}
 
-    clean_response = clean_text[start_idx:end_idx + 1]
-    try:
-        parsed = json.loads(clean_response)
-    except json.JSONDecodeError as e:
-        print(f"{chunk_prefix}JSON parse error: {e} — pokus o opravu")
-        parsed = _repair_truncated_json(clean_text) or {"identita": {}, "vysledky": []}
+    parsed = await _call_and_parse(kwargs, "try1")
+    recovered = len(parsed.get('vysledky', []))
+
+    # RETRY: pokud chunk vrátil méně kritérií než měl, zkusíme ještě jednou
+    # s mírně vyšší teplotou (variabilita může pomoct vyhnout se stejné JSON chybě).
+    if recovered < n_criteria:
+        print(f"{chunk_prefix}neúplný výsledek: {recovered}/{n_criteria} — RETRY s temperature=0.3")
+        retry_kwargs = dict(kwargs)
+        retry_kwargs["temperature"] = 0.3
+        try:
+            retry_parsed = await _call_and_parse(retry_kwargs, "retry")
+            if len(retry_parsed.get('vysledky', [])) > recovered:
+                print(f"{chunk_prefix}retry úspěšný: {len(retry_parsed.get('vysledky', []))}/{n_criteria} (původně {recovered})")
+                parsed = retry_parsed
+            else:
+                print(f"{chunk_prefix}retry nepomohl ({len(retry_parsed.get('vysledky', []))}/{n_criteria}), ponechávám původní")
+        except Exception as retry_err:
+            print(f"{chunk_prefix}retry selhal: {retry_err} — ponechávám původní {recovered}/{n_criteria}")
 
     print(f"{chunk_prefix}{len(parsed.get('vysledky', []))} kritérií OK")
     return parsed
@@ -638,7 +656,9 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
         
         kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, response_format_json=False))
 
-        response = await client.chat.completions.create(**kwargs)
+        # Context overflow retry: Phase 3 třídní analýza posílá velké prompty;
+        # když prompt_tokens + max_tokens > context_window, vLLM vrátí HTTP 400.
+        response = await _llm_call_with_overflow_retry(client, kwargs, f"[chat_completion phase={phase or 'Global'}] ")
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Error in chat_completion with vLLM at {api_url}: {e}")
