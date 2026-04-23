@@ -123,16 +123,20 @@ def _build_llm_kwargs(platform: str, enable_thinking: bool, context_window: int,
 def _split_criteria_chunks(criteria_markdown: str, chunk_size: int = 8) -> list[str]:
     """
     Splits criteria markdown into chunks of at most chunk_size criteria each.
-    Splits on '---' separator lines and keeps only sections that contain a criterion header
-    ('**N. Kritérium:**'). Falls back to blank-line splitting if no criteria found.
+
+    Primary strategy: split on numbered criterion headers ('**N. Kritérium').
+    Lookahead preserves the header in the right-hand part so each block starts
+    with its own header. This is robust against inconsistent '---' formatting.
+
+    Fallback: blank-line split (legacy behaviour).
     """
-    sections = re.split(r'\n\s*---\s*\n', criteria_markdown)
-    criteria_blocks = [s.strip() for s in sections if re.search(r'\*\*\d+\.\s*Kritérium', s)]
+    parts = re.split(r'\n+(?=\*\*\d+\.\s*Kritérium)', criteria_markdown)
+    criteria_blocks = [p.strip() for p in parts if re.match(r'\*\*\d+\.\s*Kritérium', p.strip())]
     if not criteria_blocks:
-        # Fallback: old blank-line split
         blocks = [b.strip() for b in criteria_markdown.strip().split('\n\n') if b.strip()]
         return ['\n\n'.join(blocks[i:i + chunk_size]) for i in range(0, len(blocks), chunk_size)]
-    return ['\n\n---\n\n'.join(criteria_blocks[i:i + chunk_size]) for i in range(0, len(criteria_blocks), chunk_size)]
+    return ['\n\n---\n\n'.join(criteria_blocks[i:i + chunk_size])
+            for i in range(0, len(criteria_blocks), chunk_size)]
 
 
 async def _evaluate_chunk(
@@ -170,6 +174,11 @@ async def _evaluate_chunk(
 
     IMPORTANT: Výsledkem tvé odpovědi MUSÍ být validní JSON! Žádný jiný text okolo.
     """
+    # Adaptivní max_tokens: 350 tokenů/kritérium + 300 overhead (identita + JSON struktura).
+    # Zabraňuje přemrštěnému výstupu (verbose oduvodneni, extra text za JSON) a urychluje inference.
+    n_criteria = len(re.findall(r'\*\*\d+\.\s*Kritérium', chunk_criteria))
+    chunk_max_tokens = min(max_tokens, n_criteria * 350 + 300)
+
     use_json_mode = platform in ("vllm", "openai")
     kwargs = {
         "model": model_name,
@@ -181,11 +190,12 @@ async def _evaluate_chunk(
         "top_p": top_p,
         "presence_penalty": presence_penalty,
         "frequency_penalty": frequency_penalty,
-        "max_tokens": max_tokens,
+        "max_tokens": chunk_max_tokens,
     }
     kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
 
     chunk_prefix = f"{prefix}[chunk {chunk_idx}] "
+    print(f"{chunk_prefix}n_criteria={n_criteria}, max_tokens={chunk_max_tokens}")
     response = await _llm_call_with_overflow_retry(client, kwargs, chunk_prefix)
 
     msg_content = response.choices[0].message.content or ""
