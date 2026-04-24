@@ -1,5 +1,18 @@
 # CHANGELOG - EVALUZ
 
+## [v3.9.2] - 2026-04-24
+
+### Opraveno
+- **`_sanitize_json_string_values()` — opravena chyba look-aheadu při chybějící čárce:** Předchozí implementace nezachytila případ, kdy string hodnota končí `"` a hned za ní (bez oddělující čárky) následuje začátek dalšího JSON klíče — tedy vzor `"value""key":`. Scanner nerozpoznal `"` jako konec stringu (protože `"` není v `JSON_STRUCTURAL`) a pokračoval konzumovat i klíč jako součást hodnoty → výsledek byl znehodnocen.
+
+  Oprava: při detekci `"` → whitespace → `"` scanner dál zkoumá, zda jde o vzor `"key":` (uzavírací uvozovka klíče + `:`) → pokud ano, ukončí aktuální string. Tím je správně ošetřen případ chybějící čárky mezi key-value páry.
+
+- **`_repair_truncated_json()` — sanitizace na úrovni jednotlivých bloků:** Při selhání `json.loads(block)` pro dílčí `{...}` blok se nyní provede druhý pokus s `_sanitize_json_string_values(block)`. Dříve se poškozené bloky tichce zahazovaly, čímž docházelo ke ztrátě kritérií i po úspěšném strukturálním parsování.
+
+  Výsledek: Kubisz chunk 2 (a podobné případy) by měly dosáhnout 6/6 namísto 4/6.
+
+---
+
 ## [v3.9.1] - 2026-04-24
 
 ### Opraveno

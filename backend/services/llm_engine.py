@@ -63,8 +63,25 @@ def _sanitize_json_string_values(text: str) -> str:
                 while j < n and text[j] in ' \t\r\n':
                     j += 1
                 if j >= n or text[j] in JSON_STRUCTURAL:
-                    # Legitimní konec stringu
+                    # Legitimní konec stringu (následuje ,  :  }  ]  atd.)
                     break
+                elif text[j] == '"':
+                    # Další " — zjistíme, zda jde o začátek dalšího JSON klíče ("key":)
+                    # Typický případ: model vynechal čárku a hned napsal další key-value pár.
+                    k = j + 1
+                    while k < n and text[k] not in ('"', '\n', '\r'):
+                        k += 1
+                    if k < n and text[k] == '"':
+                        # Máme uzavírací " pro případný klíč — ověříme, že za ním je ':'
+                        m = k + 1
+                        while m < n and text[m] in ' \t':
+                            m += 1
+                        if m < n and text[m] == ':':
+                            # Vzor "key": → aktuální " je skutečný konec hodnoty
+                            break
+                    # Jinak jde o uvozovku uvnitř hodnoty → escapovat
+                    result.append('\\"')
+                    i += 1
                 else:
                     # Interní neescapovaná uvozovka → escapovat
                     result.append('\\"')
@@ -113,7 +130,12 @@ def _repair_truncated_json(text: str) -> dict | None:
                 try:
                     entries.append(json.loads(text[entry_start:i + 1]))
                 except Exception:
-                    pass
+                    # Druhý pokus: sanitizace uvozovek uvnitř bloku
+                    try:
+                        sanitized_block = _sanitize_json_string_values(text[entry_start:i + 1])
+                        entries.append(json.loads(sanitized_block))
+                    except Exception:
+                        pass
                 entry_start = None
 
     if not entries:
