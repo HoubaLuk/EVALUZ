@@ -174,10 +174,14 @@ async def _evaluate_chunk(
 
     IMPORTANT: Výsledkem tvé odpovědi MUSÍ být validní JSON! Žádný jiný text okolo.
     """
-    # Adaptivní max_tokens: 350 tokenů/kritérium + 300 overhead (identita + JSON struktura).
-    # Zabraňuje přemrštěnému výstupu (verbose oduvodneni, extra text za JSON) a urychluje inference.
+    # Adaptivní max_tokens: 500 tokenů/kritérium + 300 overhead (identita + JSON struktura).
+    # Původní hodnota 350 byla kalibrovaná na anglickou tokenizaci (~2,5 zn/token).
+    # Česká diakritika tokenizuje hustěji (~1,5–1,7 zn/token), takže 350 nestačilo pro
+    # obsahově bohaté ÚZ (dialog, právní citace) — model narazil na limit a vLLM JSON mode
+    # truncoval výstup uprostřed 4. kritéria, což způsobovalo JSON parse error (22/25 kritérií).
+    # 500 tokenů/kritérium = přibližně 750–850 znaků na kritérium → dostatečná rezerva.
     n_criteria = len(re.findall(r'\*\*\d+\.\s*Kritérium', chunk_criteria))
-    chunk_max_tokens = min(max_tokens, n_criteria * 350 + 300)
+    chunk_max_tokens = min(max_tokens, n_criteria * 500 + 300)
 
     use_json_mode = platform in ("vllm", "openai")
     kwargs = {
