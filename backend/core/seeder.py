@@ -58,4 +58,10 @@ def seed_database(db: Session):
     if not db.query(AppSettings).filter(AppSettings.key == "SCHOOL_LOCATIONS").first():
         db.add(AppSettings(key="SCHOOL_LOCATIONS", value='["ÚPVSP","VZ Holešov","VZ Brno","VZ Hrdlořezy","VZ Pardubice","VZ Jihlava"]'))
 
+    # Práh úspěšnosti pro filtrování kritérií v AI analytice třídy (Phase 3).
+    # Kritéria pod tímto prahem + vždy top 5 nejhorších jdou do LLM promptu.
+    # Policejní výcvik = vysoký standard → default 80 %.
+    if not db.query(AppSettings).filter(AppSettings.key == "ANALYTICS_THRESHOLD").first():
+        db.add(AppSettings(key="ANALYTICS_THRESHOLD", value="80"))
+
     db.commit()

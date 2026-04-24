@@ -1,5 +1,71 @@
 # Architectural Decisions Log
 
+---
+
+## 2026-04-24: Phase 3 analytics — filtrování kritérií pro AI prompt (v3.8.6)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Phase 3 (`generate_class_summary`) posílala do LLM promptu statistiky **všech** kritérií (25 řádků) + kompletní markdown definic kritérií. To neodpovídá pedagogické realitě — lektor nepotřebuje slyšet o kritériích, která třída zvládá na 95 %. Zároveň se blížíme context window limitu při větším počtu kritérií nebo studentů.
+
+**Rozhodnutí:**
+1. **Filtrovat prompt, ne výstupní data:** Frontend dostává kompletní `stats[]` pro heatmapu a grafy — to se nemění. Filtruje se pouze obsah LLM promptu.
+2. **Kombinace Top-5 + práh:** Vždy posílat 5 nejhůře splněných kritérií (absolutní záchytka i pro výbornou třídu) + všechna kritéria pod prahem úspěšnosti. Deduplikace union operací.
+3. **Default práh 80 %:** Policejní výcvik vyžaduje vysokou compliance — 80 % je důstojný standard. Oproti generickým 60 % eliminuje situaci „vše zelené" při průměrném výkonu.
+4. **`ANALYTICS_THRESHOLD` konfigurovatelný v DB:** Lektor si může práh upravit v Administraci dle náročnosti konkrétní MS — jednoduchá MS → přísnější práh (90 %), komplexní MS → mírnější (70 %).
+5. **Prázdná množina = pozitivní feedback:** Pokud jsou všechna kritéria nad prahem, LLM dostane zprávu „třída podává výborný výkon" — neposílá se zbytečně celý seznam.
+
+**Dopad:**
+- Prompt Phase 3 se zkrátí z `N_kritérií × ~40 zn` na typicky `3–8 kritérií × ~40 zn` = úspora ~700 tokenů na 25 kritériích
+- LLM se soustředí na reálné problémy, ne na přepisování dobrých výsledků
+- Eliminuje budoucí token overflow při rozšíření na 20+ studentů × bohatší odůvodnění
+
+---
+
+## 2026-04-23: Adaptivní token budget kalibrovaný na českou tokenizaci (v3.8.5)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Produkční logy odhalily, že Jarošův chunk 1 konzistentně generuje ~5 100–5 170 znaků a padá s `Expecting ',' delimiter: line 28 column 10`. Původní odhad 350 tokenů/kritérium byl kalibrovaný na anglický ASCII text (~2,5 zn/token). Česká diakritika (š, č, ž…) tokenizuje hustěji (~1,5–1,7 zn/token) — pro 6 kritérií potřeboval model ~3 040 tokenů, ale dostal limit 2 400. vLLM JSON mode při dosažení limitu vložil `"}]` doprostřed 4. kritéria → syntaktická chyba vypadající jako chyba obsahu, nikoli truncation.
+
+**Rozhodnutí:**
+1. **Token budget: 350 → 500 tokenů/kritérium.** Nový vzorec: `min(global_max, n_criteria * 500 + 300)`. Pro 6 kritérií = 3 300 tokenů — pokrývá i dialogicky bohaté ÚZ s četnými právními citacemi.
+2. **Retry mechanismus jako doplněk, ne primární ochrana.** Retry s `temperature=0.3` funguje dobře pro chyby způsobené náhodným sampling (zachránil 6/6 v run 1 Jaroše), ale nefunguje pro deterministické truncation (runs 2+3). Primární ochranou je dostatečný token budget.
+
+**Dopad:** Jarošův chunk 1 se vejde do limitu s rezervou 260 tokenů. Retry mechanismus zůstává jako sekundární záchrana pro samplované chyby.
+
+---
+
+## 2026-04-23: Retry chunku + overflow retry Phase 3 (v3.8.4)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Dvě nezávislé chyby ve stejném commit okně:
+1. `_evaluate_chunk` vrací méně kritérií než chunk obsahuje → lektor vidí 22/25.
+2. `chat_completion` (Phase 3) padá na HTTP 400 při prompt_tokens + max_tokens > 16 384.
+
+**Rozhodnutí:**
+1. **Retry s vyšší teplotou:** Při `recovered < n_criteria` spustit druhý pokus s `temperature=0.3`. Vyšší teplota = jiné tokeny = šance vyhnout se stejné JSON chybě. Vybíráme výsledek s více kritérii — retry selhání neshazuje chunk.
+2. **`chat_completion` → `_llm_call_with_overflow_retry`:** Stejný wrapper který chrání Phase 2 chunky. Zachytí HTTP 400, spočítá `available_tokens = context_window - prompt_tokens - 100` a zkusí znovu.
+
+---
+
+## 2026-04-22: Robustní chunking kritérií + asyncio.gather paralelismus (v3.8.2)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Produkční logy (25 kritérií, 3 studenti) odhalily: (1) nespolehlivé dělení na `---` způsobovalo chunk 9 kritérií místo 8; (2) globální `max_tokens=6144` platil pro celý chunk bez ohledu na počet kritérií → verbose output, JSON parse error, 4/8 kritérií.
+
+**Rozhodnutí:**
+1. **Regex lookahead split:** `re.split(r'\n+(?=\*\*\d+\.\s*Kritérium)', ...)` — každé kritérium začíná `**N. Kritérium:`, hranice je 100% spolehlivá bez ohledu na `---` a mezery.
+2. **`asyncio.gather` paralelismus per student:** Chunky jednoho studenta jdou jako paralelní requesty na vLLM. vLLM continuous batching zpracovává je jako jeden batch → maximální využití L40S GPU. 3 studenti × 5 chunků = 15 simultánních requestů.
+3. **Záchranné mechanismy:** `_repair_truncated_json` (scan pro kompletní `{}` bloky), `_llm_call_with_overflow_retry` (HTTP 400 → snížení max_tokens).
+4. **chunk_size=6** (bylo 8): Kratší JSON pole → model spolehlivěji dokončí bez chyby struktury.
+
+**Dopad:** Wall clock time 146 s → ~55–90 s pro 3 studenty × 25 kritérií na L40S.
+
+---
+
 ## 2026-04-02: Man-in-the-Loop + PDF/Excel refactor (v3.6.0)
 
 **Status:** Decided & Implemented

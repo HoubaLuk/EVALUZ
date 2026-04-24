@@ -1,5 +1,53 @@
 # CHANGELOG - EVALUZ
 
+## [v3.8.6] - 2026-04-24
+
+### Přidáno
+- **Phase 3 analytics — filtrování kritérií pro AI prompt:** Do LLM promptu při generování třídní analýzy se nyní posílají pouze *problémová* kritéria: vždy top 5 nejhůře splněných + všechna kritéria pod konfigurovaným prahem úspěšnosti (default **80 %**). Kritéria nad prahem jsou vynechána — LLM se nesoustředí na to, co třída zvládá. Frontend stále dostává kompletní statistiky pro heatmapu a grafy.
+- **Konfigurovatelný práh `ANALYTICS_THRESHOLD`:** Nový klíč v `AppSettings` (default `80`). Nastavitelný v Administraci — lektor si může práh upravit dle náročnosti konkrétní modelové situace. Výchozí 80 % reflektuje vysoký standard compliance policejního výcviku.
+- **Diagnostický log filtrování:** `[ANALYTICS] Filtrování: threshold=80%, pod prahem=N, top5=5, do promptu=X/25 kritérií` — okamžitě viditelné v `docker logs evaluz_backend`.
+
+### Změněno
+- **`seeder.py`:** Přidán seed pro `ANALYTICS_THRESHOLD=80` — správné výchozí nastavení bez nutnosti ruční DB intervence.
+
+---
+
+## [v3.8.5] - 2026-04-24
+
+### Opraveno
+- **Token budget 350 → 500 tokenů/kritérium pro českou tokenizaci:** Původní odhad 350 tokenů/kritérium vycházel z anglické tokenizace (~2,5 zn/token). Česká diakritika tokenizuje hustěji (~1,5–1,7 zn/token). U dialogicky bohatých ÚZ (Jaroš: 5 170 znaků ≈ 3 040 tokenů) model narážel na limit 2 400 tokenů — vLLM JSON mode truncoval výstup uprostřed 4. kritéria a „záplatoval" JSON uzavíracími znaky → syntaktická chyba, repair zachránil jen 3/6 kritérií (22/25). Nový budget: 6 × 500 + 300 = **3 300 tokenů/chunk**.
+
+---
+
+## [v3.8.4] - 2026-04-23
+
+### Opraveno
+- **Retry chunku při neúplném JSON výsledku:** Pokud `_evaluate_chunk` vrátí méně kritérií než chunk obsahuje (recovered < n_criteria), automaticky provede druhý pokus s `temperature=0.3` (místo 0.1). Vyšší teplota generuje jiné tokeny a vyhne se opakování stejné JSON chyby. Vybírá se výsledek s vyšším počtem kritérií — retry selhání neshazuje chunk, ponechává původní parciálku. Log: `neúplný výsledek: 1/6 → RETRY s temperature=0.3` / `retry úspěšný: 6/6`.
+- **`chat_completion` (Phase 3) — overflow retry:** Funkce pro generování třídní analýzy volala `client.chat.completions.create()` přímo bez wrapperu — při prompt_tokens + max_tokens > 16 384 dostávala HTTP 400 a house UI zobrazovalo „Nepodařilo se spojit s asistentem pro generování analýzy". Nahrazeno `_llm_call_with_overflow_retry()` — wrapper zachytí 400 a automaticky sníží max_tokens na co se vejde do context window.
+
+---
+
+## [v3.8.3] - 2026-04-23
+
+### Změněno
+- **chunk_size 8 → 6:** Menší chunky (6 kritérií místo 8) snižují délku JSON výstupu per chunk a zvyšují spolehlivost parsování. 25 kritérií → 5 chunků (6+6+6+6+1), 3 studenti → 15 paralelních requestů na vLLM.
+
+### Přidáno
+- **WebSocket self-healing v `TabEvaluation.tsx`:** Nový `useEffect` detekuje stav kdy `isEvaluating=true`, ale žádný student nemá `status='evaluating'`. Automaticky resetuje UI bez nutnosti manuálního refreshe. Ochrana proti ztrátě `EVAL_SUCCESS` WebSocket zprávy při reconnectu.
+
+---
+
+## [v3.8.2] - 2026-04-22
+
+### Přidáno
+- **Robustní chunking kritérií — regex lookahead split:** `_split_criteria_chunks()` přešla z dělení na `---` separátoru na regex lookahead `\n+(?=\*\*\d+\.\s*Kritérium)`. Každý blok je garantovaně jedno kritérium bez ohledu na přítomnost `---`, mezer nebo nekonzistentního formátování. Fallback na původní blank-line split pokud regex nenajde žádnou hlavičku.
+- **Adaptivní `max_tokens` per chunk:** `chunk_max_tokens = min(global_max, n_criteria * 350 + 300)`. Zabraňuje přemrštěnému výstupu u menších chunků (chunk s 1 kritériem = 650 tokenů místo 6 144).
+- **`_repair_truncated_json()`:** Záchranná funkce scanující raw output pro kompletní `{}` bloky i při JSON parse erroru — zachrání kritéria z oříznuté odpovědi.
+- **`_llm_call_with_overflow_retry()`:** Wrapper pro LLM volání zachytávající HTTP 400 (context overflow) a automaticky snižující `max_tokens` na `context_window - prompt_tokens - 100`.
+- **Dynamická verze v záhlaví:** `Header.tsx` volá `GET /api/v1/version` z `backend/__version__.py` — eliminuje nesoulad zobrazené verze s kódem.
+
+---
+
 ## [v3.7.7] - 2026-04-13
 
 ### Opraveno

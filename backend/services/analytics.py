@@ -210,20 +210,46 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
  
     # --- 2. Request AI Insight via vLLM ---
     average_score = round(sum(student_scores) / total_students, 1) if total_students > 0 else 0
-    
+
     # Fetch phase 3 prompt
     prompt_record = db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt3").first()
     db_system_prompt = prompt_record.content if prompt_record else "Zhodnoť trendy třídy na základě dodaných a pevně vypočtených přesných statistik."
     temperature = prompt_record.temperature if prompt_record else 0.7
-    
+
     system_prompt = f"{db_system_prompt}\n\nDŮLEŽITÉ POKYNY:\nTvá role je OMEZENA POUZE NA PEDAGOGICKOU INTERPRETACI.\nNic nepočítej! Procenta jsou již deterministicky vypočtena a jsou nezpochybnitelná.\nNIKDY nepoužívej Markdown tabulky (v PDF se rozpadají).\nStrukturu tvoř výhradně pomocí nadpisů třetí úrovně (### Celkové zhodnocení, ### Nejčastější chyby, ### Pedagogická doporučení)."
-    
-    # Build payload string for LLM se VŠEMI daty, na které nesmí LLM sahat, jen je interpretovat
+
+    # --- FILTROVÁNÍ KRITÉRIÍ PRO AI PROMPT ---
+    # Policejní výcvik cílí na vysokou compliance. Do AI promptu posíláme pouze:
+    #   a) top 5 nejhůře splněných kritérií (vždy, i kdybychom měli třídu 100%)
+    #   b) všechna kritéria pod konfigurovaným prahem úspěšnosti (default 80 %)
+    # Frontend dostává kompletní statistiky pro heatmapu — filtrujeme POUZE prompt.
+    from models.db_models import AppSettings as _AppSettings
+    threshold_row = db.query(_AppSettings).filter(_AppSettings.key == "ANALYTICS_THRESHOLD").first()
+    analytics_threshold = int(threshold_row.value) if threshold_row and threshold_row.value else 80
+
+    stats_sorted_asc = sorted(stats, key=lambda x: x["success_rate"])  # nejhorší první
+    top5_worst = {s["full_name"] for s in stats_sorted_asc[:5]}
+    below_threshold = {s["full_name"] for s in stats_sorted_asc if s["success_rate"] < analytics_threshold}
+    relevant_names = top5_worst | below_threshold
+    stats_for_llm = [s for s in stats_sorted_asc if s["full_name"] in relevant_names]
+
+    print(f">>> [ANALYTICS] Filtrování: threshold={analytics_threshold}%, "
+          f"pod prahem={len(below_threshold)}, top5={len(top5_worst)}, "
+          f"do promptu={len(stats_for_llm)}/{len(stats)} kritérií")
+
+    # Build payload string for LLM — pouze relevantní (problémová) kritéria
     criteria_text = criteria_record.markdown_content if criteria_record else "Nezadána kritéria."
-    data_payload = f"EXAKTNÍ STATISTIKY (N={total_students} studentů):\n"
-    for s in stats:
-        data_payload += f"- Kritérium: '{s['full_name']}' -> Jistá úspěšnost: {s['success_rate']}%\n"
-        
+    data_payload = (
+        f"EXAKTNÍ STATISTIKY (N={total_students} studentů):\n"
+        f"Níže jsou uvedena POUZE problémová kritéria (pod {analytics_threshold}% úspěšností "
+        f"nebo v top 5 nejhorších). Kritéria s vyšší úspěšností třída zvládá uspokojivě.\n\n"
+    )
+    for s in stats_for_llm:
+        data_payload += f"- Kritérium: '{s['full_name']}' -> Úspěšnost: {s['success_rate']}%\n"
+
+    if not stats_for_llm:
+        data_payload += "- (Všechna kritéria překračují nastavený práh — třída podává výborný výkon)\n"
+
     data_payload += f"\nNejčastější problémové body napříč třídou: {', '.join(top_errors) if top_errors else 'Vše skvělé'}"
     data_payload += f"\nCelkový průměrný počet bodů: {average_score} z max {max_possible_sc}"
     data_payload += f"\n\nProsím o sepsání pedagogického shrnutí na základě TĚCHTO přesných čísel. K textu připoj metodiku pro kontext, jak kritéria vypadala:\n{criteria_text}"
