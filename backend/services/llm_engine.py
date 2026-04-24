@@ -244,6 +244,77 @@ async def _evaluate_chunk(
     return parsed
 
 
+async def _generate_individual_feedback(
+    merged: dict,
+    db,
+    client,
+    platform: str,
+    model_name: str,
+    enable_thinking: bool,
+    context_window: int,
+    top_p: float,
+    presence_penalty: float,
+    frequency_penalty: float,
+    prefix: str
+) -> str:
+    """
+    Generuje individuální zpětnou vazbu pro studenta na základě sloučených výsledků evaluace.
+    Samostatné LLM volání po merge — lektor dostane personalizované shrnutí bez ohledu na chunking.
+    Prompt se načítá z DB (phase_name='prompt_feedback') — konfigurovatelný v Administraci.
+    """
+    from models.db_models import SystemPrompt as _SystemPrompt
+    prompt_record = db.query(_SystemPrompt).filter(_SystemPrompt.phase_name == "prompt_feedback").first()
+    if not prompt_record or not prompt_record.content.strip():
+        print(f"{prefix}[feedback] Prompt 'prompt_feedback' nenalezen v DB — zpětná vazba přeskočena")
+        return ""
+
+    system_prompt = prompt_record.content
+    temperature = prompt_record.temperature if prompt_record.temperature is not None else 0.5
+
+    identita = merged.get("identita", {})
+    student_name = " ".join(filter(None, [
+        identita.get("hodnost", ""), identita.get("jmeno", ""), identita.get("prijmeni", "")
+    ])).strip() or "Student"
+    celkove_skore = merged.get("celkove_skore", 0)
+    vysledky = merged.get("vysledky", [])
+
+    splnena = [v["nazev"] for v in vysledky if v.get("splneno")]
+    nesplnena = [v["nazev"] for v in vysledky if not v.get("splneno")]
+
+    user_content = (
+        f"Student: {student_name}\n"
+        f"Celkové skóre: {celkove_skore} bodů\n"
+        f"Splněná kritéria ({len(splnena)}): {', '.join(splnena) if splnena else 'žádné'}\n"
+        f"Nesplněná kritéria ({len(nesplnena)}): {', '.join(nesplnena) if nesplnena else 'žádné'}\n\n"
+        f"Napiš individuální zpětnou vazbu pro tohoto studenta."
+    )
+
+    kwargs = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ],
+        "temperature": temperature,
+        "top_p": top_p,
+        "presence_penalty": presence_penalty,
+        "frequency_penalty": frequency_penalty,
+        "max_tokens": 600,  # Zpětná vazba = 3–5 vět, víc tokenů zbytečné
+    }
+    kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, response_format_json=False))
+
+    print(f"{prefix}[feedback] Generuji individuální zpětnou vazbu ({len(splnena)} splněno, {len(nesplnena)} nesplněno)...")
+    try:
+        response = await _llm_call_with_overflow_retry(client, kwargs, f"{prefix}[feedback] ")
+        feedback = (response.choices[0].message.content or "").strip()
+        feedback = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", feedback, flags=re.DOTALL | re.IGNORECASE).strip()
+        print(f"{prefix}[feedback] OK ({len(feedback)} znaků)")
+        return feedback
+    except Exception as e:
+        print(f"{prefix}[feedback] Chyba při generování: {e}")
+        return ""
+
+
 def _merge_chunk_results(chunk_results: list[dict]) -> dict:
     """Merges partial chunk results into one evaluation dict."""
     all_vysledky = []
@@ -355,6 +426,10 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         chunk_results = await asyncio.gather(*tasks)
         merged = _merge_chunk_results(list(chunk_results))
         print(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
+        merged["zpetna_vazba"] = await _generate_individual_feedback(
+            merged, db, client, platform, model_name, enable_thinking,
+            context_window, top_p, presence_penalty, frequency_penalty, prefix
+        )
         return merged
 
     # 2. PŘÍPRAVA PROMPTU: Tady dáváme modelu přesné instrukce, jak má JSON vypadat.
@@ -448,6 +523,11 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
 
         print(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
+        # Individuální zpětná vazba — samostatné LLM volání po parsování celého výsledku
+        parsed["zpetna_vazba"] = await _generate_individual_feedback(
+            parsed, db, client, platform, model_name, enable_thinking,
+            context_window, top_p, presence_penalty, frequency_penalty, prefix
+        )
         return parsed
 
     except Exception as e:

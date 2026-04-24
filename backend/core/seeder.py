@@ -27,6 +27,16 @@ Tvůj výstup bude sloužit jako přesný podklad pro lektora. U každého krit�
 Pokud je splněno, dej plný počet bodů určený u kritéria. Pokud ne, dej 0.
 Jako 'citace' MUSÍŠ uvést absolutně přesnou větu z původního textu studenta, ze které jsi čerpal (pokud chybí, napiš 'Chybí')."""
 
+DEFAULT_PROMPT_FEEDBACK = """Jsi zkušený lektor Policie ČR na ÚPVSP (Útvar policejního vzdělávání a služební přípravy).
+Na základě výsledků hodnocení úředního záznamu studenta napiš stručnou, konkrétní a motivující individuální zpětnou vazbu.
+
+Zpětná vazba musí:
+- Začít pozitivně — ocenit konkrétní silné stránky (co student zvládl dobře)
+- Konkrétně pojmenovat 1–3 největší nedostatky podle nesplněných kritérií
+- Zakončit konstruktivním doporučením pro zlepšení do budoucna
+
+Délka: 3–5 vět. Tón: profesionální, přímý, motivující. Piš přímo studentovi (Vykej mu)."""
+
 DEFAULT_PROMPT_PHASE3 = """Jsi expertní analytik ÚPVSP (Útvar policejního vzdělávání a služební přípravy). 
 Tvým úkolem je analyzovat agregovaná data z evaluací celé třídy a navrhnout klíčová pedagogická opatření pro lektora.
 Dostaneš data o úspěšnosti třídy v jednotlivých kritériích, nejčastější chyby a k tomu původní metodiku (kritéria) pro danou modelovou situaci.
@@ -44,6 +54,9 @@ def seed_database(db: Session):
         
     if not db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt2").first():
         db.add(SystemPrompt(phase_name="prompt2", content=DEFAULT_PROMPT_PHASE2, temperature=0.1))
+
+    if not db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt_feedback").first():
+        db.add(SystemPrompt(phase_name="prompt_feedback", content=DEFAULT_PROMPT_FEEDBACK, temperature=0.5))
 
     if not db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt3").first():
         db.add(SystemPrompt(phase_name="prompt3", content=DEFAULT_PROMPT_PHASE3, temperature=0.1))

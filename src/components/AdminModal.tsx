@@ -38,9 +38,11 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     // States for Prompts
     const [prompt1, setPrompt1] = useState('');
     const [prompt2, setPrompt2] = useState('');
+    const [promptFeedback, setPromptFeedback] = useState('');
     const [prompt3, setPrompt3] = useState('');
     const [temp1, setTemp1] = useState(0.1);
     const [temp2, setTemp2] = useState(0.1);
+    const [tempFeedback, setTempFeedback] = useState(0.5);
     const [temp3, setTemp3] = useState(0.1);
 
     // States for vLLM configuraiton
@@ -128,6 +130,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                 promptsData.forEach((p: any) => {
                     if (p.phase_name === 'prompt1') { setPrompt1(p.content); setTemp1(p.temperature); }
                     if (p.phase_name === 'prompt2') { setPrompt2(p.content); setTemp2(p.temperature); }
+                    if (p.phase_name === 'prompt_feedback') { setPromptFeedback(p.content); setTempFeedback(p.temperature); }
                     if (p.phase_name === 'prompt3') { setPrompt3(p.content); setTemp3(p.temperature); }
                 });
             }
@@ -413,6 +416,7 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                     body: JSON.stringify([
                         { phase_name: 'prompt1', content: prompt1, temperature: temp1 },
                         { phase_name: 'prompt2', content: prompt2, temperature: temp2 },
+                        { phase_name: 'prompt_feedback', content: promptFeedback, temperature: tempFeedback },
                         { phase_name: 'prompt3', content: prompt3, temperature: temp3 }
                     ])
                 });
@@ -436,10 +440,10 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
     if (!isOpen) return null;
 
     // Helper specific to current tab
-    const currentPromptText = adminTab === 'prompt1' ? prompt1 : adminTab === 'prompt2' ? prompt2 : prompt3;
-    const currentPromptTemp = adminTab === 'prompt1' ? temp1 : adminTab === 'prompt2' ? temp2 : temp3;
-    const setPromptText = adminTab === 'prompt1' ? setPrompt1 : adminTab === 'prompt2' ? setPrompt2 : setPrompt3;
-    const setPromptTemp = adminTab === 'prompt1' ? setTemp1 : adminTab === 'prompt2' ? setTemp2 : setTemp3;
+    const currentPromptText = adminTab === 'prompt1' ? prompt1 : adminTab === 'prompt2' ? prompt2 : adminTab === 'prompt_feedback' ? promptFeedback : prompt3;
+    const currentPromptTemp = adminTab === 'prompt1' ? temp1 : adminTab === 'prompt2' ? temp2 : adminTab === 'prompt_feedback' ? tempFeedback : temp3;
+    const setPromptText = adminTab === 'prompt1' ? setPrompt1 : adminTab === 'prompt2' ? setPrompt2 : adminTab === 'prompt_feedback' ? setPromptFeedback : setPrompt3;
+    const setPromptTemp = adminTab === 'prompt1' ? setTemp1 : adminTab === 'prompt2' ? setTemp2 : adminTab === 'prompt_feedback' ? setTempFeedback : setTemp3;
 
     return (
         <div className="modal-overlay">
@@ -464,9 +468,14 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                             {profile.is_superadmin && (
                                 <>
                                     <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 2px' }}>Kategorie promptů</span>
-                                    {(['prompt1', 'prompt2', 'prompt3'] as const).map((tab, i) => (
+                                    {([
+                                        { tab: 'prompt1', label: 'Fáze 1: Precizace kritérií' },
+                                        { tab: 'prompt2', label: 'Fáze 2: Evaluace ÚZ' },
+                                        { tab: 'prompt_feedback', label: 'Fáze 2b: Individuální zpětná vazba' },
+                                        { tab: 'prompt3', label: 'Fáze 3: Globální analýza' },
+                                    ] as const).map(({ tab, label }) => (
                                         <button key={tab} onClick={() => setAdminTab(tab)} style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 5, fontSize: '0.82rem', fontWeight: adminTab === tab ? 700 : 500, background: adminTab === tab ? 'var(--color-primary-light, rgba(15,82,125,0.1))' : 'transparent', color: adminTab === tab ? 'var(--color-primary)' : 'var(--text-secondary)', border: `1px solid ${adminTab === tab ? 'var(--color-primary)' : 'transparent'}`, borderLeft: adminTab === tab ? `3px solid var(--color-primary)` : '3px solid transparent', cursor: 'pointer' }}>
-                                            Fáze {i + 1}: {['Precizace kritérií', 'Evaluace ÚZ', 'Globální analýza'][i]}
+                                            {label}
                                         </button>
                                     ))}
                                     <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />
@@ -677,12 +686,13 @@ export function AdminModal({ isOpen, onClose, isSetupMode, onSetupComplete }: Ad
                             <>
                                 <div style={{ marginBottom: 12 }}>
                                     <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>
-                                        Systémový prompt: {adminTab === 'prompt1' ? 'Fáze 1' : adminTab === 'prompt2' ? 'Fáze 2' : 'Fáze 3'}
+                                        Systémový prompt: {adminTab === 'prompt1' ? 'Fáze 1 — Precizace kritérií' : adminTab === 'prompt2' ? 'Fáze 2 — Evaluace ÚZ' : adminTab === 'prompt_feedback' ? 'Fáze 2b — Individuální zpětná vazba' : 'Fáze 3 — Globální analýza třídy'}
                                     </h3>
                                     <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                                         <Icon icon={faCircleExclamation} style={{ color: 'var(--color-warning)', flexShrink: 0, marginTop: 2 }} />
                                         <span>
                                             Zde můžete upravit chování AI. Změny se projeví u všech uživatelů a uloží se do DB.
+                                            {adminTab === 'prompt_feedback' && <span style={{ display: 'block', marginTop: 4, color: 'var(--color-primary)', fontWeight: 600 }}>Tento prompt řídí generování individuální zpětné vazby pro každého studenta po dokončení evaluace. Model dostane jméno studenta, skóre a seznam splněných/nesplněných kritérií.</span>}
                                             {adminTab === 'prompt3' && <span style={{ display: 'block', marginTop: 4, color: 'var(--color-primary)', fontWeight: 600 }}>Tip: V textu níže můžete libovolně upravit hranice pro hodnocení třídy (např. Vynikající 90-100% místo 80-100%). AI se těmito pásmy bude při analýze striktně řídit.</span>}
                                         </span>
                                     </p>

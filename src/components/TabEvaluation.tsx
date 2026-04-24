@@ -6,7 +6,7 @@ import {
   faUser, faCommentDots, faDownload, faShield, faXmark, faCircleXmark,
   faSpinner, faEllipsisVertical, faTrash, faFloppyDisk, faPencil,
   faGraduationCap, faUserCheck, faHourglass, faFileLines, faUpload,
-  faSquareCheck, faCirclePlay, faClock, faShieldHalved,
+  faSquareCheck, faCirclePlay, faClock, faShieldHalved, faArrowUp,
 } from '@fortawesome/free-solid-svg-icons';
 import { Icon } from './Icon';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -64,6 +64,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
     const wsConnectCountRef = useRef(0);
+    const evalDetailScrollRef = useRef<HTMLDivElement>(null);
     const [isCancelling, setIsCancelling] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -952,7 +953,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     <Icon icon={faWandMagicSparkles} />
                                     <span>Výsledky hodnocení AI aplikací EVALUZ</span>
                                 </div>
-                                <div style={{ flex: 1, overflowY: 'auto' }}>
+                                <div ref={evalDetailScrollRef} style={{ flex: 1, overflowY: 'auto' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                                         <thead>
                                             <tr style={{ background: 'var(--bg-surface-2)', borderBottom: '1px solid var(--border-color)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
@@ -1034,7 +1035,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     />
                                 </div>
                                 {/* NCIKT pořadí: Negativní → Neutrální → Pozitivní */}
-                                <div className="btn-group btn-group--end">
+                                <div className="btn-group btn-group--end" style={{ alignItems: 'center' }}>
                                     {activeStudentData.isDirty && (
                                         <button className="btn btn--outline" onClick={handleSaveChanges} disabled={isSaving}>
                                             {isSaving ? <span className="spinner spinner--sm" /> : <Icon icon={faFloppyDisk} />}
@@ -1121,6 +1122,26 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             </span>
                                         </button>
                                     )}
+                                    <button
+                                        title="Přejít nahoru — otevřít další hodnocení"
+                                        onClick={() => evalDetailScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+                                        style={{
+                                            marginLeft: 8,
+                                            width: 38, height: 38,
+                                            borderRadius: '50%',
+                                            border: '1px solid var(--border-color)',
+                                            background: 'var(--bg-surface-2)',
+                                            color: 'var(--text-secondary)',
+                                            cursor: 'pointer',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            flexShrink: 0,
+                                            transition: 'background 0.15s, color 0.15s',
+                                        }}
+                                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-primary)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
+                                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-surface-2)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)'; }}
+                                    >
+                                        <Icon icon={faArrowUp} />
+                                    </button>
                                 </div>
                             </div>
                         </>
