@@ -2,6 +2,30 @@
 
 ---
 
+## 2026-04-24: Individuální zpětná vazba — separátní LLM volání po evaluaci (v3.8.7)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Pole `zpetna_vazba` existovalo v JSON schématu, DB, PDF generátoru i UI, ale u chunkovaného vyhodnocení (produkční path pro 25 kritérií) bylo vždy prázdné. `_merge_chunk_results` nastavoval `zpetna_vazba: ""` — model ho nikdy nevyplnil, protože chunky generují pouze dílčí JSON s kritérii, ne celkové shrnutí.
+
+**Možnosti:**
+- A: Přidat zpětnou vazbu do každého chunku a skládat ji v merge → fragmenty bez kontextu celého výsledku, pedagogicky nesmyslné.
+- B: Prompt instrukce v system promptu Phase 2 → nefunguje pro chunky (schéma `zpetna_vazba` v chunk user promptu chybí).
+- **C (zvoleno): Samostatné LLM volání po merge** — model vidí kompletní výsledek (identitu, skóre, seznam splněných/nesplněných kritérií) a generuje koherentní 3–5 vět.
+
+**Rozhodnutí:**
+1. **`_generate_individual_feedback()` po merge:** Funkce dostane sloučený dict, vytáhne identitu + vysledky, postaví stručný user prompt a zavolá model. max_tokens=600 (zpětná vazba je krátká).
+2. **Prompt v DB (`prompt_feedback`):** Konfigurovatelný v Administraci jako všechny ostatní prompty. SuperAdmin může upravit tón, formát i délku. Default: profesionální, přímý, vykání studentovi.
+3. **Fail-safe:** Chyba v generování zpětné vazby neblokuje uložení evaluace — vrátí `""` a evaluace se uloží normálně.
+4. **Stejná funkce pro chunked i non-chunked path:** Oba code paths volají `_generate_individual_feedback()` před `return` — konzistentní chování bez ohledu na počet kritérií.
+
+**Dopad:**
+- Lektor dostane automaticky navržený text zpětné vazby, který může přijmout, upravit nebo přepsat.
+- Krátký vstup (~300 zn.) → rychlé volání (~3–5 s navíc na studenta), nízká zátěž na GPU.
+- Prompt je plně v rukou lektora/metodika přes Administraci — žádný hardcoded text.
+
+---
+
 ## 2026-04-24: Phase 3 analytics — filtrování kritérií pro AI prompt (v3.8.6)
 
 **Status:** Decided & Implemented

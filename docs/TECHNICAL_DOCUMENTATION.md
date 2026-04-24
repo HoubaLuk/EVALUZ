@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.7.0 (Produkční stabilizace — Export opravy + scenario_display_name + Statistics)
-**Poslední aktualizace:** 9. dubna 2026
+**Verze:** 3.8.7 (LLM robustness — chunking, retry, token budget, individuální zpětná vazba)
+**Poslední aktualizace:** 23. dubna 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -44,14 +44,38 @@ Aplikace využívá několikafázový přístup k ovládání LLM (Large Languag
 
 ### 2.1 Konfigurace modelů (v2.0.2+)
 Systém umožňuje nastavit různé modely pro různé úkoly v Administraci:
-- **Phase 1 (Precizace)**: Ladění kritérií s lektorem. Podpora Sokratovského dotazování.
-- **Phase 2 (Evaluace)**: Samotné hodnocení textu studenta. Klade důraz na přesné citace.
-- **Phase 3 (Analýza)**: Pedagogický vhled do dat celé třídy.
+- **Phase 1 (Precizace)**: Sokratovský asistent ladí kritéria s lektorem.
+- **Phase 2 (Evaluace)**: Hodnocení ÚZ studenta. Klade důraz na přesné citace z textu.
+- **Phase 2b (Individuální zpětná vazba)**: Samostatné LLM volání po sloučení výsledků chunkingem. Model vidí kompletní výsledek (všechna kritéria), generuje personalizovanou zpětnou vazbu pro studenta (3–5 vět, max. 600 tokenů). Prompt editovatelný v Admin UI (`prompt_feedback`).
+- **Phase 3 (Analýza třídy)**: Pedagogický vhled do dat celé třídy. Filtruje kritéria před LLM promptem (top 5 nejhorších + pod `ANALYTICS_THRESHOLD`, výchozí 80 %).
 
 ### 2.2 Sokratovský AI Asistent
 V komponentě `TabCriteria` je implementován asistent, který:
 - Filtruje konverzaci od samotného návrhu kritérií pomocí oddělovače `---`.
 - Klade doplňující otázky postupně po jedné (na základě instrukce v systémovém promptu).
+
+### 2.3 LLM Robustnost (v3.8.x)
+
+Série vylepšení zaváděných od v3.8.0 řeší spolehlivost AI evaluace u větších sad kritérií a obsáhlých ÚZ:
+
+#### Chunking kritérií (v3.8.2)
+Evaluace rozdělí kritéria na skupiny po 6 (`CHUNK_SIZE=6`) pomocí regex lookahead na `**N. Kritérium`. Chunky se zpracují paralelně přes `asyncio.gather()` — vLLM continuous batching zpracuje všechny requesty jako jednu GPU dávku. Výsledky se sloučí funkcí `_merge_chunk_results()`.
+
+Výhoda: Zachování celého textu ÚZ v každém chunku, žádné ořezávání obsahu. 25 kritérií → 5 chunků zpracovaných prakticky současně.
+
+#### Adaptivní token budget (v3.8.5)
+`chunk_max_tokens = min(global_max, n_criteria × 500 + 300)`
+
+Česká diakritika tokenizuje hustěji (~1,5–1,7 zn/token) než původně předpokládaných 2,5 zn/token. Původní hodnota 350 způsobovala truncation uprostřed výstupu — vLLM JSON mode přidával `"}]` na místě ořezu → parse error se jevil jako chyba obsahu. Hodnota 500 tokenů/kritérium eliminuje tento problém.
+
+#### Retry mechanismus (v3.8.4)
+Pokud chunk vrátí méně kritérií než bylo zadáno, automaticky se provede retry s `temperature=0.3`. Funguje pro sampling-based JSON chyby; deterministické truncation řeší token budget.
+
+#### Context overflow retry (v3.8.4)
+`_llm_call_with_overflow_retry()` zachytí HTTP 400 "context length exceeded", parsuje skutečné limity z chybové zprávy a opakuje volání s redukovaným `max_tokens`. Chrání Phase 3 analytiku (velké prompty) i obecné použití.
+
+#### JSON recovery (v3.8.2)
+`_repair_truncated_json()` dokáže z partially truncated JSON odpovědi extrahovat kompletní záznamy `{}` (sleduje hloubku závorek) a sestavit validní výsledek. Zpráva informuje lektora o počtu obnovených kritérií.
 
 ---
 
@@ -105,7 +129,27 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.4.1 (Aktuální) - Statistics Dashboard & Excel Export
+### v3.8.7 (Aktuální) - Individuální zpětná vazba + scroll-to-top + Admin prompt
+- **Phase 2b:** Samostatná funkce `_generate_individual_feedback()` generuje personalizovanou zpětnou vazbu pro studenta po merge chunk výsledků. Fail-safe: chyba zpětné vazby neblokuje uložení evaluace.
+- **Admin UI:** Nový záložkový panel "Fáze 2b: Individuální zpětná vazba" v AdminModal pro editaci promptu `prompt_feedback`.
+- **UX:** Tlačítko ↑ (scroll-to-top) vedle "Vyhodnocení schváleno" — lektor se jedním klikem vrátí na seznam studentů.
+
+### v3.8.6 - Phase 3 filtrování kritérií
+- Kritéria s úspěšností nad `ANALYTICS_THRESHOLD` (výchozí 80 %) jsou filtrována z LLM promptu Phase 3; frontend heatmapa zobrazuje kompletní stats všech kritérií.
+- Nový AppSettings klíč `ANALYTICS_THRESHOLD` konfigurovatelný v Admin UI.
+
+### v3.8.5 - Token budget pro českou tokenizaci
+- Navýšení z 350 → 500 tokenů/kritérium. Eliminuje JSON truncation u obsáhlých ÚZ s dialogem a právními citacemi.
+
+### v3.8.4 - Retry + context overflow ochrana
+- `_evaluate_chunk()`: retry s temperature=0.3 při neúplném výsledku.
+- `_llm_call_with_overflow_retry()`: automatická redukce max_tokens při HTTP 400.
+
+### v3.8.2–v3.8.3 - Chunking kritérií + JSON recovery
+- `_split_criteria_chunks()`: regex lookahead split, CHUNK_SIZE=6, asyncio.gather parallelism.
+- `_repair_truncated_json()`: recovery z partially truncated JSON výstupu.
+
+### v3.7.0 - Export opravy + scenario_display_name + Statistics
 - **Statistiky (TabMonitor):** Implementace nové analytické karty pro Superadminy a Adminy. Využití knihovny **Recharts** pro vizualizaci aktivity napříč organizačními články.
 - **Excel Export:** Robustní generátor `.xlsx` souborů založený na `openpyxl`. Obsahuje sešity pro základní přehled, organizační články, aktivitu lektorů a časový monitoring.
 - **Backend API:** Nový router `api/statistics.py` s filtrem podle rolí (`is_superadmin`, `is_admin`) a organizačních článků (`school_location`).
@@ -187,4 +231,4 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 Pouze uživatel s příznakem `is_superadmin = true` může vytvářet nové lektory a spravovat globální nastavení LLM.
 
 ---
-*Poslední aktualizace dokumentace: 18. března 2026*
+*Poslední aktualizace dokumentace: 23. dubna 2026*

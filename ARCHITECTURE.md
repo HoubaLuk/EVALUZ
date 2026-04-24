@@ -1,6 +1,6 @@
 # EVALUZ — Technická architektura a dokumentace
 
-**Verze systému:** 3.8.2  
+**Verze systému:** 3.8.7  
 **Datum dokumentace:** 23. 4. 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -158,13 +158,15 @@ eval_queue.worker() — Semaphore(concurrency) paralelní zpracování
   pro každý soubor:
     llm_engine.evaluate_report()
       ↓
-    _split_criteria_chunks()  — rozdělení kritérií na chunky po 8
+    _split_criteria_chunks()  — rozdělení kritérií na chunky po 6
       ↓
     asyncio.gather(*tasks)  — paralelní posílání chunků do vLLM
       ↓
     vLLM continuous batching  — GPU zpracuje všechny requesty najednou
       ↓
     _merge_chunk_results()  — sloučení výsledků chunků
+      ↓
+    _generate_individual_feedback()  — samostatné LLM volání pro zpětnou vazbu studenta
         ↓
 DB UPDATE StudentEvaluation.json_result
         ↓
@@ -201,7 +203,7 @@ Frontend zobrazí grafy + AI shrnutí + export tlačítka
 ```
 backend/
 ├── main.py                  # FastAPI aplikace, middleware, routery, lifespan
-├── __version__.py           # Centralizovaná verze ("3.8.2")
+├── __version__.py           # Centralizovaná verze ("3.8.7")
 ├── alembic/                 # DB migrace
 ├── alembic.ini
 │
@@ -403,8 +405,9 @@ Soubor: `backend/services/llm_engine.py`
 | `evaluate_report()` | text ÚZ, kritéria MD, system prompt | dict s `vysledky` | Hlavní evaluace (Phase 2) |
 | `extract_identity()` | text ÚZ | dict `{hodnost, jmeno, prijmeni}` | Fast-scan extrakce jména |
 | `chat_completion()` | seznam zpráv, system prompt | string | Phase 1 (tvorba kritérií) a Phase 3 (analytika) |
-| `_split_criteria_chunks()` | markdown kritérií, chunk_size=8 | list[str] | Chunking pro přetečení kontextu |
-| `_evaluate_chunk()` | chunk kritérií + text ÚZ | partial dict | Vyhodnocení jednoho chunku |
+| `_split_criteria_chunks()` | markdown kritérií, chunk_size=6 | list[str] | Chunking pro přetečení kontextu |
+| `_evaluate_chunk()` | chunk kritérií + text ÚZ | partial dict | Vyhodnocení jednoho chunku (s retry) |
+| `_generate_individual_feedback()` | merged dict, db, client, ... | string | Individuální zpětná vazba pro studenta (Phase 2b) |
 | `_merge_chunk_results()` | list[dict] | sloučený dict | Merge výsledků ze všech chunků |
 | `_repair_truncated_json()` | raw string | dict nebo None | Recovery při oříznutém JSON |
 | `_llm_call_with_overflow_retry()` | kwargs, client | response | Retry při HTTP 400 context overflow |
@@ -415,12 +418,12 @@ Soubor: `backend/services/llm_engine.py`
 
 **Problém:** Model qwen3-30b-fp8 má context window 16 384 tokenů. Při 25 kritériích × průměrný popis + text ÚZ (typicky 1–2 strany) dojde k přetečení.
 
-**Řešení:** Funkce `_split_criteria_chunks()` rozdělí kritéria na skupiny po max. 8.
+**Řešení:** Funkce `_split_criteria_chunks()` rozdělí kritéria na skupiny po max. 6.
 
 ```python
-CHUNK_SIZE = 8
+CHUNK_SIZE = 6
 chunks = _split_criteria_chunks(criteria_markdown, CHUNK_SIZE)
-# 25 kritérií → 4 chunky: [K1-K8, K9-K16, K17-K24, K25]
+# 25 kritérií → 5 chunků: [K1-K6, K7-K12, K13-K18, K19-K24, K25]
 ```
 
 **Primární strategie — regex lookahead na hlavičku kritéria:**
@@ -445,7 +448,7 @@ chunk_results = await asyncio.gather(*tasks)
 
 `asyncio.gather()` odešle všechny chunky současně do vLLM serveru. vLLM continuous batching zpracuje tyto requesty jako jednu dávku na GPU — maximální využití NVIDIA L40S.
 
-**Příklad:** 3 studenti × 4 chunky = 12 paralelních requestů zpracovaných v jedné GPU dávce.
+**Příklad:** 3 studenti × 5 chunků = 15 paralelních requestů zpracovaných v jedné GPU dávce.
 
 ### 8.4 Adaptivní max_tokens
 
@@ -455,13 +458,13 @@ chunk_results = await asyncio.gather(*tasks)
 
 ```python
 n_criteria = len(re.findall(r'\*\*\d+\.\s*Kritérium', chunk_criteria))
-chunk_max_tokens = min(max_tokens, n_criteria * 350 + 300)
-# Pro 8 kritérií: min(6144, 8*350+300) = min(6144, 3100) = 3100 tokenů
-# Pro 4 kritéria: min(6144, 4*350+300) = min(6144, 1700) = 1700 tokenů
+chunk_max_tokens = min(max_tokens, n_criteria * 500 + 300)
+# Pro 6 kritérií: min(6144, 6*500+300) = min(6144, 3300) = 3300 tokenů
+# Pro 4 kritéria: min(6144, 4*500+300) = min(6144, 2300) = 2300 tokenů
 ```
 
-- `350 tokenů/kritérium` — empiricky stanovená hodnota pro název + odůvodnění + citaci
-- `+300` — overhead pro identitu, JSON strukturu a closing brackes
+- `500 tokenů/kritérium` — empiricky kalibrováno pro českou diakritiku (~1,5–1,7 zn/token vs. původně předpokládaných 2,5 zn/token). Původní hodnota 350 způsobovala truncation u obsáhlejších ÚZ (dialog, právní citace).
+- `+300` — overhead pro identitu, JSON strukturu a closing brackets
 - `min(global_max, ...)` — nikdy nepřekročí globální limit nastavený v Administraci
 
 ### 8.5 JSON resilience
@@ -512,7 +515,7 @@ Každá fáze může používat jiný model a nastavení thinking:
 ```
 MODEL_PHASE1        → model pro tvorbu kritérií (Phase 1 chat)
 THINKING_PHASE1     → thinking on/off pro Phase 1
-MODEL_PHASE2        → model pro evaluaci ÚZ (Phase 2)
+MODEL_PHASE2        → model pro evaluaci ÚZ (Phase 2 + Phase 2b zpětná vazba)
 THINKING_PHASE2     → thinking on/off pro Phase 2
 MODEL_EXTRACTION    → model pro fast-scan extrakci identity
 THINKING_EXTRACTION → thinking on/off pro extraction
@@ -521,6 +524,8 @@ VLLM_ENABLE_THINKING → globální fallback thinking
 ```
 
 Lookup priority: Phase-specific → Global fallback.
+
+**Phase 2b (individuální zpětná vazba)** sdílí model a nastavení Phase 2. Prompt se načítá samostatně z tabulky `system_prompts` (`phase_name='prompt_feedback'`), teplota z jeho záznamu (výchozí 0,5), `max_tokens=600`.
 
 ### 8.8 Parsování dokumentů
 
@@ -598,6 +603,8 @@ src/
 - WebSocket (`/evaluate/ws`) zobrazuje real-time stav (zelená/červená ikona per student)
 - Detailní výsledky: tabulka kritérií, odůvodnění, citace, celkové skóre
 - Manuální korekce skóre, oprava jména, schválení/zrušení schválení
+- Po schválení zobrazena individuální zpětná vazba vygenerovaná samostatným LLM voláním (Phase 2b)
+- Tlačítko ↑ (scroll-to-top) vedle tlačítka "Vyhodnocení schváleno" — lektor se jedním klikem vrátí na seznam studentů pro přechod na další hodnocení
 - Export PDF individuálního hodnotícího listu
 
 **Fáze 3 — Analytika (`TabAnalytics`)**
@@ -687,6 +694,12 @@ Klíče spravované přes Admin UI (`/admin/settings`), změna je okamžitě ú�
 | `LLM_CONCURRENCY_VLLM` | Počet paralelních workerů pro vLLM | `8` |
 | `LLM_CONCURRENCY_OPENROUTER` | Počet paralelních workerů pro OpenRouter | `2` |
 
+**Analytics:**
+
+| Klíč | Popis | Výchozí |
+|------|-------|---------|
+| `ANALYTICS_THRESHOLD` | Práh úspěšnosti (%) pro filtrování kritérií v Phase 3 LLM promptu. Kritéria pod prahem + vždy top 5 nejhorších jdou do LLM; ostatní jdou pouze do heatmapy ve frontendu. | `80` |
+
 **Ostatní:**
 
 | Klíč | Popis |
@@ -701,7 +714,8 @@ Uloženy v tabulce `system_prompts`, editovatelné v Admin UI:
 | `phase_name` | Účel |
 |--------------|------|
 | `prompt1` | Sokratovský AI asistent pro tvorbu kritérií |
-| `prompt2` | Expertní instruktor pro evaluaci ÚZ (Phase 2) |
+| `prompt2` | Expertní instruktor-hodnotitel pro evaluaci ÚZ (Phase 2) |
+| `prompt_feedback` | Lektor-zpětnovazební asistent pro individuální zpětnou vazbu studenta (Phase 2b); teplota 0,5, max_tokens 600 |
 | `prompt3` | Analytik pro pedagogické shrnutí třídy (Phase 3) |
 
 ---
@@ -800,3 +814,33 @@ Lookahead zachovává hlavičku v pravé části splitu. Formát `**N. Kritériu
 **Rozhodnutí:** LLM konfigurace (URL, model ID, max_tokens, thinking, platform) je uložena v tabulce `app_settings` a editovatelná přes Admin UI bez restartu aplikace. `.env` obsahuje pouze infrastrukturní konstanty (DB URL, JWT klíč).
 
 **Důsledky:** Změna modelu nebo URL trvá 5 sekund (uloží v UI), bez nutnosti přístupu k serveru nebo redeploymentu. Trade-off: konfigurace není verzionovaná v gitu — je záměrná (obsahuje citlivé API klíče).
+
+---
+
+### ADR-007: Navýšení token budgetu na 500 tokenů/kritérium (v3.8.5)
+
+**Kontext:** Původní hodnota 350 tokenů/kritérium způsobovala JSON truncation u obsáhlejších ÚZ. Diagnostika odhalila, že česká diakritika tokenizuje hustěji (~1,5–1,7 zn/token) než původně předpokládaných 2,5 zn/token. Pro 6 kritérií × 350 = 2 400 tokenů, ale reálná potřeba byla ~3 040 tokenů → vLLM JSON mode truncoval výstup uprostřed 4. kritéria, přidával `"}]` na místě ořezu → parse error se jevil jako chyba obsahu, ne jako overflow.
+
+**Rozhodnutí:** `chunk_max_tokens = min(global_max, n_criteria × 500 + 300)`. Hodnota 500 tokenů/kritérium pokrývá ~750–850 znaků výstupu — dostatečná rezerva i pro dialog-heavy ÚZ s právními citacemi.
+
+**Důsledky:** Eliminace JSON truncation chyb (Jaroš: 22/25 → 25/25). Mírně vyšší spotřeba VRAM na výstupní tokeny, ale v rámci kapacity L40S (48 GB).
+
+---
+
+### ADR-008: Individuální zpětná vazba jako samostatné LLM volání (v3.8.7)
+
+**Kontext:** Původní design měl pole `zpetna_vazba` součástí hlavního evaluačního JSON (Phase 2 prompt). Problém: při chunkingu model vidí pouze část kritérií per chunk — zpětná vazba na konci každého chunku by byla nekompletní. Alternativa — přidat zpětnou vazbu do merge funkce — by vyžadovala předávání celého promptu do utility funkce.
+
+**Rozhodnutí:** Separátní LLM volání `_generate_individual_feedback()` po `_merge_chunk_results()`. Funkce vidí kompletní sloučený výsledek (všechna kritéria), sestaví user_content se jménem studenta, skóre, splněnými a nesplněnými kritérii a zavolá model s `max_tokens=600`. Prompt je konfigurovatelný v Admin UI (`phase_name='prompt_feedback'`).
+
+**Důsledky:** Fail-safe design — selhání feedback volání vrátí prázdný string, evaluace se uloží bez zpětné vazby (neblokuje pipeline). Lektor může zpětnou vazbu vidět v detailu hodnocení. Přidá ~1–2 s latence na studenta (vLLM continuous batching to zvládá paralelně s ostatními studenty).
+
+---
+
+### ADR-009: Phase 3 filtrování kritérií před LLM promptem (v3.8.6)
+
+**Kontext:** Při rostoucím počtu kritérií (20–25) a třídě 15+ studentů by Phase 3 prompt obsahoval kompletní stats pro všechna kritéria — z nichž velká část (ta s >80% úspěšností) nepřináší pedagogicky hodnotnou informaci. Velký prompt → více tokenů → pomalejší inference → riziko context overflow.
+
+**Rozhodnutí:** Filtrování v `analytics.py/generate_class_summary()`: seřadit kritéria vzestupně dle `success_rate` → vzít top 5 nejhorších + všechna pod `ANALYTICS_THRESHOLD` (výchozí 80 %) → deduplikovat → do LLM promptu poslat pouze tuto množinu. Kompletní stats všech kritérií se stále vrátí frontendu pro heatmapu.
+
+**Důsledky:** LLM prompt zůstane konstantně malý bez ohledu na počet kritérií. `ANALYTICS_THRESHOLD` je konfigurovatelný v Admin UI. Pedagogický obsah AI shrnutí se soustředí na problémová kritéria — pro lektora relevantnější. Trade-off: AI nikdy neokomentuje kritéria s vysokou úspěšností (záměrné).

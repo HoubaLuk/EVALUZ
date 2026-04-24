@@ -147,33 +147,6 @@ async def _evaluate_chunk(
     model_name: str, prefix: str, chunk_idx: int
 ) -> dict:
     """Evaluates one chunk of criteria. Returns partial dict with 'identita' and 'vysledky'."""
-    user_prompt = f"""
-    ### SEZNAM KRITÉRIÍ K VYHODNOCENÍ (POUZE TATO KRITÉRIA):
-    {chunk_criteria}
-
-    ### TEXT ÚŘEDNÍHO ZÁZNAMU (ÚZ) K VYHODNOCENÍ:
-    {report_text}
-
-    Požadovaná struktura JSON odpovědi — vyhodnoť POUZE výše uvedená kritéria:
-    {{
-        "identita": {{
-            "hodnost": "prap.",
-            "jmeno": "Jan",
-            "prijmeni": "Novák"
-        }},
-        "vysledky": [
-            {{
-                "nazev": "název kritéria",
-                "splneno": true/false,
-                "body": počet_bodů,
-                "oduvodneni": "zdůvodnění",
-                "citace": "přesná věta z textu nebo Chybí"
-            }}
-        ]
-    }}
-
-    IMPORTANT: Výsledkem tvé odpovědi MUSÍ být validní JSON! Žádný jiný text okolo.
-    """
     # Adaptivní max_tokens: 500 tokenů/kritérium + 300 overhead (identita + JSON struktura).
     # Původní hodnota 350 byla kalibrovaná na anglickou tokenizaci (~2,5 zn/token).
     # Česká diakritika tokenizuje hustěji (~1,5–1,7 zn/token), takže 350 nestačilo pro
@@ -182,6 +155,34 @@ async def _evaluate_chunk(
     # 500 tokenů/kritérium = přibližně 750–850 znaků na kritérium → dostatečná rezerva.
     n_criteria = len(re.findall(r'\*\*\d+\.\s*Kritérium', chunk_criteria))
     chunk_max_tokens = min(max_tokens, n_criteria * 500 + 300)
+
+    user_prompt = f"""DŮLEŽITÉ: Výstupem tvé odpovědi musí být výhradně validní JSON — žádný jiný text, markdown ani komentáře.
+Vyhodnoť PRÁVĚ {n_criteria} kritérií uvedených níže — ne méně, ne více.
+
+### KRITÉRIA K VYHODNOCENÍ:
+{chunk_criteria}
+
+### TEXT ÚŘEDNÍHO ZÁZNAMU (ÚZ):
+{report_text}
+
+Požadovaná struktura JSON odpovědi:
+{{
+    "identita": {{
+        "hodnost": "prap.",
+        "jmeno": "Jan",
+        "prijmeni": "Novák"
+    }},
+    "vysledky": [
+        {{
+            "nazev": "název kritéria",
+            "splneno": true/false,
+            "body": počet_bodů,
+            "oduvodneni": "1–2 věty: co jsi hledal a co jsi (ne)nalezl",
+            "citace": "doslovná věta z textu ÚZ nebo Chybí"
+        }}
+    ]
+}}
+"""
 
     use_json_mode = platform in ("vllm", "openai")
     kwargs = {

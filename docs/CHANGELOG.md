@@ -1,5 +1,35 @@
 # CHANGELOG - EVALUZ
 
+## [v3.9.0] - 2026-04-23
+
+### Přidáno
+- **Automatický upgrade promptů při startu (`PROMPT_VERSION`):** `seeder.py` nyní sleduje verzi promptů v `AppSettings` (klíč `PROMPT_VERSION`). Při každém startu porovná uloženou verzi s aktuální — pokud je starší, přepíše všechny výchozí prompty na nové hodnoty. Administrátor nemusí prompty měnit ručně při upgrade. Vlastní úpravy promptu v Admin UI jsou přepsány upgradovým seedem (záměrné — nová verze = nový výchozí stav).
+
+### Změněno
+- **`DEFAULT_PROMPT_PHASE2` — zásadní přepis pro qwen3-30b-instruct (non-reasoning):**
+  Nový prompt explicitně instruuje model krok-za-krokem pro každé kritérium: (1) přečti popis, (2) prohledej text ÚZ, (3) napiš odůvodnění 1–2 věty, (4) binárně rozhodni, (5) přesná citace nebo "Chybí". Pole `oduvodneni` slouží jako chain-of-thought kotva — model nejdříve verbalizuje hledání, pak rozhodne. Nová pravidla zdůrazňují, že v pochybnostech = false a citace musí být doslova (ne parafráze).
+- **`DEFAULT_PROMPT_FEEDBACK` — vazba na konkrétní kritéria:**
+  Doplněna instrukce jmenovat nedostatky NÁZVEM nesplněného kritéria (ne obecným popisem). Přidán explicitní limit 120 slov — qwen3 instruct respektuje číselné limity spolehlivěji než "3–5 vět".
+- **`DEFAULT_PROMPT_PHASE3` — délkový limit a explicitní sekce:**
+  Nová instrukce: 200–350 slov celkem, každá sekce 2–4 věty. Sekce mají tučný název (`**Celkové zhodnocení:**` atd.) — zajišťuje konzistentní formátování výstupu bez ohledu na teplotu modelu.
+- **`_evaluate_chunk` user_prompt — instrukce na začátek, explicitní počet:**
+  JSON-only instrukce přesunuta na **začátek** user prompty (vyšší váha). Přidán řádek `"Vyhodnoť PRÁVĚ {n_criteria} kritérií — ne méně, ne více."` — snižuje pravděpodobnost vynechání kritéria. Výpočet `n_criteria` přesunut před sestavení promptu.
+
+---
+
+## [v3.8.7] - 2026-04-24
+
+### Přidáno
+- **Individuální zpětná vazba pro studenta — samostatné LLM volání po evaluaci:** Po sloučení výsledků chunků (`_merge_chunk_results`) se automaticky spouští `_generate_individual_feedback()`. Model dostane jméno studenta, celkové skóre a seznam splněných/nesplněných kritérií a vrátí 3–5 vět personalizovaného hodnocení. Výsledek se uloží do pole `zpetna_vazba` — lektor ho vidí v detailu hodnocení a může ho před schválením upravit.
+- **Admin prompt "Fáze 2b: Individuální zpětná vazba":** Nová záložka v Administraci promptů mezi Evaluací ÚZ a Globální analýzou. `phase_name='prompt_feedback'`, temperature=0.5. SuperAdmin může upravit tón, délku i požadavky na obsah zpětné vazby.
+- **Scroll-to-top tlačítko v detailu hodnocení:** Kulatá šipka ↑ vpravo od tlačítka "Vyhodnocení schváleno". Po schválení lektor klikne ↑ a panel se plynule scrolluje na začátek — může rovnou vybrat dalšího studenta ze seznamu.
+
+### Změněno
+- **`seeder.py`:** Přidán seed pro `prompt_feedback` s výchozím promptem (profesionální, přímý, motivující tón, vykání studentovi).
+- **`_generate_individual_feedback()` je robustní:** Chyba při generování zpětné vazby nevyhodí výjimku — vrátí prázdný string, evaluace se uloží normálně. Log: `[feedback] Chyba při generování: ...`.
+
+---
+
 ## [v3.8.6] - 2026-04-24
 
 ### Přidáno
