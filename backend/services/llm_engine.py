@@ -14,6 +14,80 @@ from core.config import settings
 from models.db_models import AppSettings
 
 
+def _sanitize_json_string_values(text: str) -> str:
+    """
+    Opravuje neescapované znaky uvnitř JSON řetězcových hodnot.
+
+    Problém: model kopíruje věty z ÚZ do pole "citace" doslova, včetně uvozovek
+    nebo literálních odřádkování, které rozbijí JSON strukturu.
+    Typická chyba: 'Expecting "," delimiter' — model zapsal "Řekl: "Vstaňte!"" a
+    parser ukončil string u první vnitřní uvozovky, pak narazil na text místo ','.
+
+    Algoritmus:
+    - Scannuje znak po znaku, při detekci otevírací " přejde do "string mode".
+    - Uvnitř stringu každé " je potenciální konec — rozhodnutí se dělá look-aheadem:
+      pokud za " (přeskočíme whitespace) následuje JSON strukturální znak ({[]},:),
+      jde o konec stringu. Jinak jde o interní uvozovku → escapujeme na \".
+    - Literální \\n, \\r, \\t uvnitř stringů jsou také escapovány.
+
+    Volá se jako druhý pokus po selhání json.loads() a před _repair_truncated_json().
+    """
+    JSON_STRUCTURAL = frozenset('{[]},:')
+    result = []
+    i = 0
+    n = len(text)
+
+    while i < n:
+        char = text[i]
+
+        if char != '"':
+            result.append(char)
+            i += 1
+            continue
+
+        # Otevírací uvozovka — vstoupíme do string mode
+        result.append('"')
+        i += 1
+
+        while i < n:
+            c = text[i]
+
+            if c == '\\' and i + 1 < n:
+                # Již escapovaná sekvence — zachovat beze změny
+                result.append(c)
+                result.append(text[i + 1])
+                i += 2
+            elif c == '"':
+                # Potenciální konec stringu — look-ahead pro strukturální znak
+                j = i + 1
+                while j < n and text[j] in ' \t\r\n':
+                    j += 1
+                if j >= n or text[j] in JSON_STRUCTURAL:
+                    # Legitimní konec stringu
+                    break
+                else:
+                    # Interní neescapovaná uvozovka → escapovat
+                    result.append('\\"')
+                    i += 1
+            elif c == '\n':
+                result.append('\\n')
+                i += 1
+            elif c == '\r':
+                result.append('\\r')
+                i += 1
+            elif c == '\t':
+                result.append('\\t')
+                i += 1
+            else:
+                result.append(c)
+                i += 1
+
+        result.append('"')
+        i += 1  # přeskočit uzavírací uvozovku
+
+    return ''.join(result)
+
+
 def _repair_truncated_json(text: str) -> dict | None:
     """
     Pokusí se obnovit JSON oříznutý LLM tokenovým limitem.
@@ -216,11 +290,21 @@ Požadovaná struktura JSON odpovědi:
             print(f"{chunk_prefix}[{attempt_label}] CRITICAL: JSON nenalezen")
             return {"identita": {}, "vysledky": []}
 
+        json_slice = clean_text[s:e + 1]
         try:
-            return json.loads(clean_text[s:e + 1])
+            return json.loads(json_slice)
         except json.JSONDecodeError as err:
-            print(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — pokus o opravu")
-            return _repair_truncated_json(clean_text) or {"identita": {}, "vysledky": []}
+            # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
+            print(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — sanitizace stringů")
+            sanitized = _sanitize_json_string_values(json_slice)
+            try:
+                result = json.loads(sanitized)
+                print(f"{chunk_prefix}[{attempt_label}] JSON opraven sanitizací ✓")
+                return result
+            except json.JSONDecodeError:
+                # Pokus 3: strukturální oprava pro zkrácený JSON
+                print(f"{chunk_prefix}[{attempt_label}] sanitizace nestačila — pokus o strukturální opravu")
+                return _repair_truncated_json(sanitized) or {"identita": {}, "vysledky": []}
 
     parsed = await _call_and_parse(kwargs, "try1")
     recovered = len(parsed.get('vysledky', []))
@@ -515,13 +599,20 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         try:
             parsed = json.loads(clean_response)
         except json.JSONDecodeError as e:
-            print(f"{prefix}Failed to parse LLM response as JSON: {e} — pokus o opravu zkráceného JSON")
-            parsed = _repair_truncated_json(clean_text)
-            if parsed:
-                print(f"{prefix}JSON obnoven: {len(parsed.get('vysledky', []))} kritérií zachráněno")
-            else:
-                print(f"{prefix}Oprava selhala. Raw Response:\n{raw_response}")
-                raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
+            # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
+            print(f"{prefix}JSON parse error: {e} — sanitizace stringů")
+            sanitized = _sanitize_json_string_values(clean_response)
+            try:
+                parsed = json.loads(sanitized)
+                print(f"{prefix}JSON opraven sanitizací ✓")
+            except json.JSONDecodeError:
+                print(f"{prefix}Sanitizace nestačila — pokus o strukturální opravu zkráceného JSON")
+                parsed = _repair_truncated_json(sanitized)
+                if parsed:
+                    print(f"{prefix}JSON obnoven: {len(parsed.get('vysledky', []))} kritérií zachráněno")
+                else:
+                    print(f"{prefix}Oprava selhala. Raw Response:\n{raw_response}")
+                    raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
 
         print(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
         # Individuální zpětná vazba — samostatné LLM volání po parsování celého výsledku

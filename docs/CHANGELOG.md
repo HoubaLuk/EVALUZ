@@ -1,5 +1,16 @@
 # CHANGELOG - EVALUZ
 
+## [v3.9.1] - 2026-04-24
+
+### Opraveno
+- **`_sanitize_json_string_values()` — sanitizace neescapovaných znaků v JSON citacích:** Nová funkce vložena do parse pipeline jako druhý pokus po selhání `json.loads()` (před strukturální opravou `_repair_truncated_json`). Řeší deterministickou chybu `Expecting ',' delimiter`, která nastane, když model zkopíruje větu z ÚZ obsahující uvozovky (např. `"Řekl: "Vstaňte!""`) nebo literální odřádkování do pole `citace` bez escapování — JSON parser ukončí string na první vnitřní uvozovce a pak narazí na text místo `,`.
+
+  Algoritmus: scanner znak po znaku detekuje string hodnoty; uvnitř stringu každé `"` testuje look-aheadem — pokud za ním (přes whitespace) následuje JSON strukturální znak (`{[]},:`) → legitimní konec stringu; jinak → interní uvozovka → escapovat na `\"`. Literální `\n`, `\r`, `\t` uvnitř stringů jsou také escapovány.
+
+  Výsledek: 3-úrovňový fallback: přímý parse → sanitizace + parse → strukturální oprava. Log: `JSON opraven sanitizací ✓`.
+
+---
+
 ## [v3.9.0] - 2026-04-23
 
 ### Přidáno
