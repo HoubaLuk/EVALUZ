@@ -1,5 +1,20 @@
 # CHANGELOG - EVALUZ
 
+## [v3.9.3] - 2026-04-28
+
+> **Poznámka:** Toto je poslední verze před zásadním přepracováním fáze precizace kritérií (Phase 1).
+> Plánovaný přechod na model s kontextovým oknem 256k tokenů (Qwen3.5 nebo ekvivalent) umožní
+> kompletní redesign Sokratovského dialogu bez omezení délky konverzace.
+
+### Opraveno
+- **Statistiky — filtr nevyhodnocených záznamů (`statistics.py`):** Endpoint `/statistics/dashboard` nyní počítá pouze záznamy s dokončeným výsledkem (`json_result IS NOT NULL`). Fast-scan vytváří DB záznam okamžitě (pro real-time UX), ale `json_result` je `NULL` dokud LLM nedokončí evaluaci — tyto "prázdné" záznamy se dříve chybně započítávaly do celkového počtu hodnocení a do agregací skóre.
+
+- **Scroll v panelu Hodnotící kritéria (`TabCriteria.tsx`):** Po AI odpovědi v chatu volá `scrollIntoView` na konci chatu, čímž přesune scroll-context prohlížeče na levý panel. Textarea pro kritéria (pravý panel) pak nereagovala na mousewheel, protože neměla explicitní `overflow-y`. Přidáno `overflowY: 'auto'` na textarea element — prohlížeč nyní správně přiřadí wheel event bez ohledu na focus context.
+
+- **Re-evaluace neschválených záznamů (`TabEvaluation.tsx`):** Tlačítko Vyhodnotit bylo disabled pro všechny záznamy ve stavu `evaluated`, včetně neschválených. Lektor tak nemohl znovu vyhodnotit studenta po změně kritérií bez předchozího schválení. Nová logika `canEvaluate`: re-evaluace je povolena pro neschválené záznamy (`is_approved=false`), zakázána pro schválené (`is_approved=true`) a probíhající evaluace (`evaluating`). Backend re-evaluaci již dříve podporoval (přepisuje `json_result`), frontend nyní toto chování odemkne.
+
+---
+
 ## [v3.9.2] - 2026-04-24
 
 ### Opraveno

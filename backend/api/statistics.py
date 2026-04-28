@@ -94,7 +94,14 @@ def get_statistics_dashboard(
         raise HTTPException(status_code=403, detail="Nedostatečná oprávnění pro přístup ke statistikám.")
 
     # Base query for StudentEvaluations, joined with Lecturer
-    query = db.query(StudentEvaluation, Lecturer).join(Lecturer, StudentEvaluation.lecturer_id == Lecturer.id)
+    # Filtrujeme pouze záznamy s dokončeným vyhodnocením (json_result IS NOT NULL).
+    # Fast-scan vytváří záznamy okamžitě (UX), json_result se plní až po dokončení LLM —
+    # bez tohoto filtru by se nedokončené záznamy počítaly do statistik.
+    query = db.query(StudentEvaluation, Lecturer).join(
+        Lecturer, StudentEvaluation.lecturer_id == Lecturer.id
+    ).filter(
+        StudentEvaluation.json_result.isnot(None)
+    )
 
     # Role-based filtering
     if not current_user.is_superadmin and current_user.is_admin:

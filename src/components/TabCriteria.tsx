@@ -273,7 +273,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
             onChange={e => { setCriteriaMarkdown(e.target.value); setSaveSuccess(false); setSaveError(null); }}
             disabled={!scenarioId || isFetchingCriteria}
             className="form-control"
-            style={{ flex: 1, resize: 'none', border: 'none', borderRadius: 0, padding: 16, fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}
+            style={{ flex: 1, resize: 'none', border: 'none', borderRadius: 0, padding: 16, fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6, overflowY: 'auto' }}
             placeholder={isFetchingCriteria ? 'Načítám kritéria...' : 'Zde pište svá kritéria...'}
           />
         </div>

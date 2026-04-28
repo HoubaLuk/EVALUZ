@@ -755,9 +755,18 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
     const activeStudentData = students.find(s => s.id === selectedStudent);
 
+    // Re-evaluace je povolena pro:
+    //   - studenty dosud nevyhodnocené (pending)
+    //   - studenty vyhodnocené ale NESCHVÁLENÉ (lektor může změnit kritéria a znovu spustit)
+    // Re-evaluace je ZAKÁZÁNA pro:
+    //   - záznamy právě probíhající evaluace (evaluating)
+    //   - záznamy schválené lektorem (is_approved=true) — Man-in-the-Loop schválení je finální
     const canEvaluate = selectedIds.length > 0 && selectedIds.some(id => {
         const student = students.find(s => s.id === id);
-        return student && student.status !== 'evaluated' && student.status !== 'evaluating';
+        if (!student) return false;
+        if (student.status === 'evaluating') return false;
+        if (student.status === 'evaluated' && student.is_approved) return false;
+        return true;
     });
 
     return (

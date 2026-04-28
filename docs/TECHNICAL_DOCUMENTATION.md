@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.8.7 (LLM robustness — chunking, retry, token budget, individuální zpětná vazba)
-**Poslední aktualizace:** 23. dubna 2026
+**Verze:** 3.9.3 (bugfixy statistiky, scroll, re-evaluace)
+**Poslední aktualizace:** 28. dubna 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
@@ -129,7 +129,24 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.8.7 (Aktuální) - Individuální zpětná vazba + scroll-to-top + Admin prompt
+### v3.9.3 (Aktuální) - Bugfixy: statistiky, scroll, re-evaluace
+
+> ⚠️ **Toto je poslední verze před zásadním přepracováním fáze precizace kritérií (Phase 1).**
+> Plánovaný přechod na LLM s kontextovým oknem 256k tokenů (Qwen3.5 nebo ekvivalent) umožní
+> kompletní redesign Sokratovského dialogu — bez omezení délky konverzace a bez rizika truncation
+> výstupu kritérií při dlouhých sezeních. Tuto migraci zahájit až po potvrzení modelu.
+
+- **Statistiky — filtr `json_result IS NOT NULL`** (`statistics.py`): Endpoint `/statistics/dashboard` nyní ignoruje záznamy bez výsledku evaluace. Fast-scan vytváří DB řádek okamžitě pro UX, ale `json_result` je `NULL` než LLM skončí — tyto záznamy se dříve chybně projevovaly v počtech a agregacích.
+- **Scroll v panelu Hodnotící kritéria** (`TabCriteria.tsx`): Přidáno `overflowY: 'auto'` na textarea. Dříve `scrollIntoView` na konci chatu přesouval scroll-context prohlížeče na levý panel a mousewheel nad pravým panelem nereagoval.
+- **Re-evaluace neschválených záznamů** (`TabEvaluation.tsx`): `canEvaluate` nyní povoluje znovu vyhodnotit studenta pokud záznam existuje ale nebyl schválen lektorem (`is_approved=false`). Schválené záznamy (`is_approved=true`) zůstávají finální.
+
+### v3.9.0–v3.9.2 - Prompt optimalizace pro qwen3-30b + JSON sanitizace
+
+- **v3.9.0:** Optimalizace promptů pro qwen3-30b-instruct (non-reasoning): krok-za-krokem Phase 2, PROMPT_VERSION upgrade systém, explicitní počet kritérií v user promptu.
+- **v3.9.1:** `_sanitize_json_string_values()` — oprava `Expecting ',' delimiter` při doslovné citaci přímé řeči (uvozovky uvnitř `citace`).
+- **v3.9.2:** Oprava look-aheadu sanitizace (vzor `"value""key":` bez čárky) + per-block sanitizace v `_repair_truncated_json`.
+
+### v3.8.7 - Individuální zpětná vazba + scroll-to-top + Admin prompt
 - **Phase 2b:** Samostatná funkce `_generate_individual_feedback()` generuje personalizovanou zpětnou vazbu pro studenta po merge chunk výsledků. Fail-safe: chyba zpětné vazby neblokuje uložení evaluace.
 - **Admin UI:** Nový záložkový panel "Fáze 2b: Individuální zpětná vazba" v AdminModal pro editaci promptu `prompt_feedback`.
 - **UX:** Tlačítko ↑ (scroll-to-top) vedle "Vyhodnocení schváleno" — lektor se jedním klikem vrátí na seznam studentů.

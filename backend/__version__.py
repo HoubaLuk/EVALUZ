@@ -1,2 +1,2 @@
 # Verze aplikace — centralizované místo
-__version__ = "3.9.2"
+__version__ = "3.9.3"
