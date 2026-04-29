@@ -3,269 +3,558 @@
 **Poslední aktualizace:** 29. dubna 2026
 
 ## Obsah
-1. [Přehled systému](#přehled-systému)
-2. [Technologický zásobník](#technologický-zásobník)
-3. [Architektura a datový tok](#architektura-a-datový-tok)
-4. [AI Strategie (Fáze 1-3)](#ai-strategie-fáze-1-3)
-5. [Databázové schéma](#databázové-schéma)
-6. [Air-Gap & Intranet Readiness](#air-gap--intranet-readiness)
-7. [Changelog](#changelog)
+1. [Přehled systému a architektura](#1-přehled-systému-a-architektura)
+2. [AI & LLM pipeline](#2-ai--llm-pipeline)
+3. [Databázová vrstva](#3-databázová-vrstva)
+4. [Bezpečnost a RBAC](#4-bezpečnost-a-rbac)
+5. [Air-Gap & Intranet Readiness](#5-air-gap--intranet-readiness)
+6. [Produkční nasazení](#6-produkční-nasazení)
+7. [Architektonická rozhodnutí (ADR)](#7-architektonická-rozhodnutí-adr)
+8. [Historie vývoje (Changelog)](#8-historie-vývoje-changelog)
 
 ---
 
-Tento dokument slouží jako centrální technický manuál a historický záznam projektu EVALUZ. Obsahuje detaily o architektuře, implementaci klíčových modulů, databázovém schématu a historii vývoje.
+## 1. Přehled systému a architektura
 
----
+EVALUZ je webová aplikace pro AI-asistované hodnocení úředních záznamů (ÚZ) studentů policejní školy. Lektor definuje hodnotící kritéria, nahraje ÚZ studentů a AI model vyhodnotí každý záznam oproti kritériím. Lektor výsledky zkontroluje, případně upraví, a schválí (Man-in-the-Loop).
 
-## 🏗 1. Architektura systému
+### 1.1 Technologický zásobník
 
-EVALUZ využívá dekomponovanou architekturu oddělující prezentační vrstvu (Frontend) od procesní vrstvy (Backend) s důrazem na asynchronní zpracování náročných úloh (AI evaluace).
+| Vrstva | Technologie |
+|---|---|
+| Frontend | React 18, Vite, TypeScript, Vanilla CSS (bez frameworku) |
+| Backend | FastAPI (Python 3.10+), SQLAlchemy 2.x ORM |
+| Databáze | PostgreSQL 17 (produkce), SQLite (dev/fallback) |
+| AI integrace | vLLM (primární), Google AI Studio, OpenRouter — rozhraní kompatibilní s OpenAI |
+| Containerizace | Docker Compose |
+| Autentizace | JWT Bearer tokeny (python-jose) |
+| WebSocket | FastAPI WebSocket, per-lektor izolace |
 
-### 1.1 Technologie (Tech Stack)
-- **Frontend**: React 18, Vite, TypeScript, Tailwind CSS (minimalisticky) / Vanilla CSS.
-- **Backend**: FastAPI (Python 3.10+), SQLAlchemy (ORM).
-- **Databáze**: 
-    - **PostgreSQL 17** (Produkční/Hlavní): Robustní správa dat, podpora transakcí a cizích klíčů.
-    - **SQLite** (Migrační/Vývojová): Původní úložiště, nyní slouží jako fallback nebo pro rychlé dev testy.
-- **AI Integrace**: Rozhraní kompatibilní s OpenAI (vLLM, Google AI Studio, OpenRouter).
+### 1.2 Komponenty a hranice
 
-### 1.2 Tok dat (Data Flow)
-1. Lektor nahraje ÚZ (PDF/DOCX/RTF).
-2. Backend extrahuje text a pomocí AI/Regexu identifikuje identitu studenta.
-3. Požadavek na evaluaci je zařazen do asynchronní fronty (`EvaluationQueue`), která je striktně izolována podle `lecturer_id`.
-4. AI evaluátor analyzuje text oproti kritériím a vrací strukturovaný JSON.
-5. Výsledky jsou uloženy v DB a real-time odeslány výhradně danému lektorovi přes WebSockets.
-
----
-
-## 🤖 2. AI & Prompt Engineering
-
-Aplikace využívá několikafázový přístup k ovládání LLM (Large Language Models) pro maximální přesnost.
-
-### 2.1 Konfigurace modelů (v2.0.2+)
-Systém umožňuje nastavit různé modely pro různé úkoly v Administraci:
-- **Phase 1 (Precizace)**: Sokratovský asistent ladí kritéria s lektorem.
-- **Phase 2 (Evaluace)**: Hodnocení ÚZ studenta. Klade důraz na přesné citace z textu.
-- **Phase 2b (Individuální zpětná vazba)**: Samostatné LLM volání po sloučení výsledků chunkingem. Model vidí kompletní výsledek (všechna kritéria), generuje personalizovanou zpětnou vazbu pro studenta (3–5 vět, max. 600 tokenů). Prompt editovatelný v Admin UI (`prompt_feedback`).
-- **Phase 3 (Analýza třídy)**: Pedagogický vhled do dat celé třídy. Filtruje kritéria před LLM promptem (top 5 nejhorších + pod `ANALYTICS_THRESHOLD`, výchozí 80 %).
-
-### 2.2 Sokratovský AI Asistent
-V komponentě `TabCriteria` je implementován asistent, který:
-- Filtruje konverzaci od samotného návrhu kritérií pomocí oddělovače `---`.
-- Klade doplňující otázky postupně po jedné (na základě instrukce v systémovém promptu).
-
-### 2.3 LLM Robustnost (v3.8.x)
-
-Série vylepšení zaváděných od v3.8.0 řeší spolehlivost AI evaluace u větších sad kritérií a obsáhlých ÚZ:
-
-#### Chunking kritérií (v3.8.2)
-Evaluace rozdělí kritéria na skupiny po 6 (`CHUNK_SIZE=6`) pomocí regex lookahead na `**N. Kritérium`. Chunky se zpracují paralelně přes `asyncio.gather()` — vLLM continuous batching zpracuje všechny requesty jako jednu GPU dávku. Výsledky se sloučí funkcí `_merge_chunk_results()`.
-
-Výhoda: Zachování celého textu ÚZ v každém chunku, žádné ořezávání obsahu. 25 kritérií → 5 chunků zpracovaných prakticky současně.
-
-#### Adaptivní token budget (v3.8.5)
-`chunk_max_tokens = min(global_max, n_criteria × 500 + 300)`
-
-Česká diakritika tokenizuje hustěji (~1,5–1,7 zn/token) než původně předpokládaných 2,5 zn/token. Původní hodnota 350 způsobovala truncation uprostřed výstupu — vLLM JSON mode přidával `"}]` na místě ořezu → parse error se jevil jako chyba obsahu. Hodnota 500 tokenů/kritérium eliminuje tento problém.
-
-#### Retry mechanismus (v3.8.4)
-Pokud chunk vrátí méně kritérií než bylo zadáno, automaticky se provede retry s `temperature=0.3`. Funguje pro sampling-based JSON chyby; deterministické truncation řeší token budget.
-
-#### Context overflow retry (v3.8.4)
-`_llm_call_with_overflow_retry()` zachytí HTTP 400 "context length exceeded", parsuje skutečné limity z chybové zprávy a opakuje volání s redukovaným `max_tokens`. Chrání Phase 3 analytiku (velké prompty) i obecné použití.
-
-#### JSON recovery (v3.8.2)
-`_repair_truncated_json()` dokáže z partially truncated JSON odpovědi extrahovat kompletní záznamy `{}` (sleduje hloubku závorek) a sestavit validní výsledek. Zpráva informuje lektora o počtu obnovených kritérií.
-
----
-
-## 💾 3. Databázová vrstva
-
-### 3.1 Migrace na PostgreSQL 17
-V milníku 2.0.0 proběhl přechod ze SQLite na PostgreSQL. Klíčové body:
-- **Skript `backend/scripts/migrate_to_postgres.py`**: Zajišťuje bezpečný přenos všech dat.
-- **Integrita**: Jsou vynuceny cizí klíče (`Lecturer` -> `Class` -> `Evaluation`).
-
-### 3.2 Klíčové tabulky
-- `lecturers`: Správa identit lektorů a SuperAdminů (včetně `must_change_password`, `rank_shortcut`, `rank_full`, `funkcni_zarazeni`).
-- `evaluation_criteria`: Definice metodik pro jednotlivé modelové situace, filtrováno podle `lecturer_id`.
-- `student_evaluations`: Výsledky AI a manuálních korekcí. Klíčové sloupce: `json_result` (JSONType), `scenario_name` (ID scénáře), `scenario_display_name` (čitelný název, ukládán od v3.7.0), `is_approved`, `student_identity` (JSONType), `cleaned_name`, `source_text`.
-- `class_analyses`: Globální (výkonové) statistiky třídy, izolované podle `lecturer_id` a `class_id`. `content_json` je JSONType (ne string) — vždy ošetřit `isinstance(raw, dict)` před `json.loads()`.
-- `app_settings`: Dynamická konfigurace systému (LLM URL, Klíče, Modely, `LLM_CONCURRENCY_OPENROUTER`, `LLM_CONCURRENCY_VLLM`).
-
-### 3.3 Migrační strategie
-- **SQLite (dev):** `init_db()` + `run_migrations()` — "kobercový nálet" přidává chybějící sloupce při každém startu.
-- **PostgreSQL (prod):** `run_alembic_migrations()` — `alembic upgrade head`. Záložní `run_migrations()` se volá v případě selhání Alembic.
-- **Nové sloupce** musí být přidány na TŘECH místech: `db_models.py`, `database.py` (SQLite + PostgreSQL větve v `run_migrations()`), a nová Alembic migrace v `alembic/versions/`.
-
-### 3.4 Pravidla pro JSON sloupce
-`json_result` a `content_json` jsou deklarovány jako `JSONType` (custom type). SQLAlchemy vrací Python dict/list přímo bez nutnosti `json.loads()`. Při čtení vždy:
-```python
-raw = record.content_json
-data = raw if isinstance(raw, dict) else json.loads(raw)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser (React SPA)                                            │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │
+│  │TabCriteria│ │TabEval.  │ │TabAnalyt.│ │TabStatistics     │  │
+│  │(Phase 1) │ │(Phase 2) │ │(Phase 3) │ │(Admin/Superadmin)│  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘  │
+│          │          │  WebSocket (eval progress)  │             │
+└──────────┼──────────┼─────────────────────────────┼─────────────┘
+           │ REST API │                             │
+┌──────────▼──────────▼─────────────────────────────▼─────────────┐
+│  FastAPI Backend                                                 │
+│  ┌──────────────┐  ┌───────────────┐  ┌──────────────────────┐  │
+│  │ api/evaluate │  │ api/analytics │  │ api/statistics       │  │
+│  │ api/auth     │  │ api/criteria  │  │ api/admin            │  │
+│  └──────┬───────┘  └───────────────┘  └──────────────────────┘  │
+│         │ EvaluationQueue (asyncio)                              │
+│  ┌──────▼────────────────────────────────────────────────────┐  │
+│  │ services/llm_engine.py                                    │  │
+│  │  evaluate_report() → chunking → asyncio.gather → merge   │  │
+│  │  3-level JSON fallback: parse → sanitize → repair        │  │
+│  │  FIX A: criteria validation | FIX B: raw dump            │  │
+│  └──────┬────────────────────────────────────────────────────┘  │
+│         │                                                        │
+└─────────┼──────────────────────────────────────────────────────-┘
+          │
+┌─────────▼──────────┐    ┌────────────────────────┐
+│  PostgreSQL 17      │    │  vLLM server (GPU)     │
+│  (Docker volume)    │    │  nebo cloud LLM API    │
+└────────────────────┘    └────────────────────────┘
 ```
 
+### 1.3 Tok dat — evaluace ÚZ
+
+1. **Fast-scan**: Lektor nahraje soubory. Backend okamžitě vytvoří `StudentEvaluation` záznam v DB (`json_result=NULL`) a extrahuje identitu studenta (`extract_identity()`). Frontend zobrazí studenta jako `pending` v reálném čase (WebSocket).
+2. **Fronta**: Každý soubor je přidán do `EvaluationQueue` jako task. Queue zpracovává úlohy asynchronně (asyncio), izolovaně podle `lecturer_id`.
+3. **LLM evaluace**: `evaluate_report()` vezme text ÚZ a kritéria, rozdělí kritéria na chunky, pošle paralelně do LLM, výsledky sloučí.
+4. **JSON pipeline**: Odpověď LLM projde 3-úrovňovým fallbackem (parse → sanitizace → strukturální oprava). Po parsování proběhne validace kritérií (FIX A) a detekce partial recovery (FIX C).
+5. **Uložení**: `json_result` je aktualizován v DB. WebSocket notifikuje lektora → frontend přejde na `evaluated`.
+6. **Man-in-the-Loop**: Lektor zkontroluje výsledky, případně opraví odůvodnění nebo body, pak záznamy schválí (`is_approved=true`). Teprve schválené záznamy vstupují do analytiky (Phase 3).
+
+### 1.4 Asynchronní fronta (EvaluationQueue)
+
+`EvaluationQueue` v `api/evaluate.py` zajišťuje:
+- **Izolaci**: Každý lektor má samostatnou frontu — evaluace jiného lektora neblokuje.
+- **Souběžnost**: Konfigurovatelná přes `LLM_CONCURRENCY_VLLM` / `LLM_CONCURRENCY_OPENROUTER` (výchozí 4). Asyncio semaphore limituje počet paralelních LLM volání.
+- **Fail-safe**: Chyba u jednoho studenta neukončí celou dávku. Chyba je broadcastována přes WebSocket; ostatní úlohy pokračují.
+- **Zrušení**: `DELETE /evaluate/batch` vyčistí frontu nevyřízených úloh.
+
+### 1.5 WebSocket a real-time UX
+
+Endpoint `/evaluate/ws?lecturer_id=X&token=Y` — duplex spojení per-lektor.
+
+Typy zpráv (server → client):
+- `EVAL_START` — student začal zpracování
+- `EVAL_DONE` — student dokončen, obsahuje výsledky
+- `EVAL_ERROR` — student selhal (neblokuje ostatní)
+
+Frontend při odpojení WebSocket automaticky se reconnectuje a resetuje zaseknuté `evaluating` stavy.
+
 ---
 
-## 🏗 6. Air-Gap & Intranet Readiness
+## 2. AI & LLM pipeline
 
-Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k internetu a HTTPS, dodržuje EVALUZ tyto principy:
+### 2.1 Konfigurace modelů
 
-### 6.1 Databázová autonomie
-- **Assertive Initialization:** Backend nečeká na externí migrační skripty pro základní data. Při každém zápisu (Fast-Scan, Evaluation) aktivně kontroluje existenci výchozí třídy (`id=1`) a v případě potřeby ji založí "za běhu".
-- **Cascading Integrity:** Všechny cizí klíče používají `ondelete="CASCADE"`, což zjednodušuje správu dat při promazávání testovacích běhů v produkci.
+Systém podporuje různé modely pro různé fáze, konfigurovatelné v Admin UI (AppSettings):
 
-### 6.2 Unicode & Cross-Platform kompatibilita
-- **NFC Normalizace:** Všechny názvy souborů a textové vstupy jsou na backendu i frontendovém WebSocketu normalizovány na **NFC**. Toto řeší konflikty mezi macOS (NFD) a Linux/Windows (NFC) servery, které dříve způsobovaly "zamrzání" indikátorů průběhu.
+| Klíč | Účel |
+|---|---|
+| `VLLM_MODEL_NAME` | Výchozí model pro všechny fáze |
+| `MODEL_EXTRACTION` | Phase 1a: Fast-scan identita (může být lehčí model) |
+| `MODEL_PHASE2` | Phase 2: Evaluace kritérií (priorita před globálním) |
+| `VLLM_API_URL` | URL vLLM serveru nebo cloud API |
+| `VLLM_MAX_TOKENS` | Max výstupní tokeny (výchozí 4096) |
+| `VLLM_ENABLE_THINKING` | Thinking mode (QwQ/R1 modely) |
+| `LLM_PLATFORM` | `vllm` / `openai` / `openrouter` / `ollama` |
 
-### 6.3 Environment-Aware UI
-- **Secure Context Fallback:** Funkce vyžadující HTTPS (např. synchronizace s HDD přes `showDirectoryPicker`) jsou v nezabezpečeném prostředí detekovány a nepoužitelnost je uživateli srozumitelně vysvětlena varovným textem.
-- **Tab Persistence:** UI využívá `display: hidden` místo odpojování komponent (unmount), čímž chrání rozpracovaná data (např. nahrané ÚZ) při navigaci mezi kartami v prohlížeči.
+### 2.2 Fáze AI zpracování
 
-### 6.4 LLM Compatibility
-- **Flexible JSON Format:** Pro lokální providery (LM Studio, Ollama) je parametr `response_format: json_object` nastaven jako volitelný. Aplikace spoléhá na vylepšené regex čištění odpovědí, které odstraňuje "thought" bloky modelů před samotným parsováním JSON.
+#### Phase 1 — Precizace kritérií (Sokratovský asistent)
+`TabCriteria` komponenta. LLM hraje roli Sokratovského asistenta — klade lektorovi upřesňující otázky jednu po druhé, aby kritéria byla jasně měřitelná. Konverzace je filtrována oddělovačem `---`: do pole kritérií se propisuje pouze část za oddělovačem (samotná definovaná kritéria, bez dialogu).
+
+Konfigurovatelný limit kontextového okna (`LLM_CONTEXT_WINDOW`) chrání před přetečením dlouhých konverzací. Plánovaný upgrade na model s 256k kontextem (Qwen3.5 nebo ekvivalent) umožní kompletní redesign bez limitu délky konverzace.
+
+#### Phase 1a — Fast-scan identity
+`extract_identity()` — rychlé LLM volání extrahující pouze hodnost, jméno a příjmení studenta z textu ÚZ (šetrné na tokeny). Výsledek uložen do `student_identity` (JSONB) a `cleaned_name` (normalizovaný řetěz pro třídění).
+
+#### Phase 2 — Evaluace ÚZ (hlavní pipeline)
+`evaluate_report()` v `llm_engine.py`. Podrobně viz sekce 2.3.
+
+#### Phase 2b — Individuální zpětná vazba
+`_generate_individual_feedback()` — samostatné LLM volání po sloučení chunk výsledků. Model vidí kompletní výsledek (seznam splněných/nesplněných kritérií), generuje personalizovanou zpětnou vazbu pro studenta (3–5 vět, max. 600 tokenů). Prompt editovatelný v Admin UI (`prompt_feedback`). Chyba zpětné vazby neblokuje uložení výsledků evaluace.
+
+#### Phase 3 — Analýza třídy
+LLM dostane agregovaná data celé třídy a generuje pedagogický komentář. Kritéria s úspěšností nad `ANALYTICS_THRESHOLD` (výchozí 80 %) jsou z LLM promptu filtrována — LLM se soustředí na problematické oblasti. Frontend heatmapa zobrazuje kompletní statistiky všech kritérií bez ohledu na threshold.
+
+### 2.3 JSON parse pipeline (Phase 2 — detailní)
+
+Celý průchod `evaluate_report()` pro jednoho studenta:
+
+```
+criteria_markdown
+       │
+       ▼
+_split_criteria_chunks() — regex lookahead na "**N. Kritérium"
+CHUNK_SIZE = 6
+       │
+  len(chunks) > 1?
+  ┌────┴─────┐
+  │ ANO      │ NE
+  ▼          ▼
+asyncio.gather()    přímá cesta
+[_evaluate_chunk()  (1 LLM volání)
+  × N chunků]
+  │
+  ▼
+_merge_chunk_results()
+propaguje _json_repaired
+       │
+       └──────────┐
+                  ▼
+    [VALIDACE — po parsování, obě cesty]
+       │
+       ▼
+_validate_and_fix_vysledky()   ← FIX A
+  • odfiltruje halucinovaná kritéria (nazev ∉ expected_set)
+  • doplní chybějící jako placeholder (_llm_omitted=True, body=0)
+  • přepočítá celkove_skore
+       │
+       ▼
+_check_partial_recovery()      ← FIX C
+  • detekuje _llm_omitted placeholdery
+  • vloží _partial_recovery do json_result
+  • reason: "json_repair" | "llm_omitted"
+       │
+       ▼
+_generate_individual_feedback() ← Phase 2b
+       │
+       ▼
+    return parsed
+```
+
+**Průchod `_evaluate_chunk()` (nebo přímé `evaluate_report`):**
+
+```
+LLM response
+    │
+    ▼
+strip think/thought bloky (re.sub <think>...</think>)
+    │
+    ▼
+najít první { a poslední } → json_slice
+    │
+    ▼
+json.loads(json_slice)
+    │ JSONDecodeError?
+    ├─ ANO ─► _dump_raw_llm_output()    ← FIX B (uloží raw do souboru)
+    │          _sanitize_json_string_values()
+    │               │
+    │          json.loads(sanitized)
+    │               │ JSONDecodeError?
+    │               ├─ ANO ─► _repair_truncated_json(sanitized)
+    │               │          parsed['_json_repaired'] = True
+    │               │          pokud None → ValueError (logováno)
+    │               └─ NE ─► "JSON opraven sanitizací ✓"
+    └─ NE ─► úspěch při prvním pokusu
+```
+
+**`_sanitize_json_string_values()` — co opravuje:**
+
+Scannuje znak po znaku. Uvnitř JSON string hodnoty:
+- `"` — look-ahead: pokud za ní (přes whitespace) následuje `{[]},:` nebo vzor `"key":` → legitimní konec stringu; jinak → escapovat na `\"`
+- `\n`, `\r`, `\t` → escape sekvence
+- `\` + non-escape-char → `\\` *(FIX D, v3.9.5)*
+- kontrolní znaky `0x00–0x1F` (kromě `\n\r\t`) → `\uXXXX` *(FIX D, v3.9.5)*
+
+**`_repair_truncated_json()` — co opravuje:**
+Strukturálně poškozený nebo uprostřed oříznutý JSON. Extrahuje kompletní `{...}` záznamy z pole `vysledky` sledováním hloubky závorek. Výsledek může mít méně kritérií než bylo zadáno (detekováno FIX C).
+
+### 2.4 Retry a overflow ochrana
+
+**Chunk retry**: Pokud chunk vrátí méně kritérií než bylo zadáno, automaticky se provede retry s `temperature=0.3`. Funguje pro sampling-based chyby; deterministické truncation řeší token budget.
+
+**Token budget**: `chunk_max_tokens = min(global_max, n_criteria × 500 + 300)`. Česká diakritika tokenizuje ~1,5–1,7 zn/token (hustěji než angličtina). Hodnota 500 tokenů/kritérium eliminuje JSON truncation u obsáhlých ÚZ.
+
+**Context overflow retry**: `_llm_call_with_overflow_retry()` zachytí HTTP 400 "context length exceeded", parsuje skutečné limity z chybové zprávy a opakuje volání s redukovaným `max_tokens`. Chrání Phase 3 analytiku (velké prompty).
+
+### 2.5 Diagnostika JSON chyb (FIX B, v3.9.5)
+
+Při každém JSON parse erroru `_dump_raw_llm_output()` uloží:
+- typ chyby, pozici chybného znaku, kontext ±50 znaků
+- kompletní raw LLM výstup
+
+Soubory v `/app/logs/llm_parse_errors/<timestamp>_<student>.txt`. Namountováno jako Docker volume (`./logs/llm_parse_errors:/app/logs/llm_parse_errors`) → přežije restart kontejneru.
+
+### 2.6 Criteria validation a partial recovery (FIX A + C, v3.9.5)
+
+`evaluate_batch` sestaví `expected_criteria_names` z `individual_criteria` a předá ho každému tasku → `evaluate_report(expected_criteria_names=...)`.
+
+Po parsování (obě cesty — chunked merge i přímá) proběhnou dvě validace:
+
+1. **FIX A** `_validate_and_fix_vysledky()`: Halucinovaná kritéria (LLM vrátil `nazev` mimo vstupní sadu) jsou odfiltrována. Chybějící kritéria jsou doplněna jako placeholdery (`_llm_omitted=true`, `body=0`, varující `oduvodneni`). Celkové skóre je přepočítáno.
+
+2. **FIX C** `_check_partial_recovery()`: Pokud existují `_llm_omitted` placeholdery, vloží do `json_result` metadata:
+   ```json
+   "_partial_recovery": {
+     "expected": 12, "recovered": 10, "lost": 2,
+     "reason": "json_repair" | "llm_omitted"
+   }
+   ```
+   `reason="json_repair"` pokud byl použit `_repair_truncated_json` (příznak `_json_repaired=True` propagovaný přes `_merge_chunk_results`).
+
+**Frontend** čte `_partial_recovery` při `fetchEvaluations` a zobrazuje:
+- Oranžový badge **⚠ X/N** v levém seznamu studentů (s Tooltip)
+- Varující panel přímo v oblasti hodnocení ("Hodnocení je neúplné...")
 
 ---
 
-## 🕒 7. Historie vývoje (Changelog)
+## 3. Databázová vrstva
 
-### v3.9.5 (Aktuální) - JSON pipeline diagnostika a robustnost
+### 3.1 Klíčové tabulky
 
-- **FIX B — Raw LLM dump při parse erroru** (`llm_engine.py`, `docker-compose.yml`): Nová funkce `_dump_raw_llm_output()` ukládá syrový výstup LLM do `/app/logs/llm_parse_errors/` při každém JSON parse erroru (oba parse body: v `_evaluate_chunk` i v přímé cestě `evaluate_report`). Soubor obsahuje chybový typ, pozici chybného znaku s 100-znakovým kontextem a kompletní raw output. Volume mount `./logs/llm_parse_errors:/app/logs/llm_parse_errors` zajišťuje persistenci přes restarty kontejneru.
+| Tabulka | Popis |
+|---|---|
+| `lecturers` | Identita lektorů, adminů, superadminů. Sloupce: `is_admin`, `is_superadmin`, `school_location`, `must_change_password`, `rank_shortcut`, `rank_full`, `funkcni_zarazeni`. |
+| `class_rooms` | Třídy (kurzy) přiřazené lektorovi. |
+| `evaluation_criteria` | Hodnotící metodiky (markdown). Filtrováno podle `lecturer_id`. |
+| `criteria` | Rozparsovaná jednotlivá kritéria z `evaluation_criteria`. Používána pro chunking a pro `expected_criteria_names`. |
+| `student_evaluations` | Výsledky evaluací. Klíčové sloupce: `json_result` (JSONB), `source_text` (text ÚZ), `student_identity` (JSONB), `cleaned_name`, `scenario_name`, `scenario_display_name`, `is_approved`, `created_at`. |
+| `class_analyses` | AI analytika třídy (Phase 3). `content_json` (JSONB), izolováno podle `lecturer_id` + `class_id`. |
+| `app_settings` | Dynamická konfigurace (LLM URL, klíče, modely, prahy, feature flags). |
+| `system_prompts` | Prompty pro jednotlivé fáze (`phase_name`). Editovatelné v Admin UI. |
+| `golden_examples` | MLOps: příklady správných evaluací pro RAG-based few-shot learning. |
+
+### 3.2 JSON sloupce — pravidla
+
+`json_result` a `content_json` jsou deklarovány jako `JSONType` (custom SQLAlchemy type). SQLAlchemy vrací Python dict/list přímo. Přesto vždy ošetřit double-encoding (starší záznamy):
+
+```python
+result = eval_record.json_result
+if isinstance(result, str):
+    result = json.loads(result)
+if isinstance(result, str):  # double-encoded
+    result = json.loads(result)
+```
+
+**Metadata v JSONB bez migrace**: Nová pole jako `_partial_recovery`, `_json_repaired`, `_llm_omitted` jsou vkládána přímo do `json_result` dict. Nevyžadují DB migraci — JSONB je schemaless. Frontend je čte podmíněně (`?._partial_recovery ?? null`).
+
+### 3.3 Migrační strategie
+
+- **PostgreSQL (prod):** `run_alembic_migrations()` → `alembic upgrade head`. Záložní `run_migrations()` se volá při selhání Alembic.
+- **SQLite (dev):** `init_db()` + `run_migrations()` — "kobercový nálet" přidává chybějící sloupce při každém startu.
+- **Nové sloupce** musí být přidány na TŘECH místech: `db_models.py`, `database.py` (SQLite + PostgreSQL větve v `run_migrations()`), a nová Alembic migrace v `alembic/versions/`.
+
+### 3.4 Fast-scan pattern
+
+Při nahrání souborů backend **okamžitě** vytvoří `StudentEvaluation` záznam s `json_result=NULL`. Důvod: UX — lektor vidí studenty v seznamu okamžitě, indikátor průběhu funguje. `json_result` je vyplněn až po dokončení LLM evaluace.
+
+Tento pattern má dopad na filtrování: **všechny dotazy na dokončené výsledky musí filtrovat `json_result IS NOT NULL`** — viz statistiky, dashboard, filter-options. Záznamy s `json_result=NULL` jsou platné DB záznamy, nikoliv chyby.
+
+### 3.5 URL state persistence (v3.9.4)
+
+Fast-scan záznamy mají uložen `source_text` — text ÚZ extrahovaný z původního souboru. `fetchEvaluations()` je načte jako `pending` záznamy i po refreshi prohlížeče. Re-evaluace funguje bez opětovného uploadu souborů — backend vezme `source_text` z DB záznamu místo nahraného souboru.
+
+---
+
+## 4. Bezpečnost a RBAC
+
+### 4.1 Autentizace
+
+JWT Bearer token v hlavičce `Authorization: Bearer <token>`. Každý chráněný endpoint používá `Depends(get_current_lecturer)`. Token expirace konfigurovatelná. Přihlášení: `POST /auth/login` → token.
+
+Prvotní heslo každého nového lektora má příznak `must_change_password=True` — API vrací 403 s instrukcí pro změnu hesla.
+
+### 4.2 Role a oprávnění (RBAC)
+
+| Role | Podmínka | Vidí data |
+|---|---|---|
+| Lektor | (výchozí) | Pouze vlastní záznamy |
+| Admin | `is_admin=True` | Záznamy všech lektorů na stejném `school_location` |
+| Superadmin | `is_superadmin=True` | Vše — všechny útvary |
+
+Pomocná funkce `_get_allowed_lecturer_ids()` vrací seznam povolených `lecturer_id` pro aktuálního uživatele (nebo `None` pro superadmina = bez omezení). Filtr se aplikuje na všechny datové endpointy.
+
+`apply_data_isolation()` v `api/auth.py` — centrální helper pro RBAC filtry na SQLAlchemy query.
+
+### 4.3 Izolace dat lektorů
+
+Každý lektor vidí pouze:
+- Vlastní `ClassRoom` záznamy
+- Vlastní `EvaluationCriteria` a `StudentEvaluation` záznamy
+- Vlastní `ClassAnalysis` výsledky
+- WebSocket notifikace pouze pro vlastní evaluační frontu
+
+Superadmin nemá tato omezení a navíc spravuje `AppSettings` a systémové prompty.
+
+---
+
+## 5. Air-Gap & Intranet Readiness
+
+### 5.1 Databázová autonomie
+
+Backend nečeká na externí skripty pro základní data. Při každém zápisu aktivně kontroluje existenci výchozí třídy (`id=1`) a v případě potřeby ji založí "za běhu". Všechny cizí klíče používají `ondelete="CASCADE"` pro snadnou správu při promazávání testovacích dat.
+
+### 5.2 Unicode & Cross-Platform kompatibilita
+
+NFC normalizace všech názvů souborů a textových vstupů na backendu i ve WebSocket handleru. Řeší konflikty mezi macOS (NFD) a Linux/Windows (NFC) při porovnávání jmen studentů.
+
+### 5.3 Environment-Aware UI
+
+- **Secure Context Fallback:** HDD Sync (`showDirectoryPicker`) vyžaduje HTTPS. V HTTP prostředí je funkce detekována a uživateli srozumitelně vysvětlena.
+- **Tab Persistence:** UI používá `display: none/block` místo unmount komponent. Rozpracovaná data (nahrané soubory, rozpracovaný dialog) přežijí přepnutí záložky.
+- **URL state persistence:** `activeTab` a `activeScenarioId` jsou synchronizovány do URL search params (`?tab=...&scenario=...`) přes `window.history.replaceState`. SPA přežije browser refresh.
+
+### 5.4 LLM kompatibilita
+
+- **JSON mode**: Parametr `response_format: json_object` nastaven pouze pro platformy `vllm` a `openai`. OpenRouter, Ollama a LM Studio ho nepodporují spolehlivě.
+- **Thinking bloky**: `re.sub(<think>...</think>)` odstraní reasoning bloky modelů (QwQ, DeepSeek) před parsováním JSON.
+- **Platform detection**: `_resolve_platform()` detekuje platformu z URL (OpenRouter URL má přednost před nastavením v DB).
+
+---
+
+## 6. Produkční nasazení
+
+### 6.1 Docker Compose
+
+Tři služby: `db` (PostgreSQL 17-alpine), `backend` (FastAPI), `frontend` (Nginx + React SPA).
+
+Porty:
+- `8001:80` — HTTP (redirect na HTTPS)
+- `8443:443` — HTTPS (self-signed nebo vlastní certifikát, volume `./ssl:/etc/nginx/ssl`)
+- Port 8000 (backend) není exponován navenek — přístup pouze přes Nginx proxy.
+
+Volumes:
+- `pgdata` — PostgreSQL data (named volume)
+- `./backend/data:/app/data` — uploadovaná data
+- `./logs/llm_parse_errors:/app/logs/llm_parse_errors` — diagnostické dumpy JSON chyb (přidáno v3.9.5)
+
+### 6.2 Generování SSL certifikátu
+
+```bash
+./generate-ssl.sh
+```
+Generuje self-signed certifikát pro intranetové nasazení. Pro produkci nahradit vlastním certifikátem (Let's Encrypt nebo CA organizace).
+
+### 6.3 Environment variables
+
+Citlivé hodnoty (DB heslo, LLM API klíče) v `backend/.env`. Tento soubor se NIKDY nesmí nahrávat do Gitu. LLM konfigurace je také editovatelná za běhu přes Admin UI (uložena v `app_settings`).
+
+### 6.4 Inicializace a migrace
+
+Při každém startu backend:
+1. Spustí Alembic migrace (`alembic upgrade head`)
+2. Záloha: `run_migrations()` přidá chybějící sloupce (kobercový nálet)
+3. `seeder.py` zkontroluje `PROMPT_VERSION` a případně přepíše výchozí prompty
+
+---
+
+## 7. Architektonická rozhodnutí (ADR)
+
+### ADR-001: Chunking kritérií místo sliding window
+
+**Kontext:** Model qwen3-30b má kontextové okno 16 384 tokenů. Při 20+ kritériích a dlouhém textu ÚZ (10+ stran) se vše nevejde do jednoho promptu.
+
+**Možnosti:**
+- *Sliding window*: Rozdělit text ÚZ na části, každou část hodnotit oproti všem kritériím. Problém: kritérium může být doloženo citací z různých částí textu — sliding window kritérium buď nenajde, nebo je duplikuje.
+- *Chunking kritérií*: Rozdělit kritéria na skupiny po 6 (`CHUNK_SIZE=6`), každý chunk hodnotit oproti **celému** textu ÚZ.
+
+**Rozhodnutí:** Chunking kritérií. Celý text ÚZ je vždy k dispozici pro každé kritérium. vLLM continuous batching zpracuje N chunků jako jednu GPU dávku — latence je prakticky stejná jako pro jeden request. 25 kritérií → 5 chunků × ~2 s/chunk = ~2 s celkem (paralelně), oproti ~10 s sekvenčně.
+
+**Kompromis:** LLM nevidí, jak hodnotí jiná kritéria z jiného chunku — nemůže detekovat konzistenci mezi kritérii. Akceptovatelné pro daný use-case.
+
+---
+
+### ADR-002: 3-úrovňový JSON fallback místo hard failure
+
+**Kontext:** LLM občas vrací syntakticky nevalidní JSON (neescapované uvozovky v citacích, literální newlines, osamocená zpětná lomítka, oříznutý výstup při token limitu).
+
+**Možnosti:**
+- *Hard failure*: Pokud `json.loads()` selže → chyba. Uživatel musí re-evaluovat.
+- *Regex extraction*: Extrahovat hodnoty regexem bez parsování. Nespolehlivé pro vnořené struktury.
+- *Progressivní fallback*: 3 úrovně pokusů s rostoucí agresivitou opravy.
+
+**Rozhodnutí:** Progressivní fallback:
+1. `json.loads()` — bez zásahu
+2. `_sanitize_json_string_values()` + `json.loads()` — oprava běžných chyb uvnitř string hodnot
+3. `_repair_truncated_json()` — strukturální rekonstrukce z částečného výstupu
+
+Na každé úrovni selhání se od v3.9.5 uloží syrový výstup do souboru pro diagnostiku.
+
+**Kompromis:** Level 3 může zachránit jen část kritérií (pokud byl výstup oříznut uprostřed). To je lepší než ztráta celé evaluace, ale musí být signalizováno lektorovi (FIX C: `_partial_recovery` + UI badge).
+
+---
+
+### ADR-003: Metadata v JSONB bez DB migrace
+
+**Kontext:** V3.9.5 přidává nová metadata do výsledků evaluace (`_partial_recovery`, `_json_repaired`, `_llm_omitted`). Tyto informace mají různou granularitu — `_llm_omitted` je na úrovni jednotlivého kritéria, `_partial_recovery` na úrovni celé evaluace.
+
+**Možnosti:**
+- *Nové sloupce v DB*: `partial_recovery_count`, `json_repair_used`, ... Vyžaduje Alembic migraci + SQLite fallback + ORM změny.
+- *Nová tabulka*: `evaluation_diagnostics` s FK na `student_evaluations`. Flexibilní, ale komplexní dotazy.
+- *Metadata v JSONB*: Vložit prefixovaná pole (`_partial_recovery`, `_llm_omitted`) přímo do existujícího `json_result` (JSONB).
+
+**Rozhodnutí:** Metadata v JSONB. `json_result` je schemaless — libovolná nová pole lze přidat bez migrace. Frontend je čte podmíněně (`?._partial_recovery ?? null`). Backend je zapisuje v-place do dict před uložením. Nulová migrační zátěž.
+
+**Kompromis:** Nelze na tato pole dělat efektivní DB dotazy (např. "všechny evaluace s `_partial_recovery`" by vyžadovaly JSONB operátory). Akceptovatelné — jde o diagnostická metadata, ne o primární data pro reporting.
+
+---
+
+### ADR-004: Man-in-the-Loop schválení před analytikou
+
+**Kontext:** AI evaluace může být nesprávná (halucinace, neúplná kritéria). Nelze nasadit systém, kde by analytika automaticky vstupovala do pedagogického rozhodování bez kontroly lektora.
+
+**Rozhodnutí:** Schválení (`is_approved=true`) je povinné před vstupem záznamu do Phase 3 analytiky a do statistik. Lektor může výsledky opravit (upravit body, odůvodnění) a pak schválit. Schválené záznamy jsou finální — re-evaluace je zakázána (UI disabled).
+
+**Kompromis:** Lektor musí kliknout "Schválit" pro každého studenta. Pro větší třídy (30+ studentů) je to manuální práce. Akceptovatelné — schválení je záměrná kontrolní brána.
+
+**Výjimka**: Re-evaluace je povolena pro záznamy `is_approved=false` (lektor může opravit nesprávné hodnocení opakovanou evaluací). Implementováno v v3.9.3.
+
+---
+
+### ADR-005: Criteria validation (FIX A) jako post-parse krok
+
+**Kontext:** Při testování (29. 4. 2026) bylo zjištěno, že LLM vrací více kritérií než bylo v promptu (1 kritérium v promptu → 19+ položek ve výstupu). Root cause není plně objasněn (hypotéza: LLM extrahuje evaluační šablonu z těla ÚZ).
+
+**Možnosti:**
+- *Prompt engineering*: Explicitnější instrukce "TOTO JSOU JEDINÉ POLOŽKY". Částečně implementováno (v3.9.0), ale neřeší halucinace spolehlivě.
+- *Pre-filter v promptu*: Nefeasible — nelze předem vědět, co LLM vygeneruje.
+- *Post-parse validace*: Po parsování JSON porovnat `vysledky[*].nazev` s `expected_criteria_names`. Odfiltrovat neznámé, doplnit chybějící.
+
+**Rozhodnutí:** Post-parse validace (FIX A). Deterministická, nezávisí na LLM chování. Chybějící kritéria dostávají placeholder s explicitní poznámkou pro lektora, takže Man-in-the-Loop kontrola funguje — lektor vidí, že kritérium nebylo vyhodnoceno a může spustit re-evaluaci.
+
+**Kompromis:** Filtr závisí na přesné shodě `nazev` — pokud LLM nepatrně změní název kritéria (překlep, zkratka), bude položka odfiltrována jako halucinace. V praxi to nenastávalo (model konzistentně kopíruje vstupní `nazev`), ale je to teoretické riziko.
+
+---
+
+### ADR-006: EvaluationQueue — asyncio, ne Celery/RQ
+
+**Kontext:** Hromadná evaluace 30 ÚZ může trvat 10–15 minut. HTTP request nemůže čekat tak dlouho.
+
+**Možnosti:**
+- *Celery + Redis*: Distribuovaná fronta. Robustní, ale výrazná infrastrukturní zátěž (Redis, Celery worker, monitoring).
+- *Background threads*: `threading.Thread`. Problémy s async/await, GIL, sdílení DB session.
+- *asyncio in-process queue*: `asyncio.Queue` + worker coroutine v rámci FastAPI procesu. Jednoduchá, nulová infrastruktura.
+
+**Rozhodnutí:** asyncio in-process queue. Aplikace běží jako jeden Docker kontejner — distribuovaná fronta je over-engineering. FastAPI je nativně asyncio → integrace je přirozená. `asyncio.Semaphore` limituje souběžnost. Celá logika v `EvaluationQueue` třídě.
+
+**Kompromis:** Restart kontejneru ztratí nevyřízené úlohy. Akceptovatelné — lektor to vidí (frontend status) a může dávku pustit znovu. Škálování na více instancí by vyžadovalo přechod na Celery, ale pro daný scale (jedna škola, desítky lektorů) není potřeba.
+
+---
+
+## 8. Historie vývoje (Changelog)
+
+### v3.9.5 (Aktuální) — JSON pipeline diagnostika a robustnost
+
+- **FIX B — Raw LLM dump při parse erroru** (`llm_engine.py`, `docker-compose.yml`): Nová `_dump_raw_llm_output()` ukládá syrový výstup LLM do `/app/logs/llm_parse_errors/` při každém JSON parse erroru. Soubor obsahuje chybový typ, pozici chybného znaku s 100-znakovým kontextem a kompletní raw output. Volume mount `./logs/llm_parse_errors:/app/logs/llm_parse_errors` zajišťuje persistenci přes restarty kontejneru.
 
 - **FIX A — Criteria validation** (`llm_engine.py`, `evaluate.py`): `_validate_and_fix_vysledky()` filtruje halucinovaná kritéria (LLM vrátil název, který nebyl v promptu) a doplňuje chybějící jako placeholdery s `_llm_omitted=true`. `evaluate_report()` má nový parametr `expected_criteria_names: list[str]`. `evaluate_batch` sestavuje jmenný seznam z `individual_criteria` a předává ho každému tasku.
 
-- **FIX C — Partial recovery detection + UI** (`llm_engine.py`, `evaluate.py`, `src/`): `_check_partial_recovery()` detekuje `_llm_omitted` placeholdery a vkládá `_partial_recovery` metadata do `json_result` (JSONB, bez migrace). Příznak `_json_repaired=True` se nastavuje při použití `_repair_truncated_json` a propaguje přes merge. Frontend: oranžový badge `⚠ X/N` v seznamu studentů + varující panel v detailu hodnocení.
+- **FIX C — Partial recovery detection + UI** (`llm_engine.py`, `evaluate.py`, `src/`): `_check_partial_recovery()` detekuje `_llm_omitted` placeholdery a vkládá `_partial_recovery` metadata do `json_result` (JSONB, bez migrace). Příznak `_json_repaired=True` se nastavuje při použití `_repair_truncated_json` a propaguje přes `_merge_chunk_results`. Frontend: oranžový badge `⚠ X/N` v seznamu studentů + varující panel v detailu hodnocení.
 
-- **FIX D — Sanitizer edge cases** (`llm_engine.py`): `_sanitize_json_string_values()` rozšířena o ošetření osamocených zpětných lomítek (→ `\\`) a kontrolních znaků `0x00–0x1F` (→ `\uXXXX`).
+- **FIX D — Sanitizer edge cases** (`llm_engine.py`): `_sanitize_json_string_values()` rozšířena o osamocená zpětná lomítka (→ `\\`) a kontrolní znaky `0x00–0x1F` (→ `\uXXXX`).
 
-### v3.9.4 - URL state persistence, analytics refresh, scroll-to-top, statistics filter-options
+### v3.9.4 — URL state persistence, analytics refresh, scroll-to-top, statistics filter-options
 
-- **URL state persistence** (`App.tsx`): `activeTab` a `activeScenarioId` jsou inicializovány z URL search params (`?tab=...&scenario=...`) a při každé změně synchronizovány zpět přes `window.history.replaceState`. SPA tak přežije browser refresh — uživatel zůstane na stejné záložce a scénáři. Vedlejší efekt: po refresh se student list obnoví z DB (fast-scan záznamy mají uložený `source_text`, `fetchEvaluations()` je načte jako `pending`, re-evaluace funguje bez opětovného uploadu souborů). Auto-select logika opravena — pokud URL obsahuje platný `scenarioId`, `classId` se odvodí z dat místo přepsání výchozím prvním scénářem.
+- **URL state persistence** (`App.tsx`): `activeTab` a `activeScenarioId` inicializovány z URL search params, synchronizovány zpět přes `window.history.replaceState`. SPA přežije browser refresh. Re-evaluace funguje bez opětovného uploadu (fast-scan záznamy mají uložen `source_text`).
+- **Analytics refresh při přepnutí záložky** (`TabAnalytics.tsx`, `App.tsx`): Prop `isActive: boolean` + `useEffect([isActive])` — `fetchAnalytics()` se spustí při každém přepnutí na záložku.
+- **Tlačítko ↑ "Přejít nahoru"** (`TabEvaluation.tsx`): `studentListScrollRef` na levý panel. Dříve scrollovalo pravý panel (tabulku hodnocení).
+- **Statistics filter-options — scénáře bez evaluací** (`statistics.py`): Filtr `json_result IS NOT NULL` přidán do `scenario_query` v `/statistics/filter-options`.
 
-- **Analytics refresh při přepnutí záložky** (`TabAnalytics.tsx`, `App.tsx`): Přidán prop `isActive: boolean` a `useEffect([isActive])` — `fetchAnalytics()` se spustí při každém přepnutí na záložku Analýza třídy. Řeší Man-in-the-Loop scénář: schválení proběhne v záložce Vyhodnocování, ale `TabAnalytics` zůstane namountovaná (`display: none`), `useEffect([])` by se nespustil znovu → stale hláška "neschválené záznamy" bez page refresh.
+### v3.9.3 — Bugfixy: statistiky, scroll, re-evaluace
 
-- **Tlačítko ↑ "Přejít nahoru"** (`TabEvaluation.tsx`): Přidán `studentListScrollRef` na div se seznamem studentů (levý panel). Tlačítko ↑ nyní scrolluje levý panel — umožňuje výběr dalšího studenta bez nutnosti ručního scrollování. Dříve scrollovalo tabulku hodnocení (pravý panel), což uživatel nepozoroval.
+> ⚠️ Toto je poslední verze před plánovaným redesignem Phase 1 (přechod na model s 256k kontextem).
 
-- **Statistics filter-options — scénáře bez evaluací** (`statistics.py`): Filtr `json_result IS NOT NULL` přidán do `scenario_query` v `/statistics/filter-options`. Scénáře, kde proběhl jen fast-scan (0 dokončených evaluací), se nyní nezobrazují v dropdownu. Dashboard endpoint byl opraven v v3.9.3 — dropdown je nyní konzistentní.
+- **Statistiky** (`statistics.py`): Filtr `json_result IS NOT NULL` v `/statistics/dashboard` — fast-scan záznamy se nepočítají do statistik.
+- **Scroll v panelu Hodnotící kritéria** (`TabCriteria.tsx`): `overflowY: 'auto'` na textarea.
+- **Re-evaluace neschválených záznamů** (`TabEvaluation.tsx`): `canEvaluate` povoluje znovu vyhodnotit studenta s `is_approved=false`.
 
-### v3.9.3 - Bugfixy: statistiky, scroll, re-evaluace
+### v3.9.0–v3.9.2 — Prompt optimalizace pro qwen3-30b + JSON sanitizace
 
-> ⚠️ **Toto je poslední verze před zásadním přepracováním fáze precizace kritérií (Phase 1).**
-> Plánovaný přechod na LLM s kontextovým oknem 256k tokenů (Qwen3.5 nebo ekvivalent) umožní
-> kompletní redesign Sokratovského dialogu — bez omezení délky konverzace a bez rizika truncation
-> výstupu kritérií při dlouhých sezeních. Tuto migraci zahájit až po potvrzení modelu.
-
-- **Statistiky — filtr `json_result IS NOT NULL`** (`statistics.py`): Endpoint `/statistics/dashboard` nyní ignoruje záznamy bez výsledku evaluace. Fast-scan vytváří DB řádek okamžitě pro UX, ale `json_result` je `NULL` než LLM skončí — tyto záznamy se dříve chybně projevovaly v počtech a agregacích.
-- **Scroll v panelu Hodnotící kritéria** (`TabCriteria.tsx`): Přidáno `overflowY: 'auto'` na textarea. Dříve `scrollIntoView` na konci chatu přesouval scroll-context prohlížeče na levý panel a mousewheel nad pravým panelem nereagoval.
-- **Re-evaluace neschválených záznamů** (`TabEvaluation.tsx`): `canEvaluate` nyní povoluje znovu vyhodnotit studenta pokud záznam existuje ale nebyl schválen lektorem (`is_approved=false`). Schválené záznamy (`is_approved=true`) zůstávají finální.
-
-### v3.9.0–v3.9.2 - Prompt optimalizace pro qwen3-30b + JSON sanitizace
-
-- **v3.9.0:** Optimalizace promptů pro qwen3-30b-instruct (non-reasoning): krok-za-krokem Phase 2, PROMPT_VERSION upgrade systém, explicitní počet kritérií v user promptu.
-- **v3.9.1:** `_sanitize_json_string_values()` — oprava `Expecting ',' delimiter` při doslovné citaci přímé řeči (uvozovky uvnitř `citace`).
+- **v3.9.0:** Optimalizace promptů pro qwen3-30b-instruct (non-reasoning). `PROMPT_VERSION` upgrade systém.
+- **v3.9.1:** `_sanitize_json_string_values()` — oprava `Expecting ',' delimiter` při přímé řeči v citacích.
 - **v3.9.2:** Oprava look-aheadu sanitizace (vzor `"value""key":` bez čárky) + per-block sanitizace v `_repair_truncated_json`.
 
-### v3.8.7 - Individuální zpětná vazba + scroll-to-top + Admin prompt
-- **Phase 2b:** Samostatná funkce `_generate_individual_feedback()` generuje personalizovanou zpětnou vazbu pro studenta po merge chunk výsledků. Fail-safe: chyba zpětné vazby neblokuje uložení evaluace.
-- **Admin UI:** Nový záložkový panel "Fáze 2b: Individuální zpětná vazba" v AdminModal pro editaci promptu `prompt_feedback`.
-- **UX:** Tlačítko ↑ (scroll-to-top) vedle "Vyhodnocení schváleno" — lektor se jedním klikem vrátí na seznam studentů.
+### v3.8.7 — Individuální zpětná vazba + Admin prompt
 
-### v3.8.6 - Phase 3 filtrování kritérií
-- Kritéria s úspěšností nad `ANALYTICS_THRESHOLD` (výchozí 80 %) jsou filtrována z LLM promptu Phase 3; frontend heatmapa zobrazuje kompletní stats všech kritérií.
-- Nový AppSettings klíč `ANALYTICS_THRESHOLD` konfigurovatelný v Admin UI.
+- **Phase 2b:** `_generate_individual_feedback()` — personalizovaná zpětná vazba po merge chunk výsledků (max. 600 tokenů). Fail-safe: chyba neblokuje uložení evaluace.
+- **Admin UI:** Panel pro editaci promptu `prompt_feedback`.
 
-### v3.8.5 - Token budget pro českou tokenizaci
-- Navýšení z 350 → 500 tokenů/kritérium. Eliminuje JSON truncation u obsáhlých ÚZ s dialogem a právními citacemi.
+### v3.8.4–v3.8.6 — Token budget, retry, Phase 3 filtrování
 
-### v3.8.4 - Retry + context overflow ochrana
-- `_evaluate_chunk()`: retry s temperature=0.3 při neúplném výsledku.
-- `_llm_call_with_overflow_retry()`: automatická redukce max_tokens při HTTP 400.
+- **v3.8.6:** Filtrování kritérií pro Phase 3 dle `ANALYTICS_THRESHOLD` (výchozí 80 %).
+- **v3.8.5:** Token budget 500 tokenů/kritérium — eliminuje JSON truncation u obsáhlých ÚZ.
+- **v3.8.4:** Chunk retry s `temperature=0.3`; `_llm_call_with_overflow_retry()` pro HTTP 400.
 
-### v3.8.2–v3.8.3 - Chunking kritérií + JSON recovery
-- `_split_criteria_chunks()`: regex lookahead split, CHUNK_SIZE=6, asyncio.gather parallelism.
+### v3.8.2–v3.8.3 — Chunking kritérií + JSON recovery
+
+- `_split_criteria_chunks()`: regex lookahead split, `CHUNK_SIZE=6`, `asyncio.gather` parallelism.
 - `_repair_truncated_json()`: recovery z partially truncated JSON výstupu.
 
-### v3.7.0 - Export opravy + scenario_display_name + Statistics
-- **Statistiky (TabMonitor):** Implementace nové analytické karty pro Superadminy a Adminy. Využití knihovny **Recharts** pro vizualizaci aktivity napříč organizačními články.
-- **Excel Export:** Robustní generátor `.xlsx` souborů založený na `openpyxl`. Obsahuje sešity pro základní přehled, organizační články, aktivitu lektorů a časový monitoring.
-- **Backend API:** Nový router `api/statistics.py` s filtrem podle rolí (`is_superadmin`, `is_admin`) a organizačních článků (`school_location`).
-- **DB Schéma:** Přidány sloupce `Lecturer.is_admin` pro střední management a `StudentEvaluation.created_at` pro historický reporting.
-- **UI/UX:** Sjednocení designu akčních tlačítek (modrá pro globální dashboard dle logiky Administrace).
-- **Bezpečnost:** Dokumentace Secure Context (HTTPS/localhost) pro HDD Sync synchronizaci.
+### v3.7.0 — Export, scenario_display_name, Statistics
 
-### v3.3.1 - Auto-Migration & WebSocket Fix
-- **Fix:** Oprava kritické chyby `403 Forbidden` u WebSocketů. Frontend nyní správně posílá ID lektora v URL.
-- **DB Migrace:** Implementována funkce `run_migrations` v jádru backendu. Databáze se nyní při startu aplikace sama zkontroluje a přidá chybějící sloupce, což usnadňuje nasazování nových verzí na server.
-- **Robustnost:** Přidána granulární kontrola existence sloupců v tabulkách `class_analyses` (opraven chybějící `class_id`), `golden_examples` a `export_history` pro zamezení chyb `UndefinedColumn`.
-- **Verzování:** Sjednocení všech verzí v systému (backend, frontend, package.json) na 3.3.1.
+- **TabStatistics (TabMonitor):** Analytická karta pro Superadminy a Adminy. Recharts vizualizace. Excel export (`openpyxl`). Router `api/statistics.py` s RBAC.
+- **DB:** `Lecturer.is_admin`, `StudentEvaluation.created_at`, `scenario_display_name`.
 
-### v3.3.0 - Data Isolation & Multi-Instructor Support
-- **Bezpečnost:** Kompletní izolace dat mezi lektory (Multi-Tenancy). Přidány filtry `lecturer_id` do všech dotazů na evaluace, analytiky a exporty.
-- **Backend:** Rozdělení WebSocket fronty (`EvaluationQueue`) – notifikace o průběhu vyhodnocování jsou nyní doručovány pouze lektorovi, který úlohu spustil.
-- **Databáze:** Rozšíření schématu `ClassAnalysis` a `GoldenExample` o `lecturer_id`. Odstraněn globálně unikátní index na `scenario_id` v tabulce analýz.
-- **Logika:** Automatická instance personalizované výchozí třídy ("Základní kurz") pro každého lektora zvlášť (nahrazení globální `id=1`).
+### v3.3.0–v3.3.1 — Data isolation, Multi-instructor, WebSocket fix
 
-### v3.2.5 - Parallel Processing & Dark Mode Overhaul
-- **Performance:** Oprava paralelního vyhodnocování (Batch Processing) – odstraněn redundantní zámek v backendu, který způsoboval sekvenční zpracování i při volné kapacitě GPU. Nyní plné využití paralelity L40S.
-- **UI/UX:** Kompletní vizuální redesign **Dark Mode** pro maximální čitelnost. Nahrazení tmavě modrých textů vysoce kontrastní zlatou/žlutou (`#facc15`) a bílou barvou.
-- **UI/UX:** Zpřehlednění ovládacích prvků (tlačítka pro nahrávání, stepper, výběr studentů) pomocí nového barevného schématu.
-- **Versioning:** Verze aplikace v záhlaví je nyní plně dynamická a čerpá se přímo z `package.json`.
-- **Toast:** Zkrácena a zpřesněna hláška po dokončení hromadného vyhodnocení.
+- Kompletní izolace dat mezi lektory (Multi-Tenancy) — filtry `lecturer_id` na všech endpointech.
+- WebSocket fronta izolována podle `lecturer_id`.
+- `run_migrations()` — kobercový nálet pro SQLite, oprava `403 Forbidden` u WebSocket.
 
-### v3.2.4 - UI & Export Stability
-- **Oprava:** Odstraněno "zasekávání" tlačítka hromadného vyhodnocení po úspěšném dokončení dávky.
-- **UI:** Zvětšen prostor pro editaci kritérií v kartě "Precizace kritérií" tak, aby využíval plnou výšku okna.
-- **UI:** Přejmenováno pole zpětné vazby na "Zpětná vazba lektora" a navýšena jeho výška pro lepší čitelnost delších textů.
-- **Export PDF:** Oprava chyby fontů při generování tloušťkové analýzy třídy (nyní robustní i v Docker prostředí).
-- **Export Excel:** Průměrné skóre nyní exportováno jako číslo (zarovnání vpravo) pro čistší profesionální výstup.
+### v3.2.x — Parallel processing, Dark mode, vLLM integration
 
-### v3.2.3 - L40S Hardware Optimization
+- **v3.2.5:** Oprava paralelního zpracování (odstraněn redundantní zámek). Dark mode redesign.
+- **v3.2.2:** `EvaluationQueue` se semaphore souběžnosti. vLLM batching.
+- **v3.2.0–v3.2.1:** Opravy `NameError` v `llm_engine.py`, respektování `Max Output Tokens` z DB.
 
-### v3.2.2 - vLLM Batching & Parallel Processing
-- **Výkon:** Implementace paralelního vyhodnocování ve frontě (`EvaluationQueue`) s nastavitelnou souběžností (výchozí 4).
-- **vLLM Integration:** Výrazně vyšší propustnost při hromadném zpracování ÚZ díky využití vLLM batchingu.
-- **Fix:** Oprava zasekávání fronty při chybě jednoho studenta (lepší error handling v `_run_task` s využitím Semaphore).
-- **Stabilita:** Doporučení pro Qwen modely (vypnutí "Enable Thinking" ve Fázi 2 pro úsporu tokenů při malém kontextovém okně 16k).
+### v2.0.2 — Google Gemini & UI Filter
 
-### v3.2.1 - LLM Parameter Enforcement
-- **Cíl:** Odstranění chyb spojených s limity kontextového okna (Error 400) a respektování nastavení v administraci.
-- **Změny:**
-  - **Backend**: Respektování hodnoty `Max Output Tokens` (z databáze) v `llm_engine.py` namísto natvrdo zakódovaných 16k.
-  - **Backend**: Oprava `NameError` u proměnné `max_tokens` při volání vLLM ve fázi 2.
-  - **Backend**: Odstranění duplicitních klíčů v parametrech pro OpenAI client.
-  - **Stability**: Zajištění plynulého vyhodnocování i u delších ÚZ na limitovaných vLLM serverech (v rámci 16k okna).
-
-### v3.2.0 - Robust vLLM Integration
-- **Cíl:** Odstranění kritických chyb při integraci s vLLM a zlepšení uživatelské zpětné vazby.
-- **Změny:**
-  - **Backend**: Oprava `NameError` u parametrů `top_p`, `presence_penalty` a `frequency_penalty` v `llm_engine.py`.
-  - **Backend**: Korektní dotazování na LLM nastavení z DB pro všechny typy AI úloh.
-  - **Frontend**: Implementace error trackingu v dávkovém vyhodnocování (`TabEvaluation`).
-  - **Frontend**: Inteligentní toast notifikace rozlišující čistý úspěch od částečného selhání.
-  - **Fix**: Oprava chyby, kdy se nově nahraní studenti neukládali při selhání Fast-Scanu.
-
-### v3.1.1 - Humanizace codebase
-- **Cíl:** Maximální srozumitelnost kódu pro člověka.
-- **Změny:**
-  - Kompletní revize komentářů v celém backendu (services, api, core).
-  - Přidání vysvětlujících českých dokumentačních bloků do klíčových frontendových komponent (`TabEvaluation`, `TabCriteria`).
-  - Podrobný popis asynchronní fronty a AI integrační logiky přímo v kódu.
-
-### v2.0.2 - Update "Google Gemini & UI Filter"
-- **AI:** Podpora pro Google AI Studio (Gemini 1.5 Pro/Flash) přes OpenAI kompatibilní rozhraní.
-- **UI:** Filtrace AI chatu – do pole kritérií se propisují pouze definovaná kritéria (za oddělovačem `---`), nikoliv celá konverzace.
+- Podpora Google AI Studio (Gemini) přes OpenAI kompatibilní rozhraní.
+- Filtrace AI chatu — do pole kritérií se propisuje pouze část za oddělovačem `---`.
 
 ---
 
-## 🛡 5. Produkční nasazení a bezpečnost
-
-### 5.1 Zabezpečení
-- **JWT Autentizace**: Každý požadavek na API (kromě login) vyžaduje platný Bearer Token.
-- **Environment Variables**: Citlivé údaje (API klíče, DB hesla) jsou v `backend/.env`. Tento soubor se NIKDY nesmí nahrávat do Gitu.
-
-### 5.2 Správa uživatelů
-Pouze uživatel s příznakem `is_superadmin = true` může vytvářet nové lektory a spravovat globální nastavení LLM.
-
----
-*Poslední aktualizace dokumentace: 23. dubna 2026*
+*Poslední aktualizace dokumentace: 29. dubna 2026*
