@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.9.4 (URL state persistence, analytics refresh, scroll-to-top, statistics filter-options)
+**Verze:** 3.9.5 (JSON pipeline diagnostika a robustnost: raw LLM dump, criteria validation, partial recovery UI)
 **Poslední aktualizace:** 29. dubna 2026
 
 ## Obsah
@@ -129,7 +129,17 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.9.4 (Aktuální) - URL state persistence, analytics refresh, scroll-to-top, statistics filter-options
+### v3.9.5 (Aktuální) - JSON pipeline diagnostika a robustnost
+
+- **FIX B — Raw LLM dump při parse erroru** (`llm_engine.py`, `docker-compose.yml`): Nová funkce `_dump_raw_llm_output()` ukládá syrový výstup LLM do `/app/logs/llm_parse_errors/` při každém JSON parse erroru (oba parse body: v `_evaluate_chunk` i v přímé cestě `evaluate_report`). Soubor obsahuje chybový typ, pozici chybného znaku s 100-znakovým kontextem a kompletní raw output. Volume mount `./logs/llm_parse_errors:/app/logs/llm_parse_errors` zajišťuje persistenci přes restarty kontejneru.
+
+- **FIX A — Criteria validation** (`llm_engine.py`, `evaluate.py`): `_validate_and_fix_vysledky()` filtruje halucinovaná kritéria (LLM vrátil název, který nebyl v promptu) a doplňuje chybějící jako placeholdery s `_llm_omitted=true`. `evaluate_report()` má nový parametr `expected_criteria_names: list[str]`. `evaluate_batch` sestavuje jmenný seznam z `individual_criteria` a předává ho každému tasku.
+
+- **FIX C — Partial recovery detection + UI** (`llm_engine.py`, `evaluate.py`, `src/`): `_check_partial_recovery()` detekuje `_llm_omitted` placeholdery a vkládá `_partial_recovery` metadata do `json_result` (JSONB, bez migrace). Příznak `_json_repaired=True` se nastavuje při použití `_repair_truncated_json` a propaguje přes merge. Frontend: oranžový badge `⚠ X/N` v seznamu studentů + varující panel v detailu hodnocení.
+
+- **FIX D — Sanitizer edge cases** (`llm_engine.py`): `_sanitize_json_string_values()` rozšířena o ošetření osamocených zpětných lomítek (→ `\\`) a kontrolních znaků `0x00–0x1F` (→ `\uXXXX`).
+
+### v3.9.4 - URL state persistence, analytics refresh, scroll-to-top, statistics filter-options
 
 - **URL state persistence** (`App.tsx`): `activeTab` a `activeScenarioId` jsou inicializovány z URL search params (`?tab=...&scenario=...`) a při každé změně synchronizovány zpět přes `window.history.replaceState`. SPA tak přežije browser refresh — uživatel zůstane na stejné záložce a scénáři. Vedlejší efekt: po refresh se student list obnoví z DB (fast-scan záznamy mají uložený `source_text`, `fetchEvaluations()` je načte jako `pending`, re-evaluace funguje bez opětovného uploadu souborů). Auto-select logika opravena — pokud URL obsahuje platný `scenarioId`, `classId` se odvodí z dat místo přepsání výchozím prvním scénářem.
 

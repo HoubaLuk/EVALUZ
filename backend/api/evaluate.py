@@ -280,10 +280,12 @@ async def evaluate_batch(
         )
 
     criteria_lines = []
+    expected_criteria_names = []
     for i, crit in enumerate(individual_criteria, 1):
         crit_text = f"**{i}. Kritérium: {crit.nazev}**\n{crit.popis}\nBodů za splnění: {crit.body}"
         criteria_lines.append(crit_text)
-        
+        expected_criteria_names.append(crit.nazev)
+
     criteria_str = "\n\n".join(criteria_lines)
     
     # 3. LOGOVÁNÍ
@@ -373,7 +375,8 @@ async def evaluate_batch(
                 db=db_bg,
                 scenario_id=scen_id,
                 student_log_prefix=student_name,
-                lecturer_id=current_user_id # Přidáno pro filtraci v LLM enginu / RAGu
+                lecturer_id=current_user_id,
+                expected_criteria_names=task_data.get('expected_criteria_names'),
             )
             
             logger.info(f"[QUEUE] LLM hotovo pro '{student_name}', ukládám do DB. Klíče: {list(llm_result_dict.keys())[:5]}")
@@ -477,7 +480,8 @@ async def evaluate_batch(
             "criteria_markdown": criteria_str,
             "scenario_id": scenario_id,
             "scenario_display_name": scenario_display_name,
-            "lecturer_id": current_user.id
+            "lecturer_id": current_user.id,
+            "expected_criteria_names": expected_criteria_names,
         }
         await eval_queue.add_task(task)
 

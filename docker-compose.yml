@@ -34,6 +34,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/data:/app/data
+      - ./logs/llm_parse_errors:/app/logs/llm_parse_errors
 
   frontend:
     build:

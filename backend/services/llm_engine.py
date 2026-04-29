@@ -6,12 +6,105 @@ přípravu promptů a následné čištění (parsování) odpovědí tak, aby z
 
 import asyncio
 import json
+import os
 import re
+import time as _time
 import httpx
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from core.config import settings
 from models.db_models import AppSettings
+
+
+# Adresář pro post-mortem dumpy LLM výstupů, které spadly při JSON parsování.
+# V Dockeru je mountnut jako persistentní volume (./logs/llm_parse_errors).
+LLM_PARSE_ERROR_DIR = "/app/logs/llm_parse_errors"
+
+
+def _dump_raw_llm_output(prefix: str, raw: str, error: Exception) -> str:
+    """Uloží syrový LLM výstup pro pozdější diagnostiku JSON parse erroru.
+
+    Vrací cestu k uloženému souboru pro logování. Při selhání zápisu vrací popis chyby.
+    """
+    try:
+        os.makedirs(LLM_PARSE_ERROR_DIR, exist_ok=True)
+        # Sanitizace prefixu pro filename (jména studentů obsahují diakritiku, mezery, závorky).
+        safe_prefix = re.sub(r'[^a-zA-Z0-9_\-]', '_', prefix)[:80] or "unknown"
+        timestamp = int(_time.time())
+        path = os.path.join(LLM_PARSE_ERROR_DIR, f"{timestamp}_{safe_prefix}.txt")
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(f"=== ERROR ===\n{type(error).__name__}: {error}\n")
+            err_pos = getattr(error, 'pos', None)
+            if isinstance(err_pos, int):
+                f.write(f"position: char {err_pos}\n")
+                start = max(0, err_pos - 50)
+                end = min(len(raw), err_pos + 50)
+                f.write(f"context: ...{raw[start:end]}...\n")
+            f.write(f"\n=== RAW LLM OUTPUT ({len(raw)} chars) ===\n{raw}\n")
+        return path
+    except Exception as dump_err:
+        return f"[dump failed: {dump_err}]"
+
+
+def _validate_and_fix_vysledky(parsed: dict, expected_criteria_names: list[str], prefix: str) -> None:
+    """FIX A: Filtruje halucinovaná kritéria a doplňuje chybějící jako placeholdery se značkou _llm_omitted.
+
+    Upravuje `parsed` in-place. Přepočítá celkove_skore.
+    """
+    expected_set = set(expected_criteria_names)
+    returned_results = parsed.get('vysledky', [])
+
+    known = []
+    unknown_names = []
+    for v in returned_results:
+        if v.get('nazev') in expected_set:
+            known.append(v)
+        else:
+            unknown_names.append(v.get('nazev', '<bez názvu>'))
+    if unknown_names:
+        print(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} neznámých kritérií od LLM: "
+              f"{unknown_names[:3]}{'...' if len(unknown_names) > 3 else ''}")
+
+    returned_set = {v.get('nazev') for v in known}
+    missing = expected_set - returned_set
+    if missing:
+        print(f"{prefix}⚠ LLM vynechal {len(missing)} kritérií — doplňuji jako nesplněné placeholdery: "
+              f"{list(missing)[:3]}{'...' if len(missing) > 3 else ''}")
+        for name in missing:
+            known.append({
+                "nazev": name,
+                "splneno": False,
+                "body": 0,
+                "oduvodneni": "⚠ Kritérium nebylo v odpovědi LLM. Vyžaduje manuální revizi nebo re-evaluaci.",
+                "citace": "",
+                "_llm_omitted": True,
+            })
+
+    parsed['vysledky'] = known
+    parsed['celkove_skore'] = sum(
+        v.get('body', 0) for v in known if isinstance(v.get('body'), (int, float))
+    )
+
+
+def _check_partial_recovery(parsed: dict, expected_criteria_names: list[str], prefix: str) -> None:
+    """FIX C: Detekuje ztrátu kritérií (po FIX A) a vloží _partial_recovery metadata do parsed.
+
+    Předpokládá, že _validate_and_fix_vysledky již proběhl — hledá položky s _llm_omitted=True.
+    """
+    omitted = [v for v in parsed.get('vysledky', []) if v.get('_llm_omitted')]
+    if not omitted:
+        return
+    expected_count = len(expected_criteria_names)
+    lost = len(omitted)
+    recovered = expected_count - lost
+    reason = "json_repair" if parsed.get('_json_repaired') else "llm_omitted"
+    parsed['_partial_recovery'] = {
+        "expected": expected_count,
+        "recovered": recovered,
+        "lost": lost,
+        "reason": reason,
+    }
+    print(f"{prefix}⚠ PARTIAL RECOVERY: {recovered}/{expected_count} kritérií ({reason})")
 
 
 def _sanitize_json_string_values(text: str) -> str:
@@ -53,10 +146,17 @@ def _sanitize_json_string_values(text: str) -> str:
             c = text[i]
 
             if c == '\\' and i + 1 < n:
-                # Již escapovaná sekvence — zachovat beze změny
-                result.append(c)
-                result.append(text[i + 1])
-                i += 2
+                next_char = text[i + 1]
+                # Validní JSON escape sekvence: \" \\ \/ \b \f \n \r \t \uXXXX
+                if next_char in '"\\/bfnrtu':
+                    # Validní escape — zachovat beze změny
+                    result.append(c)
+                    result.append(next_char)
+                    i += 2
+                else:
+                    # Osamocené zpětné lomítko — escapovat na \\
+                    result.append('\\\\')
+                    i += 1
             elif c == '"':
                 # Potenciální konec stringu — look-ahead pro strukturální znak
                 j = i + 1
@@ -96,11 +196,15 @@ def _sanitize_json_string_values(text: str) -> str:
                 result.append('\\t')
                 i += 1
             else:
-                result.append(c)
+                # Kontrolní znaky (0x00–0x1F, kromě již zachycených \n \r \t) → \uXXXX
+                if ord(c) < 0x20:
+                    result.append(f'\\u{ord(c):04x}')
+                else:
+                    result.append(c)
                 i += 1
 
         result.append('"')
-        i += 1  # přeskočit uzavírací uvozovku
+        i += 1  # přeskočit uzavírající uvozovku
 
     return ''.join(result)
 
@@ -317,7 +421,8 @@ Požadovaná struktura JSON odpovědi:
             return json.loads(json_slice)
         except json.JSONDecodeError as err:
             # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
-            print(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — sanitizace stringů")
+            dump_path = _dump_raw_llm_output(f"{chunk_prefix}{attempt_label}", json_slice, err)
+            print(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — sanitizace stringů (raw: {dump_path})")
             sanitized = _sanitize_json_string_values(json_slice)
             try:
                 result = json.loads(sanitized)
@@ -326,7 +431,10 @@ Požadovaná struktura JSON odpovědi:
             except json.JSONDecodeError:
                 # Pokus 3: strukturální oprava pro zkrácený JSON
                 print(f"{chunk_prefix}[{attempt_label}] sanitizace nestačila — pokus o strukturální opravu")
-                return _repair_truncated_json(sanitized) or {"identita": {}, "vysledky": []}
+                repaired = _repair_truncated_json(sanitized)
+                if repaired:
+                    repaired['_json_repaired'] = True
+                return repaired or {"identita": {}, "vysledky": []}
 
     parsed = await _call_and_parse(kwargs, "try1")
     recovered = len(parsed.get('vysledky', []))
@@ -426,23 +534,29 @@ def _merge_chunk_results(chunk_results: list[dict]) -> dict:
     """Merges partial chunk results into one evaluation dict."""
     all_vysledky = []
     identita = {}
+    json_repaired = False
     for result in chunk_results:
         if not identita and result.get("identita"):
             identita = result["identita"]
         all_vysledky.extend(result.get("vysledky", []))
+        if result.get('_json_repaired'):
+            json_repaired = True
     total_score = sum(
         e.get("body", 0) for e in all_vysledky
         if isinstance(e.get("body"), (int, float))
     )
-    return {
+    merged = {
         "identita": identita,
         "vysledky": all_vysledky,
         "celkove_skore": total_score,
         "zpetna_vazba": "",
     }
+    if json_repaired:
+        merged['_json_repaired'] = True
+    return merged
 
 
-async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None) -> dict:
+async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None, expected_criteria_names: list[str] = None) -> dict:
     """
     HLAVNÍ FUNKCE PRO EVALUACI (Fáze 2).
     Bere text studenta a zadaná kritéria, posílá je modelu a vrací vyčištěný JSON výsledek.
@@ -533,6 +647,12 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         chunk_results = await asyncio.gather(*tasks)
         merged = _merge_chunk_results(list(chunk_results))
         print(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
+        # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
+        if expected_criteria_names:
+            _validate_and_fix_vysledky(merged, expected_criteria_names, prefix)
+        # FIX C: Detekce partial recovery
+        if expected_criteria_names:
+            _check_partial_recovery(merged, expected_criteria_names, prefix)
         merged["zpetna_vazba"] = await _generate_individual_feedback(
             merged, db, client, platform, model_name, enable_thinking,
             context_window, top_p, presence_penalty, frequency_penalty, prefix
@@ -622,7 +742,8 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
             parsed = json.loads(clean_response)
         except json.JSONDecodeError as e:
             # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
-            print(f"{prefix}JSON parse error: {e} — sanitizace stringů")
+            dump_path = _dump_raw_llm_output(prefix, clean_response, e)
+            print(f"{prefix}JSON parse error: {e} — sanitizace stringů (raw: {dump_path})")
             sanitized = _sanitize_json_string_values(clean_response)
             try:
                 parsed = json.loads(sanitized)
@@ -631,12 +752,19 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 print(f"{prefix}Sanitizace nestačila — pokus o strukturální opravu zkráceného JSON")
                 parsed = _repair_truncated_json(sanitized)
                 if parsed:
+                    parsed['_json_repaired'] = True
                     print(f"{prefix}JSON obnoven: {len(parsed.get('vysledky', []))} kritérií zachráněno")
                 else:
                     print(f"{prefix}Oprava selhala. Raw Response:\n{raw_response}")
                     raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
 
         print(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
+        # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
+        if expected_criteria_names:
+            _validate_and_fix_vysledky(parsed, expected_criteria_names, prefix)
+        # FIX C: Detekce partial recovery
+        if expected_criteria_names:
+            _check_partial_recovery(parsed, expected_criteria_names, prefix)
         # Individuální zpětná vazba — samostatné LLM volání po parsování celého výsledku
         parsed["zpetna_vazba"] = await _generate_individual_feedback(
             parsed, db, client, platform, model_name, enable_thinking,

@@ -1,5 +1,27 @@
 # CHANGELOG - EVALUZ
 
+## [v3.9.5] - 2026-04-29
+
+### Přidáno
+
+- **FIX B — Logování syrového LLM výstupu při JSON parse erroru (`llm_engine.py`):** Při každém selhání `json.loads()` (jak v `_evaluate_chunk`, tak v přímé cestě `evaluate_report`) se syrový obsah LLM odpovědi automaticky uloží do souboru v `/app/logs/llm_parse_errors/`. Soubor obsahuje typ chyby, pozici chybného znaku s kontextem (±50 znaků) a kompletní raw output. V Docker deploymentu je adresář namountován jako persistentní volume (`./logs/llm_parse_errors:/app/logs/llm_parse_errors`), takže dumpy přežijí restart kontejneru. Umožňuje post-mortem analýzu: bez vzorků nebylo možné určit, jaký konkrétní znak/sekvence JSON rozbila (viz logy Pavelec/Kořar 29. 4. 2026).
+
+- **FIX A — Validace shody LLM výstupu s vstupními kritérii (`llm_engine.py`):** Po úspěšném parsování JSON odpovědi (všemi fallbacky) proběhne validace pole `vysledky` oproti `expected_criteria_names` — seznamu názvů kritérií z DB předaných do promptu. Halucinovaná kritéria (LLM vrátil název, který nebyl v promptu) jsou odfiltrována. Chybějící kritéria (LLM je vynechal) jsou doplněna jako placeholdery: `splneno=false`, `body=0`, `oduvodneni="⚠ Kritérium nebylo v odpovědi LLM..."`, `_llm_omitted=true`. Celkové skóre je po validaci přepočítáno. Řeší zdokumentovanou anomálii (1 kritérium v promptu → 19+ položek v odpovědi u některých studentů).
+
+- **FIX C — Detekce a varování při partial recovery (`llm_engine.py`, `evaluate.py`, `src/`):** Když po FIX A validaci existují placeholder položky (`_llm_omitted=true`), je do `json_result` vložen klíč `_partial_recovery` se statistikami (`expected`, `recovered`, `lost`, `reason`). Tento klíč je persistován v DB jako součást `json_result` (JSONB, bez migrace). Frontend (`TabEvaluation.tsx`, `types.ts`) čte `_partial_recovery` při načítání studentů a zobrazuje: (1) oranžový badge `⚠ X/N` v levém seznamu studentů s tooltipem, (2) varující panel přímo v oblasti hodnocení ("Hodnocení je neúplné — LLM nebo parser ztratil X z N kritérií. Doporučujeme spustit re-evaluaci."). Záznamy opravené `_repair_truncated_json` jsou označeny `_json_repaired=true` a vyústí v `reason="json_repair"`.
+
+- **FIX D — Vylepšená sanitizace edge cases (`llm_engine.py`):** `_sanitize_json_string_values()` rozšířena o dvě kategorie problémových znaků: (1) **Osamocené zpětné lomítko** — pokud `\` nenásleduje validní JSON escape znak (`"\\/bfnrtu`), je escapováno na `\\`; dříve zůstalo jako lone backslash a rozbilo JSON strukturu. (2) **Kontrolní znaky (0x00–0x1F)** — znaky nižší než `0x20` jiné než `\n`, `\r`, `\t` jsou nyní escapovány na `\uXXXX`; dříve procházely do výstupu a způsobovaly parse error. Oba případy se vyskytují u specifických typů ÚZ (fragmenty z Wordu, embedded objekty).
+
+### Technické změny
+
+- `backend/services/llm_engine.py`: přidány pomocné funkce `_validate_and_fix_vysledky()`, `_check_partial_recovery()`, `_dump_raw_llm_output()`; rozšířen podpis `evaluate_report()` o parametr `expected_criteria_names`; `_merge_chunk_results()` propaguje příznak `_json_repaired`; sanitizer rozšířen o lone backslash a control chars.
+- `backend/api/evaluate.py`: `evaluate_batch` sestavuje `expected_criteria_names` z `individual_criteria` a předává je přes task dict do `process_single_file_bg` → `evaluate_report`.
+- `docker-compose.yml`: přidán volume mount `./logs/llm_parse_errors:/app/logs/llm_parse_errors` pro backend.
+- `src/types.ts`: rozšířen `CriterionResult` o `_llm_omitted?: boolean`; rozšířen `Student` o `partial_recovery`.
+- `src/components/TabEvaluation.tsx`: mapování `partial_recovery` v `fetchEvaluations`; badge v seznamu studentů; varující panel v detailu.
+
+---
+
 ## [v3.9.4] - 2026-04-29
 
 ### Opraveno
