@@ -129,7 +129,17 @@ Pro zajištění stability v uzavřených sítích (intranet) bez přístupu k i
 
 ## 🕒 7. Historie vývoje (Changelog)
 
-### v3.9.3 (Aktuální) - Bugfixy: statistiky, scroll, re-evaluace
+### v3.9.4 (Aktuální) - URL state persistence, analytics refresh, scroll-to-top, statistics filter-options
+
+- **URL state persistence** (`App.tsx`): `activeTab` a `activeScenarioId` jsou inicializovány z URL search params (`?tab=...&scenario=...`) a při každé změně synchronizovány zpět přes `window.history.replaceState`. SPA tak přežije browser refresh — uživatel zůstane na stejné záložce a scénáři. Vedlejší efekt: po refresh se student list obnoví z DB (fast-scan záznamy mají uložený `source_text`, `fetchEvaluations()` je načte jako `pending`, re-evaluace funguje bez opětovného uploadu souborů). Auto-select logika opravena — pokud URL obsahuje platný `scenarioId`, `classId` se odvodí z dat místo přepsání výchozím prvním scénářem.
+
+- **Analytics refresh při přepnutí záložky** (`TabAnalytics.tsx`, `App.tsx`): Přidán prop `isActive: boolean` a `useEffect([isActive])` — `fetchAnalytics()` se spustí při každém přepnutí na záložku Analýza třídy. Řeší Man-in-the-Loop scénář: schválení proběhne v záložce Vyhodnocování, ale `TabAnalytics` zůstane namountovaná (`display: none`), `useEffect([])` by se nespustil znovu → stale hláška "neschválené záznamy" bez page refresh.
+
+- **Tlačítko ↑ "Přejít nahoru"** (`TabEvaluation.tsx`): Přidán `studentListScrollRef` na div se seznamem studentů (levý panel). Tlačítko ↑ nyní scrolluje levý panel — umožňuje výběr dalšího studenta bez nutnosti ručního scrollování. Dříve scrollovalo tabulku hodnocení (pravý panel), což uživatel nepozoroval.
+
+- **Statistics filter-options — scénáře bez evaluací** (`statistics.py`): Filtr `json_result IS NOT NULL` přidán do `scenario_query` v `/statistics/filter-options`. Scénáře, kde proběhl jen fast-scan (0 dokončených evaluací), se nyní nezobrazují v dropdownu. Dashboard endpoint byl opraven v v3.9.3 — dropdown je nyní konzistentní.
+
+### v3.9.3 - Bugfixy: statistiky, scroll, re-evaluace
 
 > ⚠️ **Toto je poslední verze před zásadním přepracováním fáze precizace kritérií (Phase 1).**
 > Plánovaný přechod na LLM s kontextovým oknem 256k tokenů (Qwen3.5 nebo ekvivalent) umožní
