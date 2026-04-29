@@ -42,13 +42,15 @@ interface TabAnalyticsProps {
     onCacheData?: (data: any) => void;
     /** Callback pro navigaci na detail konkrétního studenta */
     onNavigateToStudent?: (studentId: number) => void;
+    /** True pokud je záložka aktivní — při přepnutí znovu načte data (Man-in-the-Loop refresh) */
+    isActive?: boolean;
 }
 
 /**
  * Komponenta pro zobrazení globální analýzy výsledků celé třídy.
  * Obsahuje interaktivní grafy (Recharts), AI doporučení a seznam studentů vyžadujících pomoc.
  */
-export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, onCacheData, onNavigateToStudent }: TabAnalyticsProps) {
+export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, onCacheData, onNavigateToStudent, isActive }: TabAnalyticsProps) {
     const { showAlert } = useDialog();
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -104,6 +106,13 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
     useEffect(() => {
         fetchAnalytics();
     }, []);
+
+    // Při každém přepnutí na záložku Analýza přenačíst data — Man-in-the-Loop: schválení
+    // proběhne v záložce Vyhodnocování, ale analytics komponenta zůstane namountovaná (display:none).
+    // Bez tohoto useEffect by se zobrazovala zastaralá hláška "neschválené záznamy".
+    useEffect(() => {
+        if (isActive) fetchAnalytics();
+    }, [isActive]);
 
     // Transformace dat pro koláčový graf rozložení skóre
     const pieData = data ? [

@@ -65,6 +65,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const abortControllerRef = useRef<AbortController | null>(null);
     const wsConnectCountRef = useRef(0);
     const evalDetailScrollRef = useRef<HTMLDivElement>(null);
+    const studentListScrollRef = useRef<HTMLDivElement>(null);
     const [isCancelling, setIsCancelling] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -849,7 +850,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                         <span>Seznam studentů</span>
                         <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>{selectedIds.length}/{students.length}</span>
                     </div>
-                    <div style={{ flex: 1, overflowY: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div ref={studentListScrollRef} style={{ flex: 1, overflowY: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {students.length === 0 ? (
                             <div className="empty-state" style={{ padding: 16 }}>
                                 Žádné nahrané soubory. Klikněte na "Nahrát ÚZ".
@@ -1133,7 +1134,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     )}
                                     <button
                                         title="Přejít nahoru — otevřít další hodnocení"
-                                        onClick={() => evalDetailScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+                                        onClick={() => studentListScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
                                         style={{
                                             marginLeft: 8,
                                             width: 38, height: 38,

@@ -1,5 +1,19 @@
 # CHANGELOG - EVALUZ
 
+## [v3.9.4] - 2026-04-29
+
+### Opraveno
+
+- **Tlačítko "Přejít nahoru" po hodnocení nefungovalo (`TabEvaluation.tsx`):** Tlačítko ↑ (vedle Schválit hodnocení) scrollovalo pravý panel s tabulkou hodnocení (`evalDetailScrollRef`), namísto levého panelu se seznamem studentů. Záměr tlačítka je přejít na začátek seznamu studentů pro výběr dalšího hodnoceného. Přidán nový `studentListScrollRef` na div se seznamem studentů; button nyní scrolluje správný element.
+
+- **Záložka Analýza třídy nezobrazila aktuální data po přepnutí záložky (`TabAnalytics.tsx`, `App.tsx`):** Po schválení hodnocení v záložce Vyhodnocování a přepnutí na Analýza třídy se stále zobrazovala hláška o neschválených záznamech. Příčina: `TabAnalytics` je vždy namountovaná (display: none/block), `useEffect` s prázdným dependency array se spustí pouze jednou při mountu. Přidán prop `isActive: boolean` a nový `useEffect([isActive])` — při přepnutí na záložku se data automaticky přenačtou z backendu.
+
+- **Refresh prohlížeče vracel na základní obrazovku (`App.tsx`):** SPA nemělo URL routing → `activeTab` a `activeScenarioId` byly uloženy pouze v React state, který se při refresh zresetoval. Přidána persistence do URL search params (`?tab=...&scenario=...`): při startu aplikace se state inicializuje z URL, při každé změně se URL aktualizuje přes `window.history.replaceState`. Jako vedlejší efekt: student list se po refresh obnoví z DB (fast-scan záznamy s `source_text` jsou dostupné přes `/analytics/class/1`), studenty lze re-evaluovat bez opětovného uploadu souborů.
+
+- **Statistiky — filter-options zobrazoval scénáře bez dokončených evaluací (`statistics.py`):** Dropdown scénářů v záložce Statistiky zobrazoval i scénáře, kde proběhl pouze fast-scan (0 dokončených evaluací). Přidán filtr `json_result IS NOT NULL` do `scenario_query` v endpointu `/statistics/filter-options` — shodný s filtrem v `/statistics/dashboard`. Dashboard počítal správně (filtr přidán v v3.9.3), nyní je konzistentní i dropdown.
+
+---
+
 ## [v3.9.3] - 2026-04-28
 
 > **Poznámka:** Toto je poslední verze před zásadním přepracováním fáze precizace kritérií (Phase 1).

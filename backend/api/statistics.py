@@ -55,10 +55,14 @@ def get_filter_options(db: Session = Depends(get_db), current_user: Lecturer = D
             classes.append({"id": c.id, "name": c.name})
     classes.sort(key=lambda x: x["name"])
 
-    # Scenarios — with RBAC, return id + display name
+    # Scenarios — with RBAC, return id + display name.
+    # Filtrujeme jen scénáře s alespoň jednou dokončenou evaluací (json_result IS NOT NULL),
+    # aby se v dropdownu nezobrazovaly scénáře se samými fast-scanned (nevyhodnocenými) záznamy.
     scenario_query = db.query(
         StudentEvaluation.scenario_name,
         func.max(StudentEvaluation.scenario_display_name)
+    ).filter(
+        StudentEvaluation.json_result.isnot(None)
     ).group_by(StudentEvaluation.scenario_name)
     if allowed_ids is not None:
         scenario_query = scenario_query.filter(StudentEvaluation.lecturer_id.in_(allowed_ids))

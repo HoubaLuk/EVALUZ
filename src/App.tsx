@@ -22,7 +22,10 @@ import { API_BASE_URL } from './utils/api';
  * Spravuje globální stav (autentizace, výběr scénářů) a základní layout.
  */
 export default function EvaluzDashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('evaluation');
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab') as Tab | null;
+    return (t && ['criteria', 'evaluation', 'analytics', 'statistics'].includes(t)) ? t : 'evaluation';
+  });
   const [selectedStudent, setSelectedStudent] = useState<number | null>(1); // Default to first student for demo
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -62,7 +65,9 @@ export default function EvaluzDashboard() {
   });
 
   const [activeClassId, setActiveClassId] = useState<string | null>(null);
-  const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
+  const [activeScenarioId, setActiveScenarioId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('scenario') || null
+  );
   const [cachedAnalytics, setCachedAnalytics] = useState<Record<string, any>>({});
   const [scenariosWithAnalysis, setScenariosWithAnalysis] = useState<string[]>([]);
   const [hasEvaluations, setHasEvaluations] = useState(false);
@@ -118,6 +123,17 @@ export default function EvaluzDashboard() {
       .catch(e => console.error(e));
   }, []);
 
+  // Synchronizuje aktivní záložku a scénář do URL search params.
+  // Díky tomu přežije browser refresh — SPA nemá URL router, ale state lze
+  // uchovat v ?tab=...&scenario=... bez nutnosti reloadu.
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (activeTab) p.set('tab', activeTab);
+    if (activeScenarioId) p.set('scenario', activeScenarioId);
+    const newUrl = p.toString() ? `?${p.toString()}` : window.location.pathname;
+    window.history.replaceState({}, '', newUrl);
+  }, [activeTab, activeScenarioId]);
+
   const handleSelectScenario = (classId: string, scenarioId: string) => {
     setActiveClassId(classId);
     setActiveScenarioId(scenarioId);
@@ -127,14 +143,25 @@ export default function EvaluzDashboard() {
   };
 
   useEffect(() => {
-    if (classes && classes.length > 0 && !activeClassId) {
+    if (!classes || classes.length === 0) return;
+    if (activeScenarioId) {
+      // Scénář byl načten z URL — najít a nastavit jeho třídu
+      for (const cls of classes) {
+        if (cls.scenarios?.some(s => s.id === activeScenarioId)) {
+          setActiveClassId(cls.id);
+          return;
+        }
+      }
+    }
+    // Fallback: žádný URL param nebo scénář nenalezen → auto-vyber první scénář
+    if (!activeClassId) {
       const firstClass = classes[0];
-      if (firstClass.scenarios && firstClass.scenarios.length > 0 && !activeScenarioId) {
+      if (firstClass.scenarios && firstClass.scenarios.length > 0) {
         setActiveClassId(firstClass.id);
         setActiveScenarioId(firstClass.scenarios[0].id);
       }
     }
-  }, [classes, activeClassId, activeScenarioId]);
+  }, [classes]);
 
   const activeClass = classes.find(c => c.id === activeClassId);
   const activeScenario = activeClass?.scenarios.find(s => s.id === activeScenarioId);
@@ -560,6 +587,7 @@ export default function EvaluzDashboard() {
 
             <div style={{ display: activeTab === 'analytics' ? 'block' : 'none' }}>
               <TabAnalytics
+                isActive={activeTab === 'analytics'}
                 scenarioId={activeScenarioId}
                 className={activeClass?.name ?? null}
                 scenarioName={activeScenario?.name ?? null}

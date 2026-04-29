@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.9.3 (bugfixy statistiky, scroll, re-evaluace)
-**Poslední aktualizace:** 28. dubna 2026
+**Verze:** 3.9.4 (URL state persistence, analytics refresh, scroll-to-top, statistics filter-options)
+**Poslední aktualizace:** 29. dubna 2026
 
 ## Obsah
 1. [Přehled systému](#přehled-systému)
