@@ -34,5 +34,12 @@ def setup_logging(level: str = "INFO", production: bool = False) -> None:
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 
+    # fontTools (PDF export přes reportlab) — extrémně užvaněný INFO log
+    # při každém PDF exportu (stovky řádků o subset glyphů). Pro nás je relevantní
+    # pouze WARNING a výš (skutečné problémy s fonty).
+    logging.getLogger("fontTools").setLevel(logging.WARNING)
+    logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
+    logging.getLogger("fontTools.ttLib").setLevel(logging.WARNING)
+
     logger = logging.getLogger("evaluz")
     logger.info(f"Logging inicializováno: level={level}, production={production}")

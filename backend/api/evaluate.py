@@ -286,7 +286,12 @@ async def evaluate_batch(
         criteria_lines.append(crit_text)
         expected_criteria_names.append(crit.nazev)
 
-    criteria_str = "\n\n".join(criteria_lines)
+    # od v3.9.6: kritéria odděluje unikátní delimiter `#############`.
+    # Modelu dá jednoznačný signál "tady je další kritérium" → menší prostor pro halucinace.
+    # Splitter v llm_engine.py (`_split_criteria_chunks`) má pro delimiter primární cestu
+    # a regex lookahead na `**N. Kritérium` jako legacy fallback.
+    from services.llm_engine import CRITERIA_DELIMITER
+    criteria_str = f"\n\n{CRITERIA_DELIMITER}\n\n".join(criteria_lines)
     
     # 3. LOGOVÁNÍ
     print(f">>> SUCCESS: Do promptu vloženo {len(individual_criteria)} samostatných kritérií pro scenario_id: {scenario_id}")

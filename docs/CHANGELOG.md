@@ -1,5 +1,53 @@
 # CHANGELOG - EVALUZ
 
+## [v3.9.6] - 2026-05-03
+
+### Fáze A — Most k novému modelu (z hloubkové revize 3. 5. 2026)
+
+Diagnostika z testovacích logů 29. 4. 2026 ukázala, že FIX A v3.9.5 paradoxně zhoršila UX u multi-person ÚZ a u scénářů s person-specific kritérii: Kořař/Kubisz dostali 4–6/25 splněných kritérií, zatímco zbytek byl placeholder. Skutečnou příčinou nebyla halucinace modelu, ale **interakce mezi způsobem psaní kritérií + chunkingem + příliš striktní exact-match validací**.
+
+#### Přidáno
+
+- **Kanonizační match v `_validate_and_fix_vysledky()`** (`backend/services/llm_engine.py`): Místo exact match na string nyní porovnává **kanonickou** podobu názvu — nová helper funkce `_canonicalize_criterion_name()` aplikuje:
+  1. Strip prefixu `**N. Kritérium:` (LLM někdy zkopíruje formát z promptu).
+  2. Strip trailing markdown bold `**`.
+  3. Strip person-specific suffixu `– Jméno Příjmení` (heuristika kotvená na konec stringu, neporušuje popisné pomlčky uprostřed jako `– minimálně jméno, příjmení, datum narození`).
+  4. Lower-case + trim.
+  
+  **Důsledek:** Když LLM vrátí "Ztotožnění osoby – Ivana Horáková" a expected je "Ztotožnění osoby", oba se kanonizují na `ztotožnění osoby` → match. Položka zachována, `nazev` v UI normalizován na expected, původní LLM verze se ukládá do `_llm_actual_name` (audit/diagnostika).
+
+- **Multi-person duplikát detection**: Pokud model aplikoval stejné kritérium víckrát (jednou pro každou osobu v ÚZ), v `_validate_and_fix_vysledky()` se ponechá pouze první výskyt; další duplikáty jsou logovány jako `ℹ Multi-person duplikáty`. To řeší případ Kořař/Kubisz, kde model vracel "Ztotožnění – Kadlec" a "Ztotožnění – Horáková" jako 2 položky pro 1 expected.
+
+- **Unikátní oddělovač kritérií `#############`** (`backend/services/llm_engine.py`, `backend/services/criteria_service.py`, `backend/api/evaluate.py`): Mezi jednotlivá kritéria v promptu vkládán řetězec `#############`. Modelu dává jasný signál "tady je další kritérium", což snižuje pravděpodobnost halucinace nebo splývání kritérií. Konstanta `CRITERIA_DELIMITER` v `llm_engine.py`.
+  - `_split_criteria_chunks()` má nyní **dvě cesty**: primárně `text.split(delimiter)` (od v3.9.6), legacy regex lookahead na `**N. Kritérium` jako fallback pro zpětnou kompatibilitu se staršími daty.
+  - `parse_criteria_markdown()` v `criteria_service.py` synchronizována — pokud markdown obsahuje delimiter, použije ho přímo; jinak legacy regex.
+  - Phase 2 prompt rozšířen o explicitní instrukci: "Jednotlivá kritéria jsou oddělena řetězcem `#############`. Vrať PRÁVĚ N položek. Každé kritérium hodnotíš JEN JEDNOU, i když se v textu ÚZ vyskytuje více osob — kritéria se týkají hlavního subjektu zákroku, ne vedlejších osob. Do `nazev` zkopíruj DOSLOVA název z hlavičky bez přidávání jmen osob."
+
+- **Pytest regression suite** (`backend/tests/`, fáze B z plánu): Vytvořena minimální test infrastruktura (`pytest.ini`, `conftest.py`, `requirements-dev.txt`). Soubor `test_llm_pipeline.py` obsahuje **36 testů** pokrývajících:
+  - Kanonizační logiku (strip prefix, person suffix, popisné pomlčky)
+  - Validaci a doplňování placeholderů
+  - Multi-person duplikát detection
+  - Sanitizér (regress na v3.9.1 quotes, v3.9.5 lone backslash, control chars)
+  - `_repair_truncated_json` (regress na v3.7.8)
+  - `_split_criteria_chunks` (delimiter primární + legacy fallback)
+  - `_merge_chunk_results` (`_json_repaired` propagace, regress na v3.9.5)
+  - `parse_criteria_markdown` (delimiter + legacy)
+  - Integrační test reprodukující reálný case Kořař z 29. 4. 2026
+
+  Spuštění: `cd backend && pip install -r requirements-dev.txt && pytest tests/ -v`. Test suite je nutná infrastruktura pro budoucí refactor v rámci fáze C (radikální zjednodušení s reasoning modelem).
+
+#### Změněno
+
+- **fontTools log noise potlačen**: `backend/core/logging_config.py` nyní nastavuje `logging.getLogger("fontTools").setLevel(logging.WARNING)` (a podlogy `fontTools.subset`, `fontTools.ttLib`). Při PDF exportu se v Docker logs už neobjevují stovky řádků o subset glyphů — pouze skutečné problémy s fonty (WARNING+).
+
+#### Out of scope (zadokumentováno pro pozdější fáze)
+
+Fáze C (radikální zjednodušení s reasoning modelem qwen3.5) **nebyla** v této verzi součástí — bude provedena, jakmile bude nový model k dispozici. Plán: smazat chunking infrastrukturu (~250 řádků), `_repair_truncated_json` (~150 řádků), zjednodušit FIX A na safety net. Cílem je `evaluate_report` ~100 řádků, `llm_engine.py` < 700 řádků (vs. dnešních 992).
+
+Detailní strategický plán je v `~/.claude/plans/compressed-frolicking-dijkstra.md`.
+
+---
+
 ## [v3.9.5] - 2026-04-29
 
 ### Přidáno

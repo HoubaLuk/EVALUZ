@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.9.5 (JSON pipeline diagnostika a robustnost: raw LLM dump, criteria validation, partial recovery UI)
-**Poslední aktualizace:** 29. dubna 2026
+**Verze:** 3.9.6 (Fáze A z hloubkové revize: kanonizační match, oddělovač kritérií, regression suite)
+**Poslední aktualizace:** 3. května 2026
 
 ## Obsah
 1. [Přehled systému a architektura](#1-přehled-systému-a-architektura)
@@ -389,6 +389,25 @@ Při každém startu backend:
 2. Záloha: `run_migrations()` přidá chybějící sloupce (kobercový nálet)
 3. `seeder.py` zkontroluje `PROMPT_VERSION` a případně přepíše výchozí prompty
 
+### 6.5 Testy a CI (od v3.9.6)
+
+Regression test suite v `backend/tests/` chrání kritické vrstvy LLM pipeline před regresemi:
+
+- **Konfigurace**: `backend/pytest.ini` (testpaths = tests, asyncio_mode = auto), `backend/tests/conftest.py` (přidá `backend/` do sys.path)
+- **Závislosti**: `backend/requirements-dev.txt` (`pytest`, `pytest-asyncio`) — odděleno od produkčních `requirements.txt`, aby Docker image zůstal štíhlý
+- **Spuštění**: `cd backend && pip install -r requirements-dev.txt && pytest tests/ -v`
+- **Pokrytí** (36 testů, soubor `tests/test_llm_pipeline.py`):
+  - Kanonizace názvů kritérií (strip prefix, person suffix, popisné pomlčky)
+  - Validace + multi-person duplikáty + audit `_llm_actual_name`
+  - Sanitizér (regress na v3.9.1 quotes, v3.9.5 lone backslash + control chars)
+  - `_repair_truncated_json` (regress na v3.7.8)
+  - `_split_criteria_chunks` (delimiter primární + legacy fallback)
+  - `_merge_chunk_results` (`_json_repaired` propagace)
+  - `parse_criteria_markdown` (delimiter + legacy)
+  - Integrační test reprodukující reálný case Kořař z 29. 4. 2026
+
+Testy běží **offline** — bez sítě, bez DB, bez vLLM. Mockují odpovědi LLM jako hard-coded JSON. To umožňuje rychlé spuštění (cca 0,5 s pro celou sadu) a deterministické výsledky.
+
 ---
 
 ## 7. Architektonická rozhodnutí (ADR)
@@ -465,7 +484,32 @@ Na každé úrovni selhání se od v3.9.5 uloží syrový výstup do souboru pro
 
 **Rozhodnutí:** Post-parse validace (FIX A). Deterministická, nezávisí na LLM chování. Chybějící kritéria dostávají placeholder s explicitní poznámkou pro lektora, takže Man-in-the-Loop kontrola funguje — lektor vidí, že kritérium nebylo vyhodnoceno a může spustit re-evaluaci.
 
-**Kompromis:** Filtr závisí na přesné shodě `nazev` — pokud LLM nepatrně změní název kritéria (překlep, zkratka), bude položka odfiltrována jako halucinace. V praxi to nenastávalo (model konzistentně kopíruje vstupní `nazev`), ale je to teoretické riziko.
+**Kompromis:** Filtr závisí na přesné shodě `nazev` — pokud LLM nepatrně změní název kritéria (překlep, zkratka), bude položka odfiltrována jako halucinace.
+
+**Aktualizace v3.9.6:** Riziko se realizovalo. Při scénářích s person-specific kritérii (lektoři běžně píší jména osob do názvu kritéria — VTOS, dopravní nehoda atd.) model "personalizoval" jméno podle ÚZ, exact match selhal a 12-19 z 25 kritérií skončilo jako placeholder. Doplněna **kanonizační** vrstva — viz ADR-007.
+
+---
+
+### ADR-007: Kanonizační match místo exact match (v3.9.6)
+
+**Kontext:** ADR-005 zavedlo exact-match validaci `nazev`. V testovacích logách 29. 4. 2026 se ukázalo, že model systematicky modifikuje názvy:
+- Přidává prefix `**N. Kritérium:` (zkopíruje formát z promptu).
+- Přidává trailing `**` z markdown bold.
+- Přidává person-specific suffix `– Jméno Příjmení`, kde jméno bere z textu ÚZ (ne z promptu).
+- Aplikuje stejné generické kritérium víckrát na různé osoby (multi-person ÚZ).
+
+Důsledek byl katastrofický: u VTOS scénáře 4-6/25 splněných, zbytek placeholdery. Lektor měl zkreslený výstup neodpovídající reálné kvalitě ÚZ studenta.
+
+**Možnosti:**
+- *Prompt engineering*: Posílit instrukce "kopíruj nazev doslovně, bez jmen". Vyzkoušeno (v3.9.6 prompt update), ale samotné to neřeší 100 % případů.
+- *Fuzzy match (Levenshtein)*: Příliš permisivní, riziko falešných spárování.
+- *Prefix/suffix stripping (kanonizace)*: Deterministická normalizace obou stran (expected i actual) na společný klíč. Strip čísla a `Kritérium:`, strip trailing `**`, strip person suffix `– Jméno Příjmení` (heuristika kotvená na konec, neporušuje popisné pomlčky uprostřed).
+
+**Rozhodnutí:** Kanonizační match v `_canonicalize_criterion_name()`. Když oba strings (expected i actual) projdou kanonizací a vyjde stejný klíč, položka je zachována. `nazev` se v UI normalizuje na expected verzi (konzistence napříč studenty), původní LLM hodnota se ukládá do `_llm_actual_name` pro audit. Multi-person duplikáty (model vrátil stejné kritérium víckrát) ponechávají první výskyt.
+
+**Kompromis:** Heuristika strippingu person suffixu závisí na patternech jmen (Velké_písmeno + Velké_písmeno). Při netypických jménech (jen příjmení, dvouslovná příjmení) může selhat. Plus: ztrácíme person-specific kontext v UI hodnocení — lektor vidí jen generický název. Akceptovatelné, protože: (a) kontext je v `oduvodneni` a `citace`, (b) audit je v `_llm_actual_name`, (c) konzistence napříč studenty je důležitější pro dashboard a statistiky.
+
+**Nahrazuje:** ADR-005 exact-match jako primární cestu. ADR-005 zůstává jako historický záznam, kanonizace ho zobecňuje.
 
 ---
 
@@ -486,7 +530,25 @@ Na každé úrovni selhání se od v3.9.5 uloží syrový výstup do souboru pro
 
 ## 8. Historie vývoje (Changelog)
 
-### v3.9.5 (Aktuální) — JSON pipeline diagnostika a robustnost
+### v3.9.6 (Aktuální) — Fáze A z hloubkové revize: kanonizační match a oddělovač kritérií
+
+Diagnostická revize (3. 5. 2026, plán `~/.claude/plans/compressed-frolicking-dijkstra.md`) odhalila, že FIX A z v3.9.5 byla příliš striktní pro multi-person ÚZ a person-specific kritéria. Studenti dostávali 4–6/25 splněných kritérií tam, kde reálný výkon byl podstatně lepší — zbytek byl placeholder kvůli halucinaci jmen osob v `nazev`.
+
+- **`_canonicalize_criterion_name()`** (`llm_engine.py`): Nová helper funkce normalizující název kritéria pro porovnání. Aplikuje strip prefixu `**N. Kritérium:`, strip trailing `**`, strip person-specific suffixu `– Jméno Příjmení` (heuristika kotvená na konec, nezasahuje do popisných pomlček uprostřed), lower-case + trim. Použita v `_validate_and_fix_vysledky()` namísto exact-match.
+
+- **Multi-person duplikát detection**: Pokud LLM vrátí stejné kritérium víckrát s různými osobami, ponechá se první výskyt. Klíčové pro VTOS scénáře, kde model "rozumně" aplikoval kritéria na obě osoby.
+
+- **Audit původního názvu**: Položky zachráněné kanonizací mají v `_llm_actual_name` původní LLM-vrácený název pro diagnostiku.
+
+- **Oddělovač kritérií `#############`**: Konstanta `CRITERIA_DELIMITER` v `llm_engine.py`, lokálně synchronizovaná v `criteria_service.py`. `_split_criteria_chunks()` a `parse_criteria_markdown()` mají primární cestu přes delimiter, legacy regex lookahead na `**N. Kritérium` jako fallback. Phase 2 prompt explicitně informuje model o delimiteru a instruuje "kritéria se týkají hlavního subjektu zákroku".
+
+- **Pytest regression suite** (`backend/tests/test_llm_pipeline.py`, 36 testů): Pokrývá kanonizaci, validaci, sanitizér, JSON repair, chunking, merge a parser. Konfigurace v `pytest.ini`, dev-závislosti v `requirements-dev.txt`. Spuštění: `cd backend && pytest tests/ -v`.
+
+- **fontTools log noise potlačen**: `core/logging_config.py` nastavuje `fontTools.*` na WARNING. PDF export přestal generovat stovky INFO řádků.
+
+**Plánovaná fáze C (out of scope této verze)**: Radikální zjednodušení s reasoning modelem qwen3.5 — smazání chunking infrastruktury (~250 řádků), `_repair_truncated_json` (~150 řádků), zjednodušení FIX A na safety net. Detail v plánu `compressed-frolicking-dijkstra.md`.
+
+### v3.9.5 — JSON pipeline diagnostika a robustnost
 
 - **FIX B — Raw LLM dump při parse erroru** (`llm_engine.py`, `docker-compose.yml`): Nová `_dump_raw_llm_output()` ukládá syrový výstup LLM do `/app/logs/llm_parse_errors/` při každém JSON parse erroru. Soubor obsahuje chybový typ, pozici chybného znaku s 100-znakovým kontextem a kompletní raw output. Volume mount `./logs/llm_parse_errors:/app/logs/llm_parse_errors` zajišťuje persistenci přes restarty kontejneru.
 
@@ -557,4 +619,4 @@ Na každé úrovni selhání se od v3.9.5 uloží syrový výstup do souboru pro
 
 ---
 
-*Poslední aktualizace dokumentace: 29. dubna 2026*
+*Poslední aktualizace dokumentace: 3. května 2026*

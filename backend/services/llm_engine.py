@@ -46,30 +46,104 @@ def _dump_raw_llm_output(prefix: str, raw: str, error: Exception) -> str:
         return f"[dump failed: {dump_err}]"
 
 
+_CRITERION_PREFIX_RE = re.compile(r'^\**\s*\d+\.\s*Krit[eé]rium\s*:?\s*', re.IGNORECASE)
+# Person-suffix heuristika: poslední ` – ` (em-dash, en-dash, hyphen) následované
+# vzorem dvou Velkých-slov (jméno + příjmení s českou diakritikou) až do konce.
+# Aplikuje se POUZE na poslední segment, aby nepoškodila popisné pomlčky typu
+# "Ztotožnění osoby – minimálně jméno, příjmení, datum narození".
+_PERSON_SUFFIX_RE = re.compile(
+    r'\s*[–—-]\s*[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+'
+    r'(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+){1,3}\s*$'
+)
+
+
+def _canonicalize_criterion_name(name: str) -> str:
+    """Vrací kanonickou (porovnávací) podobu názvu kritéria.
+
+    Aplikuje:
+    1) Strip prefixu `**N. Kritérium:`/`N. Kritérium:` (LLM někdy zkopíruje formát z promptu).
+    2) Strip trailing `**` z markdown bold.
+    3) Strip person-specific suffixu (poslední ` – Jméno Příjmení`) — heuristika pro multi-person ÚZ,
+       kde model "personalizuje" generické kritérium jménem osoby z textu.
+    4) Lower-case + strip whitespace.
+
+    NEodstraňuje popisné pomlčky uprostřed (např. "minimálně jméno, příjmení, datum narození")
+    — heuristika je kotvená na konec stringu (`$`).
+    """
+    if not isinstance(name, str):
+        return ""
+    s = _CRITERION_PREFIX_RE.sub('', name).strip()
+    # Strip trailing markdown bold (`**`) — LLM někdy zkopíruje celé `**N. Kritérium: X**`
+    s = re.sub(r'\*+\s*$', '', s).strip()
+    # Iteruj: může být víc person-suffixů za sebou (např. "X – Jan Novák – Tadeáš Kadlec")
+    while True:
+        new_s = _PERSON_SUFFIX_RE.sub('', s).strip()
+        if new_s == s:
+            break
+        s = new_s
+    return s.lower().strip()
+
+
 def _validate_and_fix_vysledky(parsed: dict, expected_criteria_names: list[str], prefix: str) -> None:
-    """FIX A: Filtruje halucinovaná kritéria a doplňuje chybějící jako placeholdery se značkou _llm_omitted.
+    """FIX A: Kanonický match LLM výstupu vůči vstupním kritériím.
+
+    Změna od v3.9.5 → 3.9.6 (Phase A z hloubkové revize):
+    - Místo exact match používá kanonizaci (strip prefix `N. Kritérium:`, strip person suffix `– Jan Novák`).
+    - Zachovaná položka má normalizovaný `nazev` (odpovídající expected) pro UI konzistenci napříč studenty.
+    - Původní LLM-vrácený název se ukládá do `_llm_actual_name` pro audit/diagnostiku.
+    - Skutečné halucinace (nazev, který neodpovídá ani po kanonizaci) jsou pořád filtrovány.
+    - Skutečně chybějící kritéria jsou pořád doplněna jako placeholdery s `_llm_omitted=True`.
 
     Upravuje `parsed` in-place. Přepočítá celkove_skore.
     """
-    expected_set = set(expected_criteria_names)
     returned_results = parsed.get('vysledky', [])
 
+    # Mapa: kanonický klíč → originální expected nazev (z DB)
+    expected_canonical = {}
+    for n in expected_criteria_names:
+        canon = _canonicalize_criterion_name(n)
+        if canon and canon not in expected_canonical:
+            expected_canonical[canon] = n
+
     known = []
+    matched_canonical = set()  # které kanonické klíče už jsme spárovali (de-duplikace)
     unknown_names = []
+    duplicate_names = []
+
     for v in returned_results:
-        if v.get('nazev') in expected_set:
+        actual_name = v.get('nazev', '')
+        canonical = _canonicalize_criterion_name(actual_name)
+
+        if canonical in expected_canonical:
+            if canonical in matched_canonical:
+                # Multi-person aplikace: model vrátil totéž kritérium pro více osob.
+                # Zachováme první match, další duplikáty zaznamenáme do auditu (ne placeholder).
+                duplicate_names.append(actual_name)
+                continue
+            matched_canonical.add(canonical)
+            expected_name = expected_canonical[canonical]
+            # Audit původního LLM názvu (pokud se liší od expected)
+            if actual_name != expected_name:
+                v['_llm_actual_name'] = actual_name
+            v['nazev'] = expected_name  # normalizace pro UI konzistenci
             known.append(v)
         else:
-            unknown_names.append(v.get('nazev', '<bez názvu>'))
-    if unknown_names:
-        print(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} neznámých kritérií od LLM: "
-              f"{unknown_names[:3]}{'...' if len(unknown_names) > 3 else ''}")
+            unknown_names.append(actual_name or '<bez názvu>')
 
-    returned_set = {v.get('nazev') for v in known}
-    missing = expected_set - returned_set
+    if unknown_names:
+        print(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} skutečně neznámých kritérií "
+              f"(ani po kanonizaci se neshodují): "
+              f"{unknown_names[:3]}{'...' if len(unknown_names) > 3 else ''}")
+    if duplicate_names:
+        print(f"{prefix}ℹ Multi-person duplikáty (model aplikoval kritérium víckrát): "
+              f"{len(duplicate_names)} položek — ponechávám pouze první výskyt")
+
+    # Doplnit chybějící kritéria (žádný match ani kanonický)
+    missing = [n for n in expected_criteria_names
+               if _canonicalize_criterion_name(n) not in matched_canonical]
     if missing:
         print(f"{prefix}⚠ LLM vynechal {len(missing)} kritérií — doplňuji jako nesplněné placeholdery: "
-              f"{list(missing)[:3]}{'...' if len(missing) > 3 else ''}")
+              f"{missing[:3]}{'...' if len(missing) > 3 else ''}")
         for name in missing:
             known.append({
                 "nazev": name,
@@ -320,16 +394,36 @@ def _build_llm_kwargs(platform: str, enable_thinking: bool, context_window: int,
     # openrouter, openai, lmstudio — žádné proprietární extra_body
     return extra
 
+CRITERIA_DELIMITER = "#############"
+"""Unikátní oddělovač jednotlivých kritérií v promptu (od v3.9.6).
+
+Použit z `evaluate.py` při sestavování `criteria_str` a v `_split_criteria_chunks`.
+Volba `#############` je záměrně netypická — nemá kolizi s běžným textem ÚZ ani s markdown
+syntaxí. Modelu poskytuje jasný signál "tady je další kritérium", což snižuje pravděpodobnost,
+že kritéria splete dohromady nebo přidá vlastní.
+
+Zpětná kompatibilita: pokud markdown delimiter neobsahuje (legacy data), parser
+sáhne po regexovém fallbacku na `**N. Kritérium`.
+"""
+
+
 def _split_criteria_chunks(criteria_markdown: str, chunk_size: int = 6) -> list[str]:
     """
     Splits criteria markdown into chunks of at most chunk_size criteria each.
 
-    Primary strategy: split on numbered criterion headers ('**N. Kritérium').
-    Lookahead preserves the header in the right-hand part so each block starts
-    with its own header. This is robust against inconsistent '---' formatting.
-
-    Fallback: blank-line split (legacy behaviour).
+    Primary strategy (od v3.9.6): split podle delimiteru `#############`.
+    Sekundární strategie (legacy): split podle číslovaných header `**N. Kritérium`.
+    Fallback: blank-line split.
     """
+    # Primary: delimiter-based split (od v3.9.6)
+    if CRITERIA_DELIMITER in criteria_markdown:
+        parts = [p.strip() for p in criteria_markdown.split(CRITERIA_DELIMITER) if p.strip()]
+        if parts:
+            join_str = f'\n\n{CRITERIA_DELIMITER}\n\n'
+            return [join_str.join(parts[i:i + chunk_size])
+                    for i in range(0, len(parts), chunk_size)]
+
+    # Legacy: regex lookahead na **N. Kritérium
     parts = re.split(r'\n+(?=\*\*\d+\.\s*Kritérium)', criteria_markdown)
     criteria_blocks = [p.strip() for p in parts if re.match(r'\*\*\d+\.\s*Kritérium', p.strip())]
     if not criteria_blocks:
@@ -353,11 +447,20 @@ async def _evaluate_chunk(
     # obsahově bohaté ÚZ (dialog, právní citace) — model narazil na limit a vLLM JSON mode
     # truncoval výstup uprostřed 4. kritéria, což způsobovalo JSON parse error (22/25 kritérií).
     # 500 tokenů/kritérium = přibližně 750–850 znaků na kritérium → dostatečná rezerva.
-    n_criteria = len(re.findall(r'\*\*\d+\.\s*Kritérium', chunk_criteria))
+    # Spočítej kritéria: primárně podle delimiteru (v3.9.6+), fallback na header regex.
+    if CRITERIA_DELIMITER in chunk_criteria:
+        n_criteria = chunk_criteria.count(CRITERIA_DELIMITER) + 1
+    else:
+        n_criteria = len(re.findall(r'\*\*\d+\.\s*Kritérium', chunk_criteria)) or 1
     chunk_max_tokens = min(max_tokens, n_criteria * 500 + 300)
 
     user_prompt = f"""DŮLEŽITÉ: Výstupem tvé odpovědi musí být výhradně validní JSON — žádný jiný text, markdown ani komentáře.
 Vyhodnoť PRÁVĚ {n_criteria} kritérií uvedených níže — ne méně, ne více.
+Jednotlivá kritéria jsou oddělena řetězcem `{CRITERIA_DELIMITER}`. Vrať přesně tolik položek
+v poli `vysledky`, kolik je kritérií. Každé kritérium hodnotíš JEN JEDNOU, i když se v textu
+ÚZ vyskytuje více osob — kritéria se týkají hlavního subjektu zákroku, ne vedlejších osob.
+Do pole `nazev` zkopíruj DOSLOVA název kritéria z hlavičky (text za "Kritérium:" do konce řádku),
+bez přidávání jmen osob nebo jiného kontextu.
 
 ### KRITÉRIA K VYHODNOCENÍ:
 {chunk_criteria}
@@ -374,7 +477,7 @@ Požadovaná struktura JSON odpovědi:
     }},
     "vysledky": [
         {{
-            "nazev": "název kritéria",
+            "nazev": "název kritéria (doslovně z hlavičky, bez čísla a bez jmen osob)",
             "splneno": true/false,
             "body": počet_bodů,
             "oduvodneni": "1–2 věty: co jsi hledal a co jsi (ne)nalezl",
@@ -661,24 +764,34 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
 
     # 2. PŘÍPRAVA PROMPTU: Tady dáváme modelu přesné instrukce, jak má JSON vypadat.
     # Používáme F-stringy pro vložení textu ÚZ a kritérií přímo do pokynů.
+    n_criteria_total = len(expected_criteria_names) if expected_criteria_names else (
+        criteria_markdown.count(CRITERIA_DELIMITER) + 1 if CRITERIA_DELIMITER in criteria_markdown else 0
+    )
     user_prompt = f"""
     ### SEZNAM KRITÉRIÍ K VYHODNOCENÍ (TOTO JSOU JEDINÉ POLOŽKY, KTERÉ CHCI V JSONU):
     {criteria_markdown}
-    
+
     ### TEXT ÚŘEDNÍHO ZÁZNAMU (ÚZ) K VYHODNOCENÍ:
     {report_text}
-    
+
+    Jednotlivá kritéria jsou oddělena řetězcem `{CRITERIA_DELIMITER}`. Vrať PRÁVĚ {n_criteria_total or 'tolik'} položek
+    v poli `vysledky` — pro každé kritérium z výše uvedeného seznamu jednu položku, ne víc, ne méně.
+    Každé kritérium hodnotíš JEN JEDNOU, i když se v textu ÚZ vyskytuje více osob — kritéria se týkají
+    hlavního subjektu zákroku (osoby, která je předmětem služebního úkonu), ne vedlejších osob.
+    Do pole `nazev` zkopíruj DOSLOVA název kritéria z hlavičky (text za "Kritérium:" do konce řádku),
+    bez přidávání jmen osob nebo jiného kontextu z textu ÚZ.
+
     Požadovaná struktura JSON odpovědi (identita je POVINNÁ):
     Vždy přesně identifikuj PŘÍJMENÍ (to bude sloužit jako hlavní řadící klíč).
     {{
         "identita": {{
-            "hodnost": "prap.", 
-            "jmeno": "Jan", 
+            "hodnost": "prap.",
+            "jmeno": "Jan",
             "prijmeni": "Novák"
         }},
         "vysledky": [
             {{
-                "nazev": "název kritéria",
+                "nazev": "název kritéria (doslovně z hlavičky, bez čísla a bez jmen osob)",
                 "splneno": true/false,
                 "body": počet_bodů,
                 "oduvodneni": "tvůj proces myšlení a zdůvodnění zde",

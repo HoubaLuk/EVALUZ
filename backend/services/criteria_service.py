@@ -1,5 +1,11 @@
 import re
 
+# Unikátní oddělovač kritérií (od v3.9.6) — synchronizováno s
+# `services.llm_engine.CRITERIA_DELIMITER`. Definujeme zde lokálně, abychom se vyhnuli
+# cross-modulové cyklické závislosti při importu.
+CRITERIA_DELIMITER = "#############"
+
+
 def parse_criteria_markdown(markdown_text: str) -> list:
     """
     Vezme souvislý Markdown z UI a rozseká ho na jednotlivé objekty.
@@ -7,19 +13,21 @@ def parse_criteria_markdown(markdown_text: str) -> list:
     Vrací list dictů: [{"nazev": str, "popis": str, "body": int}, ...]
     """
     results = []
-    
+
     # 2. ÚKLID BALASTU
     text = markdown_text.strip()
-    text_with_newline = '\n' + text
-    
-    # Najdi první reálný začátek kritéria (1. Kritérium s nebo bez hvězdiček), abychom ořízli balast
-    start_match = re.search(r'\n\**1\.\s*Kritérium:', text_with_newline)
-    if start_match:
-        text = text_with_newline[start_match.start():].strip()
-    
-    # 1. MARKDOWN SPLITTER
-    # Split podle: \n následované volitelnými hvězdičkami, číslem, tečkou, mezerou a "Kritérium:"
-    blocks = re.split(r'\n(?=\**\d+\.\s*Kritérium:)', '\n' + text)
+
+    # 1. SPLITTER — primárně podle delimiteru `#############` (od v3.9.6),
+    #    fallback na regex header `**N. Kritérium:` (legacy data).
+    if CRITERIA_DELIMITER in text:
+        blocks = [b for b in text.split(CRITERIA_DELIMITER) if b.strip()]
+    else:
+        text_with_newline = '\n' + text
+        # Najdi první reálný začátek kritéria, abychom ořízli balast.
+        start_match = re.search(r'\n\**1\.\s*Kritérium:', text_with_newline)
+        if start_match:
+            text = text_with_newline[start_match.start():].strip()
+        blocks = re.split(r'\n(?=\**\d+\.\s*Kritérium:)', '\n' + text)
         
     for block in blocks:
         block = block.strip()
