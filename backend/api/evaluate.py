@@ -281,10 +281,13 @@ async def evaluate_batch(
 
     criteria_lines = []
     expected_criteria_names = []
+    expected_criteria_bodies: dict[str, int] = {}
     for i, crit in enumerate(individual_criteria, 1):
         crit_text = f"**{i}. Kritérium: {crit.nazev}**\n{crit.popis}\nBodů za splnění: {crit.body}"
         criteria_lines.append(crit_text)
         expected_criteria_names.append(crit.nazev)
+        # Autoritativní bodová hodnota z DB — model ji nesmí měnit (viz v3.9.8 fix)
+        expected_criteria_bodies[crit.nazev] = int(crit.body) if crit.body is not None else 1
 
     # od v3.9.6: kritéria odděluje unikátní delimiter `#############`.
     # Modelu dá jednoznačný signál "tady je další kritérium" → menší prostor pro halucinace.
@@ -382,6 +385,7 @@ async def evaluate_batch(
                 student_log_prefix=student_name,
                 lecturer_id=current_user_id,
                 expected_criteria_names=task_data.get('expected_criteria_names'),
+                expected_criteria_bodies=task_data.get('expected_criteria_bodies'),
             )
             
             logger.info(f"[QUEUE] LLM hotovo pro '{student_name}', ukládám do DB. Klíče: {list(llm_result_dict.keys())[:5]}")
@@ -487,6 +491,7 @@ async def evaluate_batch(
             "scenario_display_name": scenario_display_name,
             "lecturer_id": current_user.id,
             "expected_criteria_names": expected_criteria_names,
+            "expected_criteria_bodies": expected_criteria_bodies,
         }
         await eval_queue.add_task(task)
 

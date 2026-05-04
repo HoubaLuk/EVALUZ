@@ -84,29 +84,43 @@ def _canonicalize_criterion_name(name: str) -> str:
     return s.lower().strip()
 
 
-def _validate_and_fix_vysledky(parsed: dict, expected_criteria_names: list[str], prefix: str) -> None:
+def _validate_and_fix_vysledky(
+    parsed: dict,
+    expected_criteria_names: list[str],
+    prefix: str,
+    expected_criteria_bodies: dict[str, int] | None = None,
+) -> None:
     """FIX A: Kanonický match LLM výstupu vůči vstupním kritériím.
 
-    Změna od v3.9.5 → 3.9.6 (Phase A z hloubkové revize):
-    - Místo exact match používá kanonizaci (strip prefix `N. Kritérium:`, strip person suffix `– Jan Novák`).
-    - Zachovaná položka má normalizovaný `nazev` (odpovídající expected) pro UI konzistenci napříč studenty.
-    - Původní LLM-vrácený název se ukládá do `_llm_actual_name` pro audit/diagnostiku.
-    - Skutečné halucinace (nazev, který neodpovídá ani po kanonizaci) jsou pořád filtrovány.
-    - Skutečně chybějící kritéria jsou pořád doplněna jako placeholdery s `_llm_omitted=True`.
+    Změna od v3.9.5 → 3.9.6:
+    - Místo exact match kanonizace (strip prefix `N. Kritérium:`, strip person suffix `– Jan Novák`).
+    - Zachovaná položka má normalizovaný `nazev` (odpovídající expected) pro UI konzistenci.
+    - Původní LLM-vrácený název se ukládá do `_llm_actual_name` pro audit.
+
+    Změna od v3.9.7 → 3.9.8:
+    - Fronta místo dict: každé expected kritérium je nezávislá položka ve frontě.
+      Pokud dvě kritéria sdílí stejný kanonický základ (VTOS: "Ztotožnění osoby – Kadlec"
+      a "Ztotožnění osoby – Horáková" → oba canonical "ztotožnění osoby"), dřívější dict
+      uložil jen jedno a druhé se "ztratilo" — nikdy se nepřidalo jako placeholder.
+      Fronta (list) umožňuje mít N slotů pro N kritérií se stejným základem.
+    - expected_criteria_bodies: body hodnota z DB se použije po matchování místo hodnoty
+      z LLM. Model (Gemma4, qwen varianty) někdy vrátí splneno=true ale body=0, nebo
+      špatnou bodovou hodnotu. DB je autoritativní zdroj pro body.
 
     Upravuje `parsed` in-place. Přepočítá celkove_skore.
     """
+    from collections import defaultdict
     returned_results = parsed.get('vysledky', [])
 
-    # Mapa: kanonický klíč → originální expected nazev (z DB)
-    expected_canonical = {}
+    # Fronta: kanonický klíč → [expected_name_1, expected_name_2, ...] (FIFO)
+    # Každé kritérium = samostatný slot — dvě kritéria se stejným základem = dva sloty.
+    canonical_queue: dict[str, list[str]] = defaultdict(list)
     for n in expected_criteria_names:
         canon = _canonicalize_criterion_name(n)
-        if canon and canon not in expected_canonical:
-            expected_canonical[canon] = n
+        if canon:
+            canonical_queue[canon].append(n)
 
     known = []
-    matched_canonical = set()  # které kanonické klíče už jsme spárovali (de-duplikace)
     unknown_names = []
     duplicate_names = []
 
@@ -114,35 +128,40 @@ def _validate_and_fix_vysledky(parsed: dict, expected_criteria_names: list[str],
         actual_name = v.get('nazev', '')
         canonical = _canonicalize_criterion_name(actual_name)
 
-        if canonical in expected_canonical:
-            if canonical in matched_canonical:
-                # Multi-person aplikace: model vrátil totéž kritérium pro více osob.
-                # Zachováme první match, další duplikáty zaznamenáme do auditu (ne placeholder).
-                duplicate_names.append(actual_name)
-                continue
-            matched_canonical.add(canonical)
-            expected_name = expected_canonical[canonical]
-            # Audit původního LLM názvu (pokud se liší od expected)
+        if canonical_queue.get(canonical):
+            # Pop ze fronty — každý slot spotřebuje jen jednu položku
+            expected_name = canonical_queue[canonical].pop(0)
             if actual_name != expected_name:
                 v['_llm_actual_name'] = actual_name
-            v['nazev'] = expected_name  # normalizace pro UI konzistenci
+            v['nazev'] = expected_name
+
+            # Normalizace body: autoritativní hodnota z DB (splneno=True), 0 (splneno=False).
+            # Model nemůže ovlivnit počet bodů — body hodnota v DB je ground truth.
+            if v.get('splneno', False):
+                if expected_criteria_bodies and expected_name in expected_criteria_bodies:
+                    v['body'] = expected_criteria_bodies[expected_name]
+                # Pokud body z DB není k dispozici, ponecháme co model vrátil (fallback)
+            else:
+                v['body'] = 0
+
             known.append(v)
+        elif canonical in canonical_queue:
+            # Fronta pro tento canonical je prázdná → model vrátil kritérium vícekrát (multi-person).
+            duplicate_names.append(actual_name)
         else:
             unknown_names.append(actual_name or '<bez názvu>')
 
     if unknown_names:
-        print(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} skutečně neznámých kritérií "
-              f"(ani po kanonizaci se neshodují): "
+        print(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} neznámých kritérií "
+              f"(ani po kanonizaci): "
               f"{unknown_names[:3]}{'...' if len(unknown_names) > 3 else ''}")
     if duplicate_names:
-        print(f"{prefix}ℹ Multi-person duplikáty (model aplikoval kritérium víckrát): "
-              f"{len(duplicate_names)} položek — ponechávám pouze první výskyt")
+        print(f"{prefix}ℹ Multi-person duplikáty ({len(duplicate_names)} položek) — zachovávám jen první výskyt")
 
-    # Doplnit chybějící kritéria (žádný match ani kanonický)
-    missing = [n for n in expected_criteria_names
-               if _canonicalize_criterion_name(n) not in matched_canonical]
+    # Chybějící = vše, co ve frontách zbývá (model je nevyhodnotil)
+    missing = [name for slots in canonical_queue.values() for name in slots]
     if missing:
-        print(f"{prefix}⚠ LLM vynechal {len(missing)} kritérií — doplňuji jako nesplněné placeholdery: "
+        print(f"{prefix}⚠ LLM vynechal {len(missing)} kritérií — doplňuji jako placeholdery: "
               f"{missing[:3]}{'...' if len(missing) > 3 else ''}")
         for name in missing:
             known.append({
@@ -154,15 +173,14 @@ def _validate_and_fix_vysledky(parsed: dict, expected_criteria_names: list[str],
                 "_llm_omitted": True,
             })
 
-    # Normalizace: body=0 pro nesplněná kritéria.
-    # Model (zejm. Gemma, některé Qwen varianty) občas vrátí splneno=false ale body=1 — to je chyba modelu.
-    # Zde to opravíme deterministicky, aby skóre vždy odpovídalo počtu splněných kritérií.
-    for v in known:
-        if not v.get('splneno', False):
-            v['body'] = 0
+    # Seřadit výstup podle původního pořadí expected_criteria_names.
+    # Model vrací kritéria v libovolném pořadí — bez řazení frontend očísluje
+    # kritérium č. 18 jako "1." apod. Řazení zajistí, že 1. kritérium je vždy první.
+    order_map = {name: i for i, name in enumerate(expected_criteria_names)}
+    known.sort(key=lambda v: order_map.get(v.get('nazev', ''), len(expected_criteria_names)))
 
     parsed['vysledky'] = known
-    # Přepočet celkove_skore z vysledky — nespoléháme na model (může se spočítat špatně).
+    # Přepočet celkove_skore — nespoléháme na model (může se spočítat špatně).
     parsed['celkove_skore'] = sum(
         v.get('body', 0) for v in known
         if isinstance(v.get('body'), (int, float)) and v.get('splneno', False)
@@ -673,7 +691,7 @@ def _merge_chunk_results(chunk_results: list[dict]) -> dict:
     return merged
 
 
-async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None, expected_criteria_names: list[str] = None) -> dict:
+async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None, expected_criteria_names: list[str] = None, expected_criteria_bodies: dict[str, int] | None = None) -> dict:
     """
     HLAVNÍ FUNKCE PRO EVALUACI (Fáze 2).
     Bere text studenta a zadaná kritéria, posílá je modelu a vrací vyčištěný JSON výsledek.
@@ -766,7 +784,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         print(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
         # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
         if expected_criteria_names:
-            _validate_and_fix_vysledky(merged, expected_criteria_names, prefix)
+            _validate_and_fix_vysledky(merged, expected_criteria_names, prefix, expected_criteria_bodies)
         # FIX C: Detekce partial recovery
         if expected_criteria_names:
             _check_partial_recovery(merged, expected_criteria_names, prefix)
@@ -887,9 +905,9 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
 
         print(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
         # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
-        # _validate_and_fix_vysledky zároveň normalizuje body=0 pro splneno=false a přepočítá celkove_skore.
+        # _validate_and_fix_vysledky zároveň normalizuje body z DB a přepočítá celkove_skore.
         if expected_criteria_names:
-            _validate_and_fix_vysledky(parsed, expected_criteria_names, prefix)
+            _validate_and_fix_vysledky(parsed, expected_criteria_names, prefix, expected_criteria_bodies)
         else:
             # Bez expected_criteria_names také normalizujeme body a přepočítáme skóre
             # (model může vrátit špatný celkove_skore nebo body>0 pro splneno=false)

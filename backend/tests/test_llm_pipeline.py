@@ -195,10 +195,9 @@ class TestValidateAndFixVysledky:
         assert all(v["body"] == 0 and v["splneno"] is False for v in omitted)
 
     def test_score_ignores_body_when_splneno_false(self):
-        """Regrese: Gemma4 vrací splneno=false ale body=1 → skóre bylo nafouklé.
-        validate musí body normalizovat na 0 a správně přepočítat celkove_skore."""
+        """Regrese: Gemma4 vrací splneno=false ale body=1 → skóre bylo nafouklé."""
         parsed = {
-            "celkove_skore": 99,  # model se spočítal špatně
+            "celkove_skore": 99,
             "vysledky": [
                 {"nazev": "Zákonná výzva",    "splneno": True,  "body": 5},
                 {"nazev": "Ztotožnění osoby", "splneno": False, "body": 1},  # body>0 ale splneno=False!
@@ -206,16 +205,14 @@ class TestValidateAndFixVysledky:
             ]
         }
         _validate_and_fix_vysledky(parsed, self._expected(), "[T] ")
-        # body musí být nulové pro nesplněná kritéria
         ztotozneni = next(v for v in parsed["vysledky"] if v["nazev"] == "Ztotožnění osoby")
         assert ztotozneni["body"] == 0
-        # celkove_skore pouze ze splněných
         assert parsed["celkove_skore"] == 5
 
     def test_score_not_taken_from_model_when_wrong(self):
         """Regrese: model vrátil celkove_skore=25 přestože 4 kritéria nesplněna (Jančařík/Gemma4 case)."""
         parsed = {
-            "celkove_skore": 25,  # lže!
+            "celkove_skore": 25,
             "vysledky": [
                 {"nazev": "Zákonná výzva",    "splneno": True,  "body": 5},
                 {"nazev": "Ztotožnění osoby", "splneno": False, "body": 0},
@@ -225,26 +222,109 @@ class TestValidateAndFixVysledky:
         _validate_and_fix_vysledky(parsed, self._expected(), "[T] ")
         assert parsed["celkove_skore"] == 5  # ne 25
 
+    def test_body_normalized_from_db_when_splneno_true(self):
+        """Regrese: Gemma4 vrací splneno=true ale body=0 — skóre podhodnoceno.
+        expected_criteria_bodies přepíše model's body autoritativní hodnotou z DB."""
+        parsed = {
+            "vysledky": [
+                {"nazev": "Zákonná výzva",    "splneno": True, "body": 0},  # model vrátil 0, ale DB má 5
+                {"nazev": "Ztotožnění osoby", "splneno": True, "body": 0},  # model vrátil 0, ale DB má 3
+                {"nazev": "Eskorta osoby",    "splneno": False, "body": 0},
+            ]
+        }
+        db_bodies = {"Zákonná výzva": 5, "Ztotožnění osoby": 3, "Eskorta osoby": 2}
+        _validate_and_fix_vysledky(parsed, self._expected(), "[T] ", expected_criteria_bodies=db_bodies)
+        zakonna = next(v for v in parsed["vysledky"] if v["nazev"] == "Zákonná výzva")
+        ztotozneni = next(v for v in parsed["vysledky"] if v["nazev"] == "Ztotožnění osoby")
+        assert zakonna["body"] == 5   # z DB, ne 0 z modelu
+        assert ztotozneni["body"] == 3
+        assert parsed["celkove_skore"] == 8  # 5 + 3
+
+    def test_two_criteria_same_canonical_both_preserved(self):
+        """Regrese: dvě kritéria se stejným kanonickým základem (VTOS: dvě osoby).
+        Starý dict uložil jen jedno → druhé se ztratilo (nikdy placeholder). Fronta opravuje."""
+        # Dvě kritéria se stejným základem "Ztotožnění osoby" (různé osoby)
+        expected = [
+            "Ztotožnění osoby – Tadeáš Kadlec",
+            "Ztotožnění osoby – Ivana Horáková",
+            "Zákonná výzva",
+        ]
+        db_bodies = {
+            "Ztotožnění osoby – Tadeáš Kadlec": 3,
+            "Ztotožnění osoby – Ivana Horáková": 3,
+            "Zákonná výzva": 5,
+        }
+        # Model vrátil jen Kadlece a výzvu — Horáková chybí
+        parsed = {
+            "vysledky": [
+                {"nazev": "Ztotožnění osoby – Tadeáš Kadlec", "splneno": True, "body": 3},
+                {"nazev": "Zákonná výzva", "splneno": True, "body": 5},
+            ]
+        }
+        _validate_and_fix_vysledky(parsed, expected, "[T] ", expected_criteria_bodies=db_bodies)
+        # Musíme mít všechny 3 kritéria
+        assert len(parsed["vysledky"]) == 3
+        nazvy = [v["nazev"] for v in parsed["vysledky"]]
+        assert "Ztotožnění osoby – Tadeáš Kadlec" in nazvy
+        assert "Ztotožnění osoby – Ivana Horáková" in nazvy  # placeholder přidán
+        assert "Zákonná výzva" in nazvy
+        horakova = next(v for v in parsed["vysledky"] if v["nazev"] == "Ztotožnění osoby – Ivana Horáková")
+        assert horakova["_llm_omitted"] is True
+        assert horakova["body"] == 0
+        # skóre: Kadlec(3) + výzva(5) = 8
+        assert parsed["celkove_skore"] == 8
+
+    def test_output_sorted_by_original_order(self):
+        """Model vrátí kritéria v jiném pořadí než jsou zadána → výstup musí být seřazen
+        podle expected_criteria_names, aby frontend zobrazil 1. kritérium jako první."""
+        expected = ["Zákonná výzva", "Ztotožnění osoby", "Eskorta osoby"]
+        # Model vrátil v opačném pořadí
+        parsed = {
+            "vysledky": [
+                {"nazev": "Eskorta osoby",    "splneno": False, "body": 0},
+                {"nazev": "Ztotožnění osoby", "splneno": True,  "body": 3},
+                {"nazev": "Zákonná výzva",    "splneno": True,  "body": 5},
+            ]
+        }
+        _validate_and_fix_vysledky(parsed, expected, "[T] ")
+        result_nazvy = [v["nazev"] for v in parsed["vysledky"]]
+        assert result_nazvy == ["Zákonná výzva", "Ztotožnění osoby", "Eskorta osoby"]
+
+    def test_missing_placeholder_inserted_at_correct_position(self):
+        """Chybějící kritérium (placeholder) musí být na svém původním místě,
+        ne naskládané na konci — jinak by frontend zobrazil čísla špatně."""
+        expected = ["Zákonná výzva", "Ztotožnění osoby", "Eskorta osoby"]
+        # Model vynechal "Ztotožnění osoby"
+        parsed = {
+            "vysledky": [
+                {"nazev": "Eskorta osoby",  "splneno": True, "body": 2},
+                {"nazev": "Zákonná výzva",  "splneno": True, "body": 5},
+            ]
+        }
+        _validate_and_fix_vysledky(parsed, expected, "[T] ")
+        result_nazvy = [v["nazev"] for v in parsed["vysledky"]]
+        # Ztotožnění osoby musí být na pozici 1 (index 1), ne na konci
+        assert result_nazvy == ["Zákonná výzva", "Ztotožnění osoby", "Eskorta osoby"]
+        assert parsed["vysledky"][1].get("_llm_omitted") is True
+
     def test_merge_score_ignores_failed_criteria(self):
         """Regrese: _merge_chunk_results sčítal body bez ohledu na splneno."""
         chunk1 = {
             "identita": {"jmeno": "Jan", "prijmeni": "Novák"},
             "vysledky": [
                 {"nazev": "A", "splneno": True,  "body": 3},
-                {"nazev": "B", "splneno": False, "body": 2},  # body>0 ale nesplněno
+                {"nazev": "B", "splneno": False, "body": 2},
             ]
         }
         chunk2 = {
             "identita": {},
             "vysledky": [
                 {"nazev": "C", "splneno": True,  "body": 1},
-                {"nazev": "D", "splneno": False, "body": 1},  # body>0 ale nesplněno
+                {"nazev": "D", "splneno": False, "body": 1},
             ]
         }
         merged = _merge_chunk_results([chunk1, chunk2])
-        # Správně: 3 + 1 = 4 (B a D nesplněné, jejich body ignorovány)
-        assert merged["celkove_skore"] == 4
-        # Normalizace: body nesplněných nulováno
+        assert merged["celkove_skore"] == 4  # jen A+C
         b = next(v for v in merged["vysledky"] if v["nazev"] == "B")
         assert b["body"] == 0
 
