@@ -154,9 +154,18 @@ def _validate_and_fix_vysledky(parsed: dict, expected_criteria_names: list[str],
                 "_llm_omitted": True,
             })
 
+    # Normalizace: body=0 pro nesplněná kritéria.
+    # Model (zejm. Gemma, některé Qwen varianty) občas vrátí splneno=false ale body=1 — to je chyba modelu.
+    # Zde to opravíme deterministicky, aby skóre vždy odpovídalo počtu splněných kritérií.
+    for v in known:
+        if not v.get('splneno', False):
+            v['body'] = 0
+
     parsed['vysledky'] = known
+    # Přepočet celkove_skore z vysledky — nespoléháme na model (může se spočítat špatně).
     parsed['celkove_skore'] = sum(
-        v.get('body', 0) for v in known if isinstance(v.get('body'), (int, float))
+        v.get('body', 0) for v in known
+        if isinstance(v.get('body'), (int, float)) and v.get('splneno', False)
     )
 
 
@@ -644,9 +653,14 @@ def _merge_chunk_results(chunk_results: list[dict]) -> dict:
         all_vysledky.extend(result.get("vysledky", []))
         if result.get('_json_repaired'):
             json_repaired = True
+    # Normalizace: body=0 pro nesplněná kritéria (model může vrátit body>0 i pro splneno=false).
+    for e in all_vysledky:
+        if not e.get('splneno', False):
+            e['body'] = 0
+    # Přepočet skóre z vysledky — model si může celkove_skore spočítat chybně.
     total_score = sum(
         e.get("body", 0) for e in all_vysledky
-        if isinstance(e.get("body"), (int, float))
+        if isinstance(e.get("body"), (int, float)) and e.get("splneno", False)
     )
     merged = {
         "identita": identita,
@@ -873,8 +887,20 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
 
         print(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
         # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
+        # _validate_and_fix_vysledky zároveň normalizuje body=0 pro splneno=false a přepočítá celkove_skore.
         if expected_criteria_names:
             _validate_and_fix_vysledky(parsed, expected_criteria_names, prefix)
+        else:
+            # Bez expected_criteria_names také normalizujeme body a přepočítáme skóre
+            # (model může vrátit špatný celkove_skore nebo body>0 pro splneno=false)
+            vysledky = parsed.get('vysledky', [])
+            for v in vysledky:
+                if not v.get('splneno', False):
+                    v['body'] = 0
+            parsed['celkove_skore'] = sum(
+                v.get('body', 0) for v in vysledky
+                if isinstance(v.get('body'), (int, float)) and v.get('splneno', False)
+            )
         # FIX C: Detekce partial recovery
         if expected_criteria_names:
             _check_partial_recovery(parsed, expected_criteria_names, prefix)

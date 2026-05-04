@@ -194,6 +194,60 @@ class TestValidateAndFixVysledky:
         assert len(omitted) == 2
         assert all(v["body"] == 0 and v["splneno"] is False for v in omitted)
 
+    def test_score_ignores_body_when_splneno_false(self):
+        """Regrese: Gemma4 vrací splneno=false ale body=1 → skóre bylo nafouklé.
+        validate musí body normalizovat na 0 a správně přepočítat celkove_skore."""
+        parsed = {
+            "celkove_skore": 99,  # model se spočítal špatně
+            "vysledky": [
+                {"nazev": "Zákonná výzva",    "splneno": True,  "body": 5},
+                {"nazev": "Ztotožnění osoby", "splneno": False, "body": 1},  # body>0 ale splneno=False!
+                {"nazev": "Eskorta osoby",    "splneno": False, "body": 0},
+            ]
+        }
+        _validate_and_fix_vysledky(parsed, self._expected(), "[T] ")
+        # body musí být nulové pro nesplněná kritéria
+        ztotozneni = next(v for v in parsed["vysledky"] if v["nazev"] == "Ztotožnění osoby")
+        assert ztotozneni["body"] == 0
+        # celkove_skore pouze ze splněných
+        assert parsed["celkove_skore"] == 5
+
+    def test_score_not_taken_from_model_when_wrong(self):
+        """Regrese: model vrátil celkove_skore=25 přestože 4 kritéria nesplněna (Jančařík/Gemma4 case)."""
+        parsed = {
+            "celkove_skore": 25,  # lže!
+            "vysledky": [
+                {"nazev": "Zákonná výzva",    "splneno": True,  "body": 5},
+                {"nazev": "Ztotožnění osoby", "splneno": False, "body": 0},
+                {"nazev": "Eskorta osoby",    "splneno": False, "body": 0},
+            ]
+        }
+        _validate_and_fix_vysledky(parsed, self._expected(), "[T] ")
+        assert parsed["celkove_skore"] == 5  # ne 25
+
+    def test_merge_score_ignores_failed_criteria(self):
+        """Regrese: _merge_chunk_results sčítal body bez ohledu na splneno."""
+        chunk1 = {
+            "identita": {"jmeno": "Jan", "prijmeni": "Novák"},
+            "vysledky": [
+                {"nazev": "A", "splneno": True,  "body": 3},
+                {"nazev": "B", "splneno": False, "body": 2},  # body>0 ale nesplněno
+            ]
+        }
+        chunk2 = {
+            "identita": {},
+            "vysledky": [
+                {"nazev": "C", "splneno": True,  "body": 1},
+                {"nazev": "D", "splneno": False, "body": 1},  # body>0 ale nesplněno
+            ]
+        }
+        merged = _merge_chunk_results([chunk1, chunk2])
+        # Správně: 3 + 1 = 4 (B a D nesplněné, jejich body ignorovány)
+        assert merged["celkove_skore"] == 4
+        # Normalizace: body nesplněných nulováno
+        b = next(v for v in merged["vysledky"] if v["nazev"] == "B")
+        assert b["body"] == 0
+
 
 # ---------------------------------------------------------------------------
 # _check_partial_recovery
@@ -340,11 +394,13 @@ class TestSplitCriteriaChunks:
 
 class TestMergeChunkResults:
     def test_merges_vysledky_from_multiple_chunks(self):
+        # splneno=True required for body to count (normalizace: nesplněné = 0)
         chunk1 = {"identita": {"jmeno": "Jan"}, "vysledky": [
-            {"nazev": "A", "body": 5}, {"nazev": "B", "body": 3}
+            {"nazev": "A", "splneno": True, "body": 5},
+            {"nazev": "B", "splneno": True, "body": 3}
         ]}
         chunk2 = {"identita": {}, "vysledky": [
-            {"nazev": "C", "body": 2}
+            {"nazev": "C", "splneno": True, "body": 2}
         ]}
         merged = _merge_chunk_results([chunk1, chunk2])
         assert len(merged["vysledky"]) == 3
