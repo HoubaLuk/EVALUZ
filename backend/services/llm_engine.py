@@ -6,6 +6,7 @@ přípravu promptů a následné čištění (parsování) odpovědí tak, aby z
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time as _time
@@ -14,6 +15,8 @@ from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from core.config import settings
 from models.db_models import AppSettings
+
+logger = logging.getLogger("evaluz.llm")
 
 
 # Adresář pro post-mortem dumpy LLM výstupů, které spadly při JSON parsování.
@@ -152,16 +155,16 @@ def _validate_and_fix_vysledky(
             unknown_names.append(actual_name or '<bez názvu>')
 
     if unknown_names:
-        print(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} neznámých kritérií "
+        logger.warning(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} neznámých kritérií "
               f"(ani po kanonizaci): "
               f"{unknown_names[:3]}{'...' if len(unknown_names) > 3 else ''}")
     if duplicate_names:
-        print(f"{prefix}ℹ Multi-person duplikáty ({len(duplicate_names)} položek) — zachovávám jen první výskyt")
+        logger.info(f"{prefix}ℹ Multi-person duplikáty ({len(duplicate_names)} položek) — zachovávám jen první výskyt")
 
     # Chybějící = vše, co ve frontách zbývá (model je nevyhodnotil)
     missing = [name for slots in canonical_queue.values() for name in slots]
     if missing:
-        print(f"{prefix}⚠ LLM vynechal {len(missing)} kritérií — doplňuji jako placeholdery: "
+        logger.warning(f"{prefix}⚠ LLM vynechal {len(missing)} kritérií — doplňuji jako placeholdery: "
               f"{missing[:3]}{'...' if len(missing) > 3 else ''}")
         for name in missing:
             known.append({
@@ -185,6 +188,11 @@ def _validate_and_fix_vysledky(
         v.get('body', 0) for v in known
         if isinstance(v.get('body'), (int, float)) and v.get('splneno', False)
     )
+    # v3.9.10: Autoritativní max_skore = součet body všech očekávaných kritérií z DB.
+    # Frontend má tedy jednoznačné max — ne počet kritérií, ne sum z vysledky (tam mají
+    # nesplněná kritéria body=0 po normalizaci).
+    if expected_criteria_bodies:
+        parsed['max_skore'] = sum(expected_criteria_bodies.values())
 
 
 def _check_partial_recovery(parsed: dict, expected_criteria_names: list[str], prefix: str) -> None:
@@ -205,7 +213,7 @@ def _check_partial_recovery(parsed: dict, expected_criteria_names: list[str], pr
         "lost": lost,
         "reason": reason,
     }
-    print(f"{prefix}⚠ PARTIAL RECOVERY: {recovered}/{expected_count} kritérií ({reason})")
+    logger.warning(f"{prefix}⚠ PARTIAL RECOVERY: {recovered}/{expected_count} kritérií ({reason})")
 
 
 def _sanitize_json_string_values(text: str) -> str:
@@ -382,7 +390,7 @@ async def _llm_call_with_overflow_retry(client, kwargs: dict, prefix: str) -> ob
                 limit = int(m.group(1))
                 input_tokens = int(m.group(2))
                 safe_tokens = max(512, limit - input_tokens - 300)
-                print(f"{prefix}Context overflow ({input_tokens}+{kwargs['max_tokens']}>{limit})"
+                logger.warning(f"{prefix}Context overflow ({input_tokens}+{kwargs['max_tokens']}>{limit})"
                       f" — retry s max_tokens={safe_tokens}")
                 retry_kwargs = {**kwargs, "max_tokens": safe_tokens}
                 return await client.chat.completions.create(**retry_kwargs)
@@ -416,10 +424,37 @@ def _build_llm_kwargs(platform: str, enable_thinking: bool, context_window: int,
             "enable_thinking": enable_thinking,
             "chat_template_kwargs": {"enable_thinking": enable_thinking}
         }
+    elif platform == "openrouter":
+        extra["extra_body"] = {
+            "reasoning": {"enabled": enable_thinking},
+            "chat_template_kwargs": {"enable_thinking": enable_thinking},
+        }
     elif platform == "ollama":
         extra["extra_body"] = {"num_ctx": context_window}
-    # openrouter, openai, lmstudio — žádné proprietární extra_body
+    # openai, lmstudio — žádné proprietární extra_body
     return extra
+
+PLATFORM_CONTEXT_DEFAULTS: dict[str, int] = {
+    "vllm": 131072,
+    "openrouter": 8192,
+    "ollama": 8192,
+    "openai": 128000,
+    "lmstudio": 8192,
+}
+
+
+def _estimate_tokens(text: str) -> int:
+    """Odhadne počet tokenů podle délky textu (~3,5 znaku/token pro češtinu)."""
+    return max(1, int(len(text) / 3.5))
+
+
+def _get_setting(db: "Session", key: str, default: str) -> str:
+    """Čte AppSettings z DB; pokud klíč neexistuje nebo je prázdný, vrátí default."""
+    row = db.query(AppSettings).filter(AppSettings.key == key).first()
+    if row and row.value:
+        return row.value
+    return default
+
 
 CRITERIA_DELIMITER = "#############"
 """Unikátní oddělovač jednotlivých kritérií v promptu (od v3.9.6).
@@ -530,20 +565,20 @@ Požadovaná struktura JSON odpovědi:
     kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
 
     chunk_prefix = f"{prefix}[chunk {chunk_idx}] "
-    print(f"{chunk_prefix}n_criteria={n_criteria}, max_tokens={chunk_max_tokens}")
+    logger.info(f"{chunk_prefix}n_criteria={n_criteria}, max_tokens={chunk_max_tokens}")
 
     async def _call_and_parse(call_kwargs: dict, attempt_label: str) -> dict:
         response = await _llm_call_with_overflow_retry(client, call_kwargs, chunk_prefix)
         msg_content = response.choices[0].message.content or ""
         raw = msg_content.strip()
         reasoning = getattr(response.choices[0].message, 'reasoning', None)
-        print(f"{chunk_prefix}[{attempt_label}] content_len={len(raw)}, reasoning_len={len(reasoning) if reasoning else 0}")
+        logger.info(f"{chunk_prefix}[{attempt_label}] content_len={len(raw)}, reasoning_len={len(reasoning) if reasoning else 0}")
 
         clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
         s = clean_text.find('{')
         e = clean_text.rfind('}')
         if s == -1 or e == -1 or s > e:
-            print(f"{chunk_prefix}[{attempt_label}] CRITICAL: JSON nenalezen")
+            logger.error(f"{chunk_prefix}[{attempt_label}] CRITICAL: JSON nenalezen")
             return {"identita": {}, "vysledky": []}
 
         json_slice = clean_text[s:e + 1]
@@ -552,15 +587,15 @@ Požadovaná struktura JSON odpovědi:
         except json.JSONDecodeError as err:
             # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
             dump_path = _dump_raw_llm_output(f"{chunk_prefix}{attempt_label}", json_slice, err)
-            print(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — sanitizace stringů (raw: {dump_path})")
+            logger.warning(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — sanitizace stringů (raw: {dump_path})")
             sanitized = _sanitize_json_string_values(json_slice)
             try:
                 result = json.loads(sanitized)
-                print(f"{chunk_prefix}[{attempt_label}] JSON opraven sanitizací ✓")
+                logger.info(f"{chunk_prefix}[{attempt_label}] JSON opraven sanitizací ✓")
                 return result
             except json.JSONDecodeError:
                 # Pokus 3: strukturální oprava pro zkrácený JSON
-                print(f"{chunk_prefix}[{attempt_label}] sanitizace nestačila — pokus o strukturální opravu")
+                logger.warning(f"{chunk_prefix}[{attempt_label}] sanitizace nestačila — pokus o strukturální opravu")
                 repaired = _repair_truncated_json(sanitized)
                 if repaired:
                     repaired['_json_repaired'] = True
@@ -572,20 +607,20 @@ Požadovaná struktura JSON odpovědi:
     # RETRY: pokud chunk vrátil méně kritérií než měl, zkusíme ještě jednou
     # s mírně vyšší teplotou (variabilita může pomoct vyhnout se stejné JSON chybě).
     if recovered < n_criteria:
-        print(f"{chunk_prefix}neúplný výsledek: {recovered}/{n_criteria} — RETRY s temperature=0.3")
+        logger.warning(f"{chunk_prefix}neúplný výsledek: {recovered}/{n_criteria} — RETRY s temperature=0.3")
         retry_kwargs = dict(kwargs)
         retry_kwargs["temperature"] = 0.3
         try:
             retry_parsed = await _call_and_parse(retry_kwargs, "retry")
             if len(retry_parsed.get('vysledky', [])) > recovered:
-                print(f"{chunk_prefix}retry úspěšný: {len(retry_parsed.get('vysledky', []))}/{n_criteria} (původně {recovered})")
+                logger.info(f"{chunk_prefix}retry úspěšný: {len(retry_parsed.get('vysledky', []))}/{n_criteria} (původně {recovered})")
                 parsed = retry_parsed
             else:
-                print(f"{chunk_prefix}retry nepomohl ({len(retry_parsed.get('vysledky', []))}/{n_criteria}), ponechávám původní")
+                logger.warning(f"{chunk_prefix}retry nepomohl ({len(retry_parsed.get('vysledky', []))}/{n_criteria}), ponechávám původní")
         except Exception as retry_err:
-            print(f"{chunk_prefix}retry selhal: {retry_err} — ponechávám původní {recovered}/{n_criteria}")
+            logger.warning(f"{chunk_prefix}retry selhal: {retry_err} — ponechávám původní {recovered}/{n_criteria}")
 
-    print(f"{chunk_prefix}{len(parsed.get('vysledky', []))} kritérií OK")
+    logger.info(f"{chunk_prefix}{len(parsed.get('vysledky', []))} kritérií OK")
     return parsed
 
 
@@ -610,7 +645,7 @@ async def _generate_individual_feedback(
     from models.db_models import SystemPrompt as _SystemPrompt
     prompt_record = db.query(_SystemPrompt).filter(_SystemPrompt.phase_name == "prompt_feedback").first()
     if not prompt_record or not prompt_record.content.strip():
-        print(f"{prefix}[feedback] Prompt 'prompt_feedback' nenalezen v DB — zpětná vazba přeskočena")
+        logger.info(f"{prefix}[feedback] Prompt 'prompt_feedback' nenalezen v DB — zpětná vazba přeskočena")
         return ""
 
     system_prompt = prompt_record.content
@@ -648,15 +683,15 @@ async def _generate_individual_feedback(
     }
     kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, response_format_json=False))
 
-    print(f"{prefix}[feedback] Generuji individuální zpětnou vazbu ({len(splnena)} splněno, {len(nesplnena)} nesplněno)...")
+    logger.info(f"{prefix}[feedback] Generuji individuální zpětnou vazbu ({len(splnena)} splněno, {len(nesplnena)} nesplněno)...")
     try:
         response = await _llm_call_with_overflow_retry(client, kwargs, f"{prefix}[feedback] ")
         feedback = (response.choices[0].message.content or "").strip()
         feedback = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", feedback, flags=re.DOTALL | re.IGNORECASE).strip()
-        print(f"{prefix}[feedback] OK ({len(feedback)} znaků)")
+        logger.info(f"{prefix}[feedback] OK ({len(feedback)} znaků)")
         return feedback
     except Exception as e:
-        print(f"{prefix}[feedback] Chyba při generování: {e}")
+        logger.error(f"{prefix}[feedback] Chyba při generování: {e}")
         return ""
 
 
@@ -742,7 +777,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     platform = _resolve_platform(raw_platform, api_url)
 
     prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
-    print(f"{prefix}LLM volání: platform={platform}, url={api_url}, model={model_name}")
+    logger.info(f"{prefix}LLM volání: platform={platform}, url={api_url}, model={model_name}")
 
     client = AsyncOpenAI(
         base_url=api_url,
@@ -753,13 +788,18 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     
     strict_system_prompt = system_prompt
 
-    # CHUNKING: Pokud je kritérií více než CHUNK_SIZE, rozdělíme je a zpracujeme paralelně.
-    # Každý chunk → samostatný vLLM request → vLLM continuous batching → maximální využití GPU.
-    # chunk_size=6: menší JSON pole → méně chyb struktury (model spolehlivěji dokončí všechna kritéria).
-    CHUNK_SIZE = 6
-    chunks = _split_criteria_chunks(criteria_markdown, CHUNK_SIZE)
+    # ADAPTIVNÍ CHUNKING: pokud celý prompt + ÚZ + kritéria + max_tokens vejde do kontextového okna,
+    # pošleme vše v jednom volání (méně HTTP roundtripů, méně chyb merge).
+    # Pro modely s 8k kontextem (legacy OpenRouter) chunking zůstane aktivní.
+    chunk_size = int(_get_setting(db, "CHUNK_SIZE", "6"))
+    threshold_pct = float(_get_setting(db, "CHUNK_THRESHOLD_TOKENS_PCT", "0.7"))
+    ctx = context_window or PLATFORM_CONTEXT_DEFAULTS.get(platform, 8192)
+    budget = int(ctx * threshold_pct)
+    est = _estimate_tokens(strict_system_prompt + report_text + criteria_markdown) + max_tokens
+    logger.info(f"{prefix}Token odhad: est={est}, budget={budget} ({threshold_pct*100:.0f}% z ctx={ctx}) → {'single-call' if est <= budget else f'chunking ({chunk_size}/chunk)'}")
+    chunks = [criteria_markdown] if est <= budget else _split_criteria_chunks(criteria_markdown, chunk_size)
     if len(chunks) > 1:
-        print(f"{prefix}Chunking: {len(chunks)} chunks á max {CHUNK_SIZE} kritérií — asyncio.gather")
+        logger.info(f"{prefix}Chunking: {len(chunks)} chunks á max {chunk_size} kritérií — asyncio.gather")
         tasks = [
             _evaluate_chunk(
                 client=client,
@@ -781,7 +821,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         ]
         chunk_results = await asyncio.gather(*tasks)
         merged = _merge_chunk_results(list(chunk_results))
-        print(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
+        logger.info(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
         # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
         if expected_criteria_names:
             _validate_and_fix_vysledky(merged, expected_criteria_names, prefix, expected_criteria_bodies)
@@ -838,7 +878,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     NEPIŠ ŽÁDNÝ JINÝ TEXT OKOLO, ŽÁDNÉ VYSVĚTLIVKY ANI MARKDOWN BLOKY (např. ```json).
     """
 
-    # print(f"{prefix}FINAL PROMPT TO LLM:\n{user_prompt}\n<<< END OF PROMPT")
+    if logger.isEnabledFor(logging.DEBUG): logger.debug(f"{prefix}FINAL PROMPT TO LLM:\n{user_prompt}\n<<< END OF PROMPT")
 
     try:
         kwargs = {
@@ -867,9 +907,9 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
 
         # Logování délky surové odpovědi pro diagnostiku
         reasoning = getattr(response.choices[0].message, 'reasoning', None)
-        print(f"{prefix}LLM odpověď: content_len={len(raw_response)}, reasoning_len={len(reasoning) if reasoning else 0}")
+        logger.info(f"{prefix}LLM odpověď: content_len={len(raw_response)}, reasoning_len={len(reasoning) if reasoning else 0}")
         if not raw_response:
-            print(f"{prefix}VAROVÁNÍ: content je prázdný! model={model_name}, reasoning={'ANO' if reasoning else 'NE'}")
+            logger.warning(f"{prefix}VAROVÁNÍ: content je prázdný! model={model_name}, reasoning={'ANO' if reasoning else 'NE'}")
 
         # ODSTRANĚNÍ THOUGHT BLOKŮ: Některé modely (jako Qwen nebo DeepSeek) píší své "myšlenky" mezi <think> a </think>.
         clean_text = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", raw_response, flags=re.DOTALL|re.IGNORECASE).strip()
@@ -879,7 +919,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         end_idx = clean_text.rfind('}')
 
         if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
-            print(f"{prefix}CRITICAL ERROR: Odpověď LLM neobsahuje JSON (chybí {{ nebo }}). RAW RESPONSE (first 500):\n{raw_response[:500]}\n--- END RAW ---")
+            logger.error(f"{prefix}CRITICAL ERROR: Odpověď LLM neobsahuje JSON (chybí {{ nebo }}). RAW RESPONSE (first 500):\n{raw_response[:500]}\n--- END RAW ---")
             raise ValueError("V odpovědi LLM nebyl nalezen žádný JSON objekt.")
 
         clean_response = clean_text[start_idx:end_idx+1]
@@ -888,22 +928,22 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         except json.JSONDecodeError as e:
             # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
             dump_path = _dump_raw_llm_output(prefix, clean_response, e)
-            print(f"{prefix}JSON parse error: {e} — sanitizace stringů (raw: {dump_path})")
+            logger.warning(f"{prefix}JSON parse error: {e} — sanitizace stringů (raw: {dump_path})")
             sanitized = _sanitize_json_string_values(clean_response)
             try:
                 parsed = json.loads(sanitized)
-                print(f"{prefix}JSON opraven sanitizací ✓")
+                logger.info(f"{prefix}JSON opraven sanitizací ✓")
             except json.JSONDecodeError:
-                print(f"{prefix}Sanitizace nestačila — pokus o strukturální opravu zkráceného JSON")
+                logger.warning(f"{prefix}Sanitizace nestačila — pokus o strukturální opravu zkráceného JSON")
                 parsed = _repair_truncated_json(sanitized)
                 if parsed:
                     parsed['_json_repaired'] = True
-                    print(f"{prefix}JSON obnoven: {len(parsed.get('vysledky', []))} kritérií zachráněno")
+                    logger.info(f"{prefix}JSON obnoven: {len(parsed.get('vysledky', []))} kritérií zachráněno")
                 else:
-                    print(f"{prefix}Oprava selhala. Raw Response:\n{raw_response}")
+                    logger.error(f"{prefix}Oprava selhala. Raw Response:\n{raw_response}")
                     raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
 
-        print(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
+        logger.info(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
         # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
         # _validate_and_fix_vysledky zároveň normalizuje body z DB a přepočítá celkove_skore.
         if expected_criteria_names:
@@ -930,7 +970,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         return parsed
 
     except Exception as e:
-        print(f"{prefix}Error communicating with vLLM at {api_url}: {e}")
+        logger.error(f"{prefix}Error communicating with vLLM at {api_url}: {e}")
         raise
 
 async def extract_identity(report_text: str, db: Session, student_log_prefix: str = "", lecturer_id: int = None) -> dict:
@@ -984,7 +1024,7 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
         http_client=httpx.AsyncClient(timeout=60.0)
     )
     
-    print(f"[FAST-SCAN] platform={platform}, model={model_name}")
+    logger.info(f"[FAST-SCAN] platform={platform}, model={model_name}")
 
     system_prompt = "Jsi asistent pro vytěžování dat z textu. Tvým úkolem je najít jméno, příjmení a hodnost studenta."
     
@@ -1031,7 +1071,7 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
 
         msg_content = response.choices[0].message.content
         if not msg_content:
-            print(f"[FAST-SCAN] Model vrátil prázdnou odpověď (content=None). Model: {model_name}")
+            logger.warning(f"[FAST-SCAN] Model vrátil prázdnou odpověď (content=None). Model: {model_name}")
             return {}
         
         raw_response = msg_content.strip()
@@ -1040,17 +1080,17 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
         start_idx = clean_text.find('{')
         end_idx = clean_text.rfind('}')
         if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
-            print(f"[FAST-SCAN] Missing JSON object. RAW: {raw_response}")
+            logger.warning(f"[FAST-SCAN] Missing JSON object. RAW: {raw_response}")
             return {}
             
         clean_response = clean_text[start_idx:end_idx+1]
         data = json.loads(clean_response)
         identity = data.get("identita", {})
         if identity:
-            print(f"[FAST-SCAN] Identita nalezena: {identity}")
+            logger.info(f"[FAST-SCAN] Identita nalezena: {identity}")
         return identity
     except Exception as e:
-        print(f"Fast-scan identity exception: {e}")
+        logger.error(f"Fast-scan identity exception: {e}")
         return {}
 
 async def chat_completion(messages: list, system_prompt: str, temperature: float, db: Session, phase: str = None) -> str:
@@ -1111,7 +1151,7 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
     max_tokens = int(db_max_tokens.value) if db_max_tokens and db_max_tokens.value else 6000
     context_window = int(db_context.value) if db_context and db_context.value else 8192
     
-    print(f">>> LLM volání směřuje na: {api_url} s modelem: {model_name}")
+    logger.info(f">>> LLM volání směřuje na: {api_url} s modelem: {model_name}")
 
     client = AsyncOpenAI(
         base_url=api_url,
@@ -1144,5 +1184,5 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
         response = await _llm_call_with_overflow_retry(client, kwargs, f"[chat_completion phase={phase or 'Global'}] ")
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"Error in chat_completion with vLLM at {api_url}: {e}")
+        logger.error(f"Error in chat_completion with vLLM at {api_url}: {e}")
         raise ValueError(f"Nepodařilo se spojit s LLM: {str(e)}")

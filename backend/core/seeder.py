@@ -106,4 +106,10 @@ def seed_database(db: Session):
     if not db.query(AppSettings).filter(AppSettings.key == "ANALYTICS_THRESHOLD").first():
         db.add(AppSettings(key="ANALYTICS_THRESHOLD", value="80"))
 
+    if not db.query(AppSettings).filter(AppSettings.key == "CHUNK_SIZE").first():
+        db.add(AppSettings(key="CHUNK_SIZE", value="6"))
+
+    if not db.query(AppSettings).filter(AppSettings.key == "CHUNK_THRESHOLD_TOKENS_PCT").first():
+        db.add(AppSettings(key="CHUNK_THRESHOLD_TOKENS_PCT", value="0.7"))
+
     db.commit()

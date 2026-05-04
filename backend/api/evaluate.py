@@ -24,6 +24,7 @@ logger = logging.getLogger("evaluz.evaluate")
 from services.doc_parser import extract_text
 from services.llm_engine import evaluate_report, extract_identity
 from services.security_scanner import scanner, SecurityException
+from utils.text import clean_filename_to_display
 from models.evaluation import EvaluationResponse, CriterionResult, BatchEvaluationResponse
 from pydantic import BaseModel
 from services.evaluation_queue import eval_queue
@@ -162,7 +163,7 @@ async def fast_scan_batch(
                 cleaned_display_name = f"{prijmeni} {jmeno}".strip()
             else:
                 # Pokud AI jméno nenašla, použijeme název souboru
-                cleaned_display_name = file.filename.rsplit('.', 1)[0]
+                cleaned_display_name = clean_filename_to_display(file.filename)
             
             # Najít nebo vytvořit třídu dle jména poslaného z frontendu.
             target_name = class_name.strip() or "Základní kurz"
@@ -279,11 +280,17 @@ async def evaluate_batch(
             detail=f"Kritéria pro ({scenario_id}) nebyla správně rozparsována. Uložte je prosím znovu v Nastavení kritérií."
         )
 
+    from services.llm_engine import CRITERIA_DELIMITER as _DELIM
     criteria_lines = []
     expected_criteria_names = []
     expected_criteria_bodies: dict[str, int] = {}
     for i, crit in enumerate(individual_criteria, 1):
-        crit_text = f"**{i}. Kritérium: {crit.nazev}**\n{crit.popis}\nBodů za splnění: {crit.body}"
+        import re as _re
+        # v3.9.9: Legacy parser (regex-based) ukládal popis s trailing `#############`
+        # (delimiter se nacházel mezi kritérii v markdown_content a byl zahrnut do bloku).
+        # Čistíme popis od všech výskytů delimiteru — nesmí kontaminovat criteria_str.
+        popis_clean = _re.sub(r'\s*#############\s*', ' ', crit.popis).strip()
+        crit_text = f"**{i}. Kritérium: {crit.nazev}**\n{popis_clean}\nBodů za splnění: {crit.body}"
         criteria_lines.append(crit_text)
         expected_criteria_names.append(crit.nazev)
         # Autoritativní bodová hodnota z DB — model ji nesmí měnit (viz v3.9.8 fix)
@@ -407,15 +414,15 @@ async def evaluate_batch(
                 elif prijmeni:
                     cleaned_eval_name = prijmeni.capitalize()
                 else:
-                    base_name = student_name.rsplit('.', 1)[0]
-                    import re
-                    clean_base = re.sub(r'(?i)\b(?:úz|uz|vtos|-)\b', '', base_name)
-                    cleaned_eval_name = re.sub(r'\s+', ' ', clean_base).strip()
+                    cleaned_eval_name = clean_filename_to_display(student_name)
                 
                 if existing_eval:
                     existing_eval.json_result = llm_result_dict
                     existing_eval.is_approved = False  # Re-evaluace zruší předchozí schválení
-                    if existing_eval.student_identity and identita and not "prijmeni" in (existing_eval.student_identity or {}):
+                    prev_identity = existing_eval.student_identity or {}
+                    has_new = bool(identita.get("prijmeni", "").strip())
+                    prev_has = bool(prev_identity.get("prijmeni", "").strip())
+                    if has_new and not prev_has:
                          existing_eval.student_identity = identita
                          existing_eval.cleaned_name = cleaned_eval_name
                     # Aktualizuj scenario_display_name pokud zatím není uložen
