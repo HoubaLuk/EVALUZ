@@ -669,7 +669,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
     presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
     frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
-    context_window = int(db_context.value) if db_context and db_context.value else 8192
+    context_window = int(db_context.value) if db_context and db_context.value else None
     max_tokens = int(db_max_tokens.value) if db_max_tokens and db_max_tokens.value else 4096
 
     if not api_url or not model_name:
@@ -691,7 +691,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
         http_client=httpx.AsyncClient(timeout=300.0)
     )
-    
+
     strict_system_prompt = system_prompt
 
     # ADAPTIVNÍ CHUNKING: pokud celý prompt + ÚZ + kritéria + max_tokens vejde do kontextového okna,

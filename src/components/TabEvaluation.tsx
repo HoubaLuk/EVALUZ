@@ -1140,7 +1140,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     )}
                                     <button
                                         title="Přejít nahoru — otevřít další hodnocení"
-                                        onClick={() => studentListScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+                                        onClick={() => {
+                                            studentListScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                                            evalDetailScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                                        }}
                                         style={{
                                             marginLeft: 8,
                                             width: 38, height: 38,
