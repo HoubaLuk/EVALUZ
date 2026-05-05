@@ -14,6 +14,10 @@ E2 scénáře:
   6. test_chunking_single_call_when_under_threshold  — malý prompt → 1 LLM call
   7. test_chunking_falls_back_when_over_threshold    — přetečení → chunking aktivní
   8. test_chunking_respects_chunk_size_setting       — CHUNK_SIZE=2 → více chunků
+
+E6 scénáře:
+  2. test_evaluate_truncated_json_raises             — uříznutý JSON → ValueError (fail-fast)
+  4b. test_no_partial_recovery_flag_anywhere         — _partial_recovery flag nikdy nepřítomen
 """
 
 import pytest
@@ -69,31 +73,32 @@ async def test_evaluate_clean_single_call(db: Session, mock_llm):
     assert not result.get("_partial_recovery")
 
 
-# ── Test 2: uříznutý JSON → oprava ───────────────────────────────────────────
+# ── Test 2: uříznutý JSON → fail-fast (E6: _repair_truncated_json smazána) ───
 
 @pytest.mark.asyncio
-async def test_evaluate_truncated_json_recovers(db: Session, mock_llm):
-    """LLM vrátí uříznutý JSON → pipeline ho opraví a přidá _json_repaired=True."""
+async def test_evaluate_truncated_json_raises(db: Session, mock_llm):
+    """Po E6: uříznutý JSON (sanitizace nestačí) → ValueError (fail-fast, ne recovery).
+
+    S 128k kontextem je truncace prakticky nemožná → half-repaired výsledek
+    je horší než čistá chyba, která vynutí re-evaluaci.
+    """
     names = build_expected_names(CRITERIA_3)
     bodies = build_expected_bodies(CRITERIA_3)
 
     mock_llm.respond_truncated(names)
 
-    with mock_llm:
-        result = await evaluate_report(
-            report_text=SAMPLE_REPORT_TEXT,
-            criteria_markdown=_build_criteria_markdown(CRITERIA_3),
-            system_prompt="Vyhodnoť ÚZ.",
-            db=db,
-            scenario_id="scen-test-3",
-            student_log_prefix="truncated_test",
-            expected_criteria_names=names,
-            expected_criteria_bodies=bodies,
-        )
-
-    assert result.get("_json_repaired") is True, (
-        "Očekáváno _json_repaired=True pro uříznutý JSON"
-    )
+    with pytest.raises((ValueError, Exception)):
+        with mock_llm:
+            await evaluate_report(
+                report_text=SAMPLE_REPORT_TEXT,
+                criteria_markdown=_build_criteria_markdown(CRITERIA_3),
+                system_prompt="Vyhodnoť ÚZ.",
+                db=db,
+                scenario_id="scen-test-3",
+                student_log_prefix="truncated_test",
+                expected_criteria_names=names,
+                expected_criteria_bodies=bodies,
+            )
 
 
 # ── Test 3: 12 kritérií, chunking, chybějící kritérium → placeholder ─────────
@@ -139,16 +144,19 @@ async def test_evaluate_chunked_missing_criterion(db: Session, mock_llm):
     assert placeholder["body"] == 0
 
 
-# ── Test 4: partial recovery flag ────────────────────────────────────────────
+# ── Test 4: chybějící kritéria → placeholdery (po E6: bez _partial_recovery flagu) ──
 
 @pytest.mark.asyncio
-async def test_partial_recovery_flag_in_response(db: Session, mock_llm):
-    """6 kritérií v jednom volání, LLM vrátí pouze 4 → _partial_recovery metadata."""
+async def test_missing_criteria_get_placeholders(db: Session, mock_llm):
+    """6 kritérií, LLM vrátí pouze 4 → 2 placeholdery s _llm_omitted=True.
+
+    Po E6: _partial_recovery flag neexistuje (smazán spolu s _check_partial_recovery).
+    Placeholdery zůstávají — _validate_and_fix_vysledky je přidává vždy.
+    """
     names = build_expected_names(CRITERIA_6)
     bodies = build_expected_bodies(CRITERIA_6)
 
-    missing = names[4:]  # Vynecháme poslední 2 kritéria
-    present = names[:4]
+    missing = names[4:]
 
     mock_llm.respond_chunk_pattern(
         chunks=[names],
@@ -167,11 +175,42 @@ async def test_partial_recovery_flag_in_response(db: Session, mock_llm):
             expected_criteria_bodies=bodies,
         )
 
-    pr = result.get("_partial_recovery")
-    assert pr is not None, "Očekáváno _partial_recovery metadata v odpovědi"
-    assert pr["expected"] == len(CRITERIA_6)
-    assert pr["lost"] == len(missing)
-    assert pr["recovered"] == len(present)
+    assert "_partial_recovery" not in result, "E6: _partial_recovery flag byl smazán"
+    omitted = [v for v in result["vysledky"] if v.get("_llm_omitted")]
+    assert len(omitted) == len(missing)
+    assert len(result["vysledky"]) == len(CRITERIA_6)
+
+
+# ── Test 4b: _partial_recovery flag nesmí být v žádné odpovědi (E6 smazal _check_partial_recovery) ─
+
+@pytest.mark.asyncio
+async def test_no_partial_recovery_flag_anywhere(db: Session, mock_llm):
+    """Po E6: _check_partial_recovery byla smazána → _partial_recovery flag se nikdy neobjeví."""
+    names = build_expected_names(CRITERIA_6)
+    bodies = build_expected_bodies(CRITERIA_6)
+
+    # Simulujeme LLM, které vrátí jen 4/6 kritérií
+    missing = names[4:]
+    mock_llm.respond_chunk_pattern(chunks=[names], missing_per_chunk=[missing])
+
+    with mock_llm:
+        result = await evaluate_report(
+            report_text=SAMPLE_REPORT_TEXT,
+            criteria_markdown=_build_criteria_markdown(CRITERIA_6),
+            system_prompt="Vyhodnoť ÚZ.",
+            db=db,
+            scenario_id="scen-test-6",
+            student_log_prefix="no_partial_test",
+            expected_criteria_names=names,
+            expected_criteria_bodies=bodies,
+        )
+
+    assert "_partial_recovery" not in result, (
+        "_partial_recovery flag nesmí existovat — _check_partial_recovery byla smazána v E6"
+    )
+    # Placeholdery stále jsou přítomny (_llm_omitted=True), ale bez metadata flagu
+    omitted = [v for v in result["vysledky"] if v.get("_llm_omitted")]
+    assert len(omitted) == len(missing), f"Očekáváno {len(missing)} placeholder(ů)"
 
 
 # ── Test 5: fast-scan identity → full eval NEPŘEPÍŠE cleaned_name (regression guard) ─

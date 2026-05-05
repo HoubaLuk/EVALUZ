@@ -187,11 +187,15 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             identita: evalRecord.identita,
                             status: finalStatus,
                             score: evalRecord.celkove_skore,
-                            maxScore: evalRecord.vysledky ? evalRecord.vysledky.length : 0,
+                            // v3.9.10: maxScore = součet body všech kritérií (autoritativní z DB).
+                            // Dříve byl maxScore = počet kritérií, což matečně neodpovídalo součtu bodů
+                            // u kritérií s body>1 (UI ukázalo 19/25 místo 19/27).
+                            maxScore: evalRecord.max_skore ?? (evalRecord.vysledky
+                                ? evalRecord.vysledky.reduce((sum: number, v: { body?: number, splneno?: boolean }) => sum + (v.splneno ? (Number(v.body) || 1) : 1), 0)
+                                : 0),
                             evaluationDetails: evalRecord.vysledky,
                             zpetna_vazba: evalRecord.zpetna_vazba,
                             is_approved: evalRecord.is_approved ?? false,
-                            partial_recovery: evalRecord.json_result?._partial_recovery ?? null,
                         };
                     });
 
@@ -905,13 +909,6 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                 <Icon icon={faCircleExclamation} size="xs" /> Nezpracováno
                                             </span>
                                         )}
-                                        {student.partial_recovery && (
-                                            <Tooltip content={`LLM/parser ztratil ${student.partial_recovery.lost} z ${student.partial_recovery.expected} kritérií. Doporučujeme re-evaluaci.`}>
-                                                <span className="badge badge--warning" style={{ fontSize: '0.7rem', cursor: 'help' }}>
-                                                    <Icon icon={faTriangleExclamation} size="xs" /> {student.partial_recovery.recovered}/{student.partial_recovery.expected}
-                                                </span>
-                                            </Tooltip>
-                                        )}
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger asChild>
                                                 <button className="btn btn--sm btn--icon-only btn--outline" onClick={(e) => e.stopPropagation()} style={{ opacity: student.status === 'evaluating' ? 0.4 : 1 }}>
@@ -965,16 +962,6 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                     </div>
                                 </div>
                             </div>
-
-                            {/* Partial recovery warning */}
-                            {activeStudentData.partial_recovery && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'var(--color-warning-bg, #fff8e1)', border: '1px solid var(--color-warning, #f59e0b)', borderRadius: 6, fontSize: '0.82rem', color: 'var(--color-warning-text, #92400e)' }}>
-                                    <Icon icon={faTriangleExclamation} />
-                                    <span>
-                                        Hodnocení je <strong>neúplné</strong> — LLM nebo parser ztratil <strong>{activeStudentData.partial_recovery.lost}</strong> z <strong>{activeStudentData.partial_recovery.expected}</strong> kritérií. Doporučujeme spustit re-evaluaci.
-                                    </span>
-                                </div>
-                            )}
 
                             {/* AI Evaluation Table */}
                             <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

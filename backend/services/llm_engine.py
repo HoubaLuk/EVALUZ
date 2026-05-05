@@ -195,26 +195,6 @@ def _validate_and_fix_vysledky(
         parsed['max_skore'] = sum(expected_criteria_bodies.values())
 
 
-def _check_partial_recovery(parsed: dict, expected_criteria_names: list[str], prefix: str) -> None:
-    """FIX C: Detekuje ztrátu kritérií (po FIX A) a vloží _partial_recovery metadata do parsed.
-
-    Předpokládá, že _validate_and_fix_vysledky již proběhl — hledá položky s _llm_omitted=True.
-    """
-    omitted = [v for v in parsed.get('vysledky', []) if v.get('_llm_omitted')]
-    if not omitted:
-        return
-    expected_count = len(expected_criteria_names)
-    lost = len(omitted)
-    recovered = expected_count - lost
-    reason = "json_repair" if parsed.get('_json_repaired') else "llm_omitted"
-    parsed['_partial_recovery'] = {
-        "expected": expected_count,
-        "recovered": recovered,
-        "lost": lost,
-        "reason": reason,
-    }
-    logger.warning(f"{prefix}⚠ PARTIAL RECOVERY: {recovered}/{expected_count} kritérií ({reason})")
-
 
 def _sanitize_json_string_values(text: str) -> str:
     """
@@ -232,7 +212,7 @@ def _sanitize_json_string_values(text: str) -> str:
       jde o konec stringu. Jinak jde o interní uvozovku → escapujeme na \".
     - Literální \\n, \\r, \\t uvnitř stringů jsou také escapovány.
 
-    Volá se jako druhý pokus po selhání json.loads() a před _repair_truncated_json().
+    Volá se jako druhý pokus po selhání json.loads().
     """
     JSON_STRUCTURAL = frozenset('{[]},:')
     result = []
@@ -317,59 +297,6 @@ def _sanitize_json_string_values(text: str) -> str:
 
     return ''.join(result)
 
-
-def _repair_truncated_json(text: str) -> dict | None:
-    """
-    Pokusí se obnovit JSON oříznutý LLM tokenovým limitem.
-    Najde všechny kompletní záznamy v poli 'vysledky' a sestaví validní JSON.
-    """
-    vysledky_match = re.search(r'"vysledky"\s*:\s*\[', text)
-    if not vysledky_match:
-        return None
-
-    arr_start = vysledky_match.end()
-    entries = []
-    depth = 0
-    entry_start = None
-
-    for i, c in enumerate(text[arr_start:], arr_start):
-        if c == '{':
-            if depth == 0:
-                entry_start = i
-            depth += 1
-        elif c == '}':
-            depth -= 1
-            if depth == 0 and entry_start is not None:
-                try:
-                    entries.append(json.loads(text[entry_start:i + 1]))
-                except Exception:
-                    # Druhý pokus: sanitizace uvozovek uvnitř bloku
-                    try:
-                        sanitized_block = _sanitize_json_string_values(text[entry_start:i + 1])
-                        entries.append(json.loads(sanitized_block))
-                    except Exception:
-                        pass
-                entry_start = None
-
-    if not entries:
-        return None
-
-    try:
-        identita_match = re.search(r'"identita"\s*:\s*(\{[^}]+\})', text)
-        identita = json.loads(identita_match.group(1)) if identita_match else {}
-    except Exception:
-        identita = {}
-
-    total_score = sum(
-        e.get("body", 0) for e in entries
-        if isinstance(e.get("body"), (int, float))
-    )
-    return {
-        "identita": identita,
-        "vysledky": entries,
-        "celkove_skore": total_score,
-        "zpetna_vazba": f"[Odpověď modelu byla zkrácena tokenovým limitem — obnoveno {len(entries)} kritérií]",
-    }
 
 
 async def _llm_call_with_overflow_retry(client, kwargs: dict, prefix: str) -> object:
@@ -585,41 +512,20 @@ Požadovaná struktura JSON odpovědi:
         try:
             return json.loads(json_slice)
         except json.JSONDecodeError as err:
-            # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
-            dump_path = _dump_raw_llm_output(f"{chunk_prefix}{attempt_label}", json_slice, err)
-            logger.warning(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — sanitizace stringů (raw: {dump_path})")
+            if logger.isEnabledFor(logging.DEBUG):
+                dump_path = _dump_raw_llm_output(f"{chunk_prefix}{attempt_label}", json_slice, err)
+                logger.debug(f"{chunk_prefix}[{attempt_label}] raw dump: {dump_path}")
+            logger.warning(f"{chunk_prefix}[{attempt_label}] JSON parse error: {err} — sanitizace stringů")
             sanitized = _sanitize_json_string_values(json_slice)
             try:
                 result = json.loads(sanitized)
                 logger.info(f"{chunk_prefix}[{attempt_label}] JSON opraven sanitizací ✓")
                 return result
             except json.JSONDecodeError:
-                # Pokus 3: strukturální oprava pro zkrácený JSON
-                logger.warning(f"{chunk_prefix}[{attempt_label}] sanitizace nestačila — pokus o strukturální opravu")
-                repaired = _repair_truncated_json(sanitized)
-                if repaired:
-                    repaired['_json_repaired'] = True
-                return repaired or {"identita": {}, "vysledky": []}
+                logger.error(f"{chunk_prefix}[{attempt_label}] sanitizace nestačila — chunk selhal")
+                raise ValueError(f"Chunk {chunk_idx}: model nevrátil validní JSON.")
 
     parsed = await _call_and_parse(kwargs, "try1")
-    recovered = len(parsed.get('vysledky', []))
-
-    # RETRY: pokud chunk vrátil méně kritérií než měl, zkusíme ještě jednou
-    # s mírně vyšší teplotou (variabilita může pomoct vyhnout se stejné JSON chybě).
-    if recovered < n_criteria:
-        logger.warning(f"{chunk_prefix}neúplný výsledek: {recovered}/{n_criteria} — RETRY s temperature=0.3")
-        retry_kwargs = dict(kwargs)
-        retry_kwargs["temperature"] = 0.3
-        try:
-            retry_parsed = await _call_and_parse(retry_kwargs, "retry")
-            if len(retry_parsed.get('vysledky', [])) > recovered:
-                logger.info(f"{chunk_prefix}retry úspěšný: {len(retry_parsed.get('vysledky', []))}/{n_criteria} (původně {recovered})")
-                parsed = retry_parsed
-            else:
-                logger.warning(f"{chunk_prefix}retry nepomohl ({len(retry_parsed.get('vysledky', []))}/{n_criteria}), ponechávám původní")
-        except Exception as retry_err:
-            logger.warning(f"{chunk_prefix}retry selhal: {retry_err} — ponechávám původní {recovered}/{n_criteria}")
-
     logger.info(f"{chunk_prefix}{len(parsed.get('vysledky', []))} kritérií OK")
     return parsed
 
@@ -822,12 +728,8 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         chunk_results = await asyncio.gather(*tasks)
         merged = _merge_chunk_results(list(chunk_results))
         logger.info(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
-        # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
         if expected_criteria_names:
             _validate_and_fix_vysledky(merged, expected_criteria_names, prefix, expected_criteria_bodies)
-        # FIX C: Detekce partial recovery
-        if expected_criteria_names:
-            _check_partial_recovery(merged, expected_criteria_names, prefix)
         merged["zpetna_vazba"] = await _generate_individual_feedback(
             merged, db, client, platform, model_name, enable_thinking,
             context_window, top_p, presence_penalty, frequency_penalty, prefix
@@ -926,22 +828,17 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         try:
             parsed = json.loads(clean_response)
         except json.JSONDecodeError as e:
-            # Pokus 2: sanitizace neescapovaných znaků (uvozovky, newlines v citacích)
-            dump_path = _dump_raw_llm_output(prefix, clean_response, e)
-            logger.warning(f"{prefix}JSON parse error: {e} — sanitizace stringů (raw: {dump_path})")
+            if logger.isEnabledFor(logging.DEBUG):
+                dump_path = _dump_raw_llm_output(prefix, clean_response, e)
+                logger.debug(f"{prefix}raw dump: {dump_path}")
+            logger.warning(f"{prefix}JSON parse error: {e} — sanitizace stringů")
             sanitized = _sanitize_json_string_values(clean_response)
             try:
                 parsed = json.loads(sanitized)
                 logger.info(f"{prefix}JSON opraven sanitizací ✓")
             except json.JSONDecodeError:
-                logger.warning(f"{prefix}Sanitizace nestačila — pokus o strukturální opravu zkráceného JSON")
-                parsed = _repair_truncated_json(sanitized)
-                if parsed:
-                    parsed['_json_repaired'] = True
-                    logger.info(f"{prefix}JSON obnoven: {len(parsed.get('vysledky', []))} kritérií zachráněno")
-                else:
-                    logger.error(f"{prefix}Oprava selhala. Raw Response:\n{raw_response}")
-                    raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
+                logger.error(f"{prefix}Sanitizace nestačila. Raw Response:\n{raw_response[:500]}")
+                raise ValueError("Model nevrátil validní JSON. Zkontrolujte logy.")
 
         logger.info(f"{prefix}JSON úspěšně zparsován: klíče={list(parsed.keys())[:6]}")
         # FIX A: Validace shody s vstupními kritérii (filtruje halucinace, doplňuje chybějící)
@@ -949,8 +846,6 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         if expected_criteria_names:
             _validate_and_fix_vysledky(parsed, expected_criteria_names, prefix, expected_criteria_bodies)
         else:
-            # Bez expected_criteria_names také normalizujeme body a přepočítáme skóre
-            # (model může vrátit špatný celkove_skore nebo body>0 pro splneno=false)
             vysledky = parsed.get('vysledky', [])
             for v in vysledky:
                 if not v.get('splneno', False):
@@ -959,9 +854,6 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 v.get('body', 0) for v in vysledky
                 if isinstance(v.get('body'), (int, float)) and v.get('splneno', False)
             )
-        # FIX C: Detekce partial recovery
-        if expected_criteria_names:
-            _check_partial_recovery(parsed, expected_criteria_names, prefix)
         # Individuální zpětná vazba — samostatné LLM volání po parsování celého výsledku
         parsed["zpetna_vazba"] = await _generate_individual_feedback(
             parsed, db, client, platform, model_name, enable_thinking,

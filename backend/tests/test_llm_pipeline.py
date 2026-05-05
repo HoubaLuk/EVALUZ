@@ -4,15 +4,17 @@ Pokrytí:
 - `_canonicalize_criterion_name` — strip prefixu i person-specific suffixu
 - `_validate_and_fix_vysledky` — match přes kanonizaci, audit `_llm_actual_name`,
   multi-person duplikáty, doplnění chybějících
-- `_check_partial_recovery` — metadata po validaci
 - `_sanitize_json_string_values` — neescape uvozovky v citacích, lone backslash, control chars
-- `_repair_truncated_json` — recovery z truncated výstupu
 - `_split_criteria_chunks` — primární delimiter cesta i legacy regex fallback
 - `_merge_chunk_results` — propagace `_json_repaired` flagu
 - `parse_criteria_markdown` — delimiter primární i legacy fallback
 
-Tyto testy pokrývají regrese, na které jsme historicky naráželi (v3.7.8 truncation,
-v3.9.1 quotes v citacích, v3.9.2 missing comma, v3.9.5 hallucinace, v3.9.6 personalizace).
+Tyto testy pokrývají regrese, na které jsme historicky naráželi (v3.9.1 quotes v citacích,
+v3.9.2 missing comma, v3.9.5 hallucinace, v3.9.6 personalizace).
+
+E6 poznámka: `_check_partial_recovery` a `_repair_truncated_json` byly smazány — jejich testy
+jsou v integration suite (test_evaluate_endpoint.py), fail-fast chování ověřuje
+test_evaluate_truncated_json_raises a test_no_partial_recovery_flag_anywhere.
 """
 import json
 import pytest
@@ -20,9 +22,7 @@ import pytest
 from services.llm_engine import (
     _canonicalize_criterion_name,
     _validate_and_fix_vysledky,
-    _check_partial_recovery,
     _sanitize_json_string_values,
-    _repair_truncated_json,
     _split_criteria_chunks,
     _merge_chunk_results,
     CRITERIA_DELIMITER,
@@ -330,46 +330,6 @@ class TestValidateAndFixVysledky:
 
 
 # ---------------------------------------------------------------------------
-# _check_partial_recovery
-# ---------------------------------------------------------------------------
-
-class TestCheckPartialRecovery:
-    def test_no_partial_recovery_when_all_present(self):
-        parsed = {
-            "vysledky": [
-                {"nazev": "A", "splneno": True, "body": 1},
-                {"nazev": "B", "splneno": True, "body": 1},
-            ]
-        }
-        _check_partial_recovery(parsed, ["A", "B"], "[T] ")
-        assert "_partial_recovery" not in parsed
-
-    def test_partial_recovery_when_omitted_present(self):
-        parsed = {
-            "vysledky": [
-                {"nazev": "A", "splneno": True, "body": 1},
-                {"nazev": "B", "splneno": False, "body": 0, "_llm_omitted": True},
-            ]
-        }
-        _check_partial_recovery(parsed, ["A", "B"], "[T] ")
-        pr = parsed["_partial_recovery"]
-        assert pr["expected"] == 2
-        assert pr["recovered"] == 1
-        assert pr["lost"] == 1
-        assert pr["reason"] == "llm_omitted"
-
-    def test_reason_json_repair_when_flag_set(self):
-        parsed = {
-            "_json_repaired": True,
-            "vysledky": [
-                {"nazev": "A", "splneno": False, "body": 0, "_llm_omitted": True},
-            ]
-        }
-        _check_partial_recovery(parsed, ["A"], "[T] ")
-        assert parsed["_partial_recovery"]["reason"] == "json_repair"
-
-
-# ---------------------------------------------------------------------------
 # _sanitize_json_string_values
 # ---------------------------------------------------------------------------
 
@@ -408,32 +368,6 @@ class TestSanitizer:
 
 
 # ---------------------------------------------------------------------------
-# _repair_truncated_json
-# ---------------------------------------------------------------------------
-
-class TestRepairTruncatedJson:
-    def test_recovers_complete_records_from_truncated_array(self):
-        # Simulace: vLLM JSON mode truncated uprostřed 3. záznamu
-        truncated = '''
-        {
-            "identita": {"jmeno": "Jan", "prijmeni": "Novák"},
-            "vysledky": [
-                {"nazev": "A", "splneno": true, "body": 5, "oduvodneni": "x", "citace": "y"},
-                {"nazev": "B", "splneno": false, "body": 0, "oduvodneni": "x", "citace": "y"},
-                {"nazev": "C", "splneno": true, "body
-        '''
-        result = _repair_truncated_json(truncated)
-        assert result is not None
-        assert len(result["vysledky"]) == 2  # A a B (kompletní), C zahozeno
-        nazvy = [v["nazev"] for v in result["vysledky"]]
-        assert "A" in nazvy and "B" in nazvy
-
-    def test_returns_none_when_no_vysledky_marker(self):
-        result = _repair_truncated_json('{"some": "thing"}')
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
 # _split_criteria_chunks
 # ---------------------------------------------------------------------------
 
@@ -466,6 +400,18 @@ class TestSplitCriteriaChunks:
         chunks = _split_criteria_chunks(markdown, chunk_size=3)
         # 7 kritérií / chunk_size 3 = 3 chunky (3+3+1)
         assert len(chunks) == 3
+
+    def test_25_criteria_gives_5_chunks_not_9_v399(self):
+        # Regression: legacy parser ukládal popis s trailing delimiter → 50 bloků místo 25
+        # a criteria_str pak generoval 9 chunků místo 5. Ověřujeme, že clean popis dává 5.
+        items = [
+            f"**{i}. Kritérium: K{i}**\nPopis kritéria {i} bez delimiteru\nBodů za splnění: 1"
+            for i in range(1, 26)
+        ]
+        markdown = f"\n\n{CRITERIA_DELIMITER}\n\n".join(items)
+        chunks = _split_criteria_chunks(markdown, chunk_size=6)
+        # ceil(25/6) = 5
+        assert len(chunks) == 5, f"Očekáváno 5 chunků, dostali jsme {len(chunks)}"
 
 
 # ---------------------------------------------------------------------------
@@ -507,10 +453,11 @@ class TestMergeChunkResults:
 
 class TestParseCriteriaMarkdown:
     def test_parses_with_delimiter(self):
+        # v3.9.10: Body se extrahují POUZE z `**Bodová hodnota:** N` (lektorův formát z UI).
         markdown = (
-            "**1. Kritérium: Zákonná výzva**\nOvěř, zda...\nBodů za splnění: 5"
+            "**1. Kritérium: Zákonná výzva**\n* **Bodová hodnota:** 5\nOvěř, zda..."
             f"\n\n{CRITERIA_DELIMITER}\n\n"
-            "**2. Kritérium: Eskorta osoby**\nHledej v textu...\nBodů za splnění: 3"
+            "**2. Kritérium: Eskorta osoby**\n* **Bodová hodnota:** 3\nHledej v textu..."
         )
         result = parse_criteria_markdown(markdown)
         assert len(result) == 2
@@ -520,8 +467,8 @@ class TestParseCriteriaMarkdown:
 
     def test_parses_legacy_format_without_delimiter(self):
         markdown = (
-            "**1. Kritérium: Zákonná výzva**\nOvěř...\nBodů za splnění: 5\n\n"
-            "**2. Kritérium: Eskorta osoby**\nHledej...\nBodů za splnění: 3"
+            "**1. Kritérium: Zákonná výzva**\n* **Bodová hodnota:** 5\nOvěř...\n\n"
+            "**2. Kritérium: Eskorta osoby**\n* **Bodová hodnota:** 3\nHledej..."
         )
         result = parse_criteria_markdown(markdown)
         assert len(result) == 2
@@ -532,6 +479,58 @@ class TestParseCriteriaMarkdown:
         result = parse_criteria_markdown(markdown)
         assert len(result) == 1
         assert result[0]["body"] == 1
+
+    def test_filters_out_scenario_header_block_v3910(self):
+        # v3.9.10: Markdown často začíná hlavičkou scénáře (MS info, max body, atd.).
+        # Parser tento blok dříve mylně ukládal jako 26. kritérium s body=25.
+        # Po opravě jsou akceptovány POUZE bloky s validním headerem `**N. Kritérium:**`.
+        markdown = (
+            "**HODNOTÍCÍ KRITÉRIA (Formát Markdown)**\n"
+            "**MODELOVÁ SITUACE: č. 2 – Vstup do obydlí**\n"
+            "**Maximální možný počet bodů: 25**\n"
+            f"\n\n{CRITERIA_DELIMITER}\n\n"
+            "**1. Kritérium: Kdo vyslal hlídku**\n* **Bodová hodnota:** 1\n* Popis"
+            f"\n\n{CRITERIA_DELIMITER}\n\n"
+            "**2. Kritérium: Eskorta osoby**\n* **Bodová hodnota:** 1\n* Popis"
+        )
+        result = parse_criteria_markdown(markdown)
+        assert len(result) == 2, f"Očekáváno 2 kritéria, dostali jsme {len(result)}: {[r['nazev'] for r in result]}"
+        assert all("Kritéri" not in r["nazev"][:8] or "HODNOTÍ" not in r["nazev"] for r in result)
+        assert result[0]["nazev"] == "Kdo vyslal hlídku"
+        assert result[1]["nazev"] == "Eskorta osoby"
+
+    def test_body_only_from_explicit_field_v3910(self):
+        # v3.9.10: Body se smí extrahovat POUZE z `**Bodová hodnota:** N`.
+        # Dříve regex chytal náhodné číslice ("3 části", "Maximální 25 bodů" atd.).
+        markdown = (
+            "**1. Kritérium: Citace zákonné výzvy**\n"
+            "* **Bodová hodnota:** 1\n"
+            "* Popis: musí obsahovat 3 části (Jménem zákona, pokyn, následek). "
+            "Maximálně 25 bodů celého scénáře."
+        )
+        result = parse_criteria_markdown(markdown)
+        assert len(result) == 1
+        # Body MUSÍ být 1 z explicitního pole, ne 3 ani 25 z volného textu
+        assert result[0]["body"] == 1, f"Body má být 1, dostali jsme {result[0]['body']}"
+
+    def test_body_default_1_when_no_explicit_field_v3910(self):
+        markdown = "**1. Kritérium: Test**\n* Popis bez explicitního body pole"
+        result = parse_criteria_markdown(markdown)
+        assert len(result) == 1
+        assert result[0]["body"] == 1
+
+    def test_strips_trailing_delimiter_from_popis_v399(self):
+        # v3.9.9: Legacy parser ukládal delimiter na konci popis (byl součástí bloku
+        # v markdown_content mezi dvěma kritérii). Po opravě musí popis delimiter neobsahovat.
+        markdown = (
+            "**1. Kritérium: Zákonná výzva**\nOvěř, zda...\nBodů za splnění: 5"
+            f"\n\n{CRITERIA_DELIMITER}\n\n"
+            "**2. Kritérium: Eskorta osoby**\nHledej...\nBodů za splnění: 3"
+        )
+        result = parse_criteria_markdown(markdown)
+        assert len(result) == 2
+        for r in result:
+            assert CRITERIA_DELIMITER not in r["popis"], f"Delimiter found in popis of '{r['nazev']}'"
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +563,6 @@ class TestPhaseAIntegration:
             ]
         }
         _validate_and_fix_vysledky(parsed, expected, "[T-Kořař] ")
-        _check_partial_recovery(parsed, expected, "[T-Kořař] ")
 
         # Po kanonizaci by mělo být všech 5 kritérií zachráněno
         assert len(parsed["vysledky"]) == 5

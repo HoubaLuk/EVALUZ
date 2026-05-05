@@ -54,12 +54,6 @@ export interface Student {
   zpetna_vazba?: string;
   isDirty?: boolean;
   is_approved?: boolean;
-  partial_recovery?: {
-    expected: number;
-    recovered: number;
-    lost: number;
-    reason: string;
-  } | null;
 }
 
 
