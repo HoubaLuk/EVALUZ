@@ -589,12 +589,14 @@ async def _generate_individual_feedback(
     }
     kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, response_format_json=False))
 
-    logger.info(f"{prefix}[feedback] Generuji individuální zpětnou vazbu ({len(splnena)} splněno, {len(nesplnena)} nesplněno)...")
+    est_fb = _estimate_tokens(system_prompt + user_content)
+    logger.info(f"{prefix}[feedback] Generuji zpětnou vazbu — input ~{est_fb} tokenů, max_tokens=600 ({len(splnena)} splněno, {len(nesplnena)} nesplněno)...")
+    _t0_fb = _time.monotonic()
     try:
         response = await _llm_call_with_overflow_retry(client, kwargs, f"{prefix}[feedback] ")
         feedback = (response.choices[0].message.content or "").strip()
         feedback = re.sub(r"<(think|thought)>.*?(</\1>|$)", "", feedback, flags=re.DOTALL | re.IGNORECASE).strip()
-        logger.info(f"{prefix}[feedback] OK ({len(feedback)} znaků)")
+        logger.info(f"{prefix}[feedback] OK — {len(feedback)} znaků, trvalo {_time.monotonic()-_t0_fb:.1f}s")
         return feedback
     except Exception as e:
         logger.error(f"{prefix}[feedback] Chyba při generování: {e}")
@@ -706,6 +708,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     chunks = [criteria_markdown] if est <= budget else _split_criteria_chunks(criteria_markdown, chunk_size)
     if len(chunks) > 1:
         logger.info(f"{prefix}Chunking: {len(chunks)} chunks á max {chunk_size} kritérií — asyncio.gather")
+        _t0_chunks = _time.monotonic()
         tasks = [
             _evaluate_chunk(
                 client=client,
@@ -727,7 +730,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         ]
         chunk_results = await asyncio.gather(*tasks)
         merged = _merge_chunk_results(list(chunk_results))
-        logger.info(f"{prefix}Merge hotov: {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
+        logger.info(f"{prefix}Chunking hotov za {_time.monotonic()-_t0_chunks:.1f}s — {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
         if expected_criteria_names:
             _validate_and_fix_vysledky(merged, expected_criteria_names, prefix, expected_criteria_bodies)
         merged["zpetna_vazba"] = await _generate_individual_feedback(
@@ -801,6 +804,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
             
         # Voláme model (s automatickým retry při context overflow).
+        _t0_llm = _time.monotonic()
         response = await _llm_call_with_overflow_retry(client, kwargs, prefix)
 
         # 3. PARSOVÁNÍ VÝSLEDKU: AI modely občas píší víc, než chceme. Tady odpověď čistíme.
@@ -809,7 +813,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
 
         # Logování délky surové odpovědi pro diagnostiku
         reasoning = getattr(response.choices[0].message, 'reasoning', None)
-        logger.info(f"{prefix}LLM odpověď: content_len={len(raw_response)}, reasoning_len={len(reasoning) if reasoning else 0}")
+        logger.info(f"{prefix}Single-call hotov za {_time.monotonic()-_t0_llm:.1f}s — content_len={len(raw_response)}, reasoning_len={len(reasoning) if reasoning else 0}")
         if not raw_response:
             logger.warning(f"{prefix}VAROVÁNÍ: content je prázdný! model={model_name}, reasoning={'ANO' if reasoning else 'NE'}")
 
