@@ -22,7 +22,7 @@ import datetime
 logger = logging.getLogger("evaluz.evaluate")
 
 from services.doc_parser import extract_text
-from services.llm_engine import evaluate_report, extract_identity
+from services.llm_engine import evaluate_report, extract_identity, generate_feedback_for_record
 from services.security_scanner import scanner, SecurityException
 from utils.text import clean_filename_to_display
 from models.evaluation import EvaluationResponse, CriterionResult, BatchEvaluationResponse
@@ -49,6 +49,38 @@ async def websocket_eval_status(websocket: WebSocket, lecturer_id: int):
     except WebSocketDisconnect:
         # Odpojení z registru, pokud lektor zavře okno.
         eval_queue.disconnect(websocket, lecturer_id)
+
+async def _run_feedback_task(eval_record_id: int, lecturer_id: int, student_name: str, scen_id: str):
+    """
+    Background task: generuje individuální zpětnou vazbu po dokončení evaluace.
+    Spouštěno přes asyncio.create_task() po odeslání EVAL_SUCCESS — neblokuje critical path.
+    """
+    db_fb = SessionLocal()
+    try:
+        eval_record = db_fb.query(StudentEvaluation).filter(StudentEvaluation.id == eval_record_id).first()
+        if not eval_record or not eval_record.json_result:
+            logger.warning(f"[FEEDBACK_TASK] Záznam id={eval_record_id} nenalezen nebo prázdný — přeskakuji")
+            return
+
+        merged = dict(eval_record.json_result) if isinstance(eval_record.json_result, dict) else {}
+        feedback = await generate_feedback_for_record(merged, db_fb, student_log_prefix=student_name)
+
+        updated = dict(merged)
+        updated["zpetna_vazba"] = feedback
+        eval_record.json_result = updated
+        db_fb.commit()
+        logger.info(f"[FEEDBACK_TASK] Zpětná vazba uložena pro '{student_name}' (id={eval_record_id})")
+
+        await eval_queue.broadcast({
+            "type": "FEEDBACK_DONE",
+            "student_name": student_name,
+            "scenario_id": scen_id,
+        }, lecturer_id=lecturer_id)
+    except Exception as e:
+        logger.error(f"[FEEDBACK_TASK] Chyba pro '{student_name}': {e}", exc_info=True)
+    finally:
+        db_fb.close()
+
 
 # Pomocná schémata pro validaci vstupních a výstupních dat.
 class FastScanResponseItem(BaseModel):
@@ -459,16 +491,24 @@ async def evaluate_batch(
                     
                 db_bg.commit()
                 logger.info(f"[QUEUE] DB commit OK pro '{student_name}'")
+                _saved_eval_id = existing_eval.id if existing_eval else eval_record.id
 
             end_time = datetime.datetime.now()
             duration = (end_time - start_time).total_seconds()
             print(f">>> [QUEUE] Vyhodnocení hotovo: {student_name} v {end_time.strftime('%H:%M:%S')} (trvalo {duration:.1f}s)")
-            
+
             await eval_queue.broadcast({
                 "type": "EVAL_SUCCESS",
                 "student_name": student_name,
                 "scenario_id": scen_id
             }, lecturer_id=current_user_id)
+
+            asyncio.create_task(_run_feedback_task(
+                eval_record_id=_saved_eval_id,
+                lecturer_id=current_user_id,
+                student_name=student_name,
+                scen_id=scen_id,
+            ))
 
         except SecurityException as se:
             logger.error(f"[QUEUE] Bezpečnostní chyba při vyhodnocování '{student_name}': {se}", exc_info=True)

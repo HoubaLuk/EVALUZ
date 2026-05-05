@@ -112,4 +112,7 @@ def seed_database(db: Session):
     if not db.query(AppSettings).filter(AppSettings.key == "CHUNK_THRESHOLD_TOKENS_PCT").first():
         db.add(AppSettings(key="CHUNK_THRESHOLD_TOKENS_PCT", value="0.7"))
 
+    if not db.query(AppSettings).filter(AppSettings.key == "FEEDBACK_MAX_TOKENS").first():
+        db.add(AppSettings(key="FEEDBACK_MAX_TOKENS", value="250"))
+
     db.commit()

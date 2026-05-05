@@ -575,6 +575,10 @@ async def _generate_individual_feedback(
         f"Napiš individuální zpětnou vazbu pro tohoto studenta."
     )
 
+    from models.db_models import AppSettings as _AppSettings
+    db_fb_tokens = db.query(_AppSettings).filter(_AppSettings.key == "FEEDBACK_MAX_TOKENS").first()
+    fb_max_tokens = int(db_fb_tokens.value) if db_fb_tokens and db_fb_tokens.value else 250
+
     kwargs = {
         "model": model_name,
         "messages": [
@@ -585,12 +589,12 @@ async def _generate_individual_feedback(
         "top_p": top_p,
         "presence_penalty": presence_penalty,
         "frequency_penalty": frequency_penalty,
-        "max_tokens": 600,  # Zpětná vazba = 3–5 vět, víc tokenů zbytečné
+        "max_tokens": fb_max_tokens,
     }
     kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, response_format_json=False))
 
     est_fb = _estimate_tokens(system_prompt + user_content)
-    logger.info(f"{prefix}[feedback] Generuji zpětnou vazbu — input ~{est_fb} tokenů, max_tokens=600 ({len(splnena)} splněno, {len(nesplnena)} nesplněno)...")
+    logger.info(f"{prefix}[feedback] Generuji zpětnou vazbu — input ~{est_fb} tokenů, max_tokens={fb_max_tokens} ({len(splnena)} splněno, {len(nesplnena)} nesplněno)...")
     _t0_fb = _time.monotonic()
     try:
         response = await _llm_call_with_overflow_retry(client, kwargs, f"{prefix}[feedback] ")
@@ -601,6 +605,56 @@ async def _generate_individual_feedback(
     except Exception as e:
         logger.error(f"{prefix}[feedback] Chyba při generování: {e}")
         return ""
+
+
+async def generate_feedback_for_record(merged: dict, db: Session, student_log_prefix: str = "") -> str:
+    """
+    Veřejný wrapper: načte LLM nastavení z DB, vytvoří klienta a vygeneruje zpětnou vazbu.
+    Voláno z evaluate.py jako background asyncio task po EVAL_SUCCESS.
+    """
+    db_url = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first()
+    db_key = db.query(AppSettings).filter(AppSettings.key == "VLLM_API_KEY").first()
+    db_phase_model = db.query(AppSettings).filter(AppSettings.key == "MODEL_PHASE2").first()
+    db_global_model = db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first()
+    db_phase_thinking = db.query(AppSettings).filter(AppSettings.key == "THINKING_PHASE2").first()
+    db_global_thinking = db.query(AppSettings).filter(AppSettings.key == "VLLM_ENABLE_THINKING").first()
+    db_platform = db.query(AppSettings).filter(AppSettings.key == "LLM_PLATFORM").first()
+    db_top_p = db.query(AppSettings).filter(AppSettings.key == "VLLM_TOP_P").first()
+    db_presence = db.query(AppSettings).filter(AppSettings.key == "VLLM_PRESENCE_PENALTY").first()
+    db_freq = db.query(AppSettings).filter(AppSettings.key == "VLLM_FREQUENCY_PENALTY").first()
+    db_context = db.query(AppSettings).filter(AppSettings.key == "LLM_CONTEXT_WINDOW").first()
+
+    api_url = db_url.value if db_url and db_url.value else ""
+    model_name = (db_phase_model.value if db_phase_model and db_phase_model.value else "") or (db_global_model.value if db_global_model and db_global_model.value else "")
+    api_key = db_key.value if db_key and db_key.value else ""
+    thinking_value = (db_phase_thinking.value if db_phase_thinking and db_phase_thinking.value else "") or (db_global_thinking.value if db_global_thinking and db_global_thinking.value else "true")
+    enable_thinking = (thinking_value.lower() == "true")
+    raw_platform = db_platform.value if db_platform and db_platform.value else "vllm"
+    top_p = float(db_top_p.value) if db_top_p and db_top_p.value else 0.95
+    presence_penalty = float(db_presence.value) if db_presence and db_presence.value else 0.0
+    frequency_penalty = float(db_freq.value) if db_freq and db_freq.value else 0.0
+    context_window = int(db_context.value) if db_context and db_context.value else None
+
+    if not api_url or not model_name:
+        logger.warning(f"[FEEDBACK] LLM konfigurace chybí — zpětná vazba přeskočena")
+        return ""
+
+    if "openrouter.ai" in api_url and not api_url.endswith("/api/v1"):
+        api_url = "https://openrouter.ai/api/v1"
+
+    platform = _resolve_platform(raw_platform, api_url)
+    prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
+
+    client = AsyncOpenAI(
+        base_url=api_url,
+        api_key=api_key or "sk-no-key-required",
+        default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
+        http_client=httpx.AsyncClient(timeout=300.0)
+    )
+    return await _generate_individual_feedback(
+        merged, db, client, platform, model_name, enable_thinking,
+        context_window, top_p, presence_penalty, frequency_penalty, prefix
+    )
 
 
 def _merge_chunk_results(chunk_results: list[dict]) -> dict:
@@ -733,10 +787,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         logger.info(f"{prefix}Chunking hotov za {_time.monotonic()-_t0_chunks:.1f}s — {len(merged['vysledky'])} kritérií, skóre={merged['celkove_skore']}")
         if expected_criteria_names:
             _validate_and_fix_vysledky(merged, expected_criteria_names, prefix, expected_criteria_bodies)
-        merged["zpetna_vazba"] = await _generate_individual_feedback(
-            merged, db, client, platform, model_name, enable_thinking,
-            context_window, top_p, presence_penalty, frequency_penalty, prefix
-        )
+        merged["zpetna_vazba"] = ""
         return merged
 
     # 2. PŘÍPRAVA PROMPTU: Tady dáváme modelu přesné instrukce, jak má JSON vypadat.
@@ -858,11 +909,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 v.get('body', 0) for v in vysledky
                 if isinstance(v.get('body'), (int, float)) and v.get('splneno', False)
             )
-        # Individuální zpětná vazba — samostatné LLM volání po parsování celého výsledku
-        parsed["zpetna_vazba"] = await _generate_individual_feedback(
-            parsed, db, client, platform, model_name, enable_thinking,
-            context_window, top_p, presence_penalty, frequency_penalty, prefix
-        )
+        parsed["zpetna_vazba"] = ""
         return parsed
 
     except Exception as e:

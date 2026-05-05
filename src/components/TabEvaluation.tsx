@@ -134,6 +134,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                         const dataName = (data.student_name || "").normalize('NFC');
                         return sName === dataName ? { ...s, status: 'pending' } : s;
                     }));
+                } else if (data.type === 'FEEDBACK_DONE') {
+                    await fetchEvaluations();
                 }
             };
             ws.onclose = () => {
