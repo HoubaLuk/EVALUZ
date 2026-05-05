@@ -2,6 +2,70 @@
 
 ---
 
+## 2026-05-05: Fail-fast místo JSON repair — smazání _repair_truncated_json a _check_partial_recovery (v3.10.0 / ADR-009)
+
+**Status:** Decided & Implemented
+
+**Kontext:** `_repair_truncated_json()` (~120 řádků) rekonstruovala JSON z oříznutého výstupu strukturálním scanem. Existovala od v3.8.2, kdy LLM měl 8–16k kontextové okno a truncace se reálně stávala. `_check_partial_recovery()` (~30 řádků) přidávala `_partial_recovery` metadata do `json_result`, která frontend zobrazoval jako oranžový badge a varující panel. Přechod na vLLM s 128k kontextem (a adaptivní chunking z E2) způsobil, že truncace je prakticky nemožná.
+
+**Možnosti:**
+- A: Zachovat `_repair_truncated_json` jako pojistku — ~170 řádků dead code, udržovací náklad, testovatelnost.
+- **B (zvoleno): Smazat obě funkce, fail-fast přes ValueError** — jednodušší kód, čistší chybový stav pro lektora.
+
+**Rozhodnutí:**
+1. Smazány `_repair_truncated_json`, `_check_partial_recovery`, chunk retry loop (−121 řádků z `llm_engine.py`).
+2. Při JSON parse erroru po sanitizaci → `ValueError` (logováno jako ERROR) → HTTP 500 → lektor vidí chybu a může re-evaluovat.
+3. `_partial_recovery` flag odstraněn z frontendu (TypeScript interface, badge, panel).
+4. Unit testy smazaných funkcí odstraněny z `test_llm_pipeline.py`.
+5. Integrační test `test_no_partial_recovery_flag_anywhere` ověřuje, že flag nikdy nevznikne.
+
+**Rollback:** Git tag `v3.9.10-pre-cleanup` zachovává stav před smazáním.
+
+**Dopad:** `llm_engine.py` zkrácen z ~1000 na ~600 řádků. 52/52 testů pass.
+
+**Riziko:** Pokud lektor přepne na model s malým kontextem (< 8k) bez správného nastavení `CHUNK_SIZE`, evaluace může selhat s ValueError. Mitigace: `PLATFORM_CONTEXT_DEFAULTS` pro openrouter/ollama/lmstudio = 8192 (chunking se zapne brzy).
+
+---
+
+## 2026-05-04: Adaptivní chunking — kontextové okno z DB, ne fixní konstanta (v3.9.10 / ADR-008)
+
+**Status:** Decided & Implemented
+
+**Kontext:** `CHUNK_SIZE = 6` bylo hardcoded konstanta. S přechodem na vLLM s 128k kontextovým oknem je fixní chunking zbytečný pro malé sady kritérií (6 kritérií = 6 LLM requestů místo 1). Zároveň je potřeba zachovat chunking jako ochranu pro platformy s malým kontextem (OpenRouter, Ollama).
+
+**Možnosti:**
+- A: Vždy chunking — zbytečné requesty pro malé sady.
+- B: Vždy single-call — nebezpečné při přepnutí na malý kontext.
+- **C (zvoleno): Adaptivní** — odhadni tokeny, porovnej s budgetem, rozhoduj dynamicky.
+
+**Rozhodnutí:**
+1. `_estimate_tokens(text)` = `max(1, len(text) // 3)` — ~3.5 chars/token pro češtinu (konzervativní).
+2. `PLATFORM_CONTEXT_DEFAULTS`: vllm=131072, openai=128000, openrouter/ollama/lmstudio=8192.
+3. Budget = `context_window × CHUNK_THRESHOLD_TOKENS_PCT` (výchozí 0.7 = 70 %).
+4. `CHUNK_SIZE` a `CHUNK_THRESHOLD_TOKENS_PCT` čteny z `AppSettings` per volání.
+5. `seeder.py`: automatický seed obou klíčů při startu.
+
+**Kompromis:** Odhad tokenů je přibližný. Threshold 0.7 dává dostatečnou rezervu — chybný odhad způsobí zbytečné chunking, nikdy přetečení kontextu.
+
+---
+
+## 2026-05-03: Kanonizační match místo exact match (v3.9.6 / ADR-007)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Testovací logy 29. 4. 2026 (Kořař/Kubisz) ukázaly, že FIX A z v3.9.5 s exact-match způsobuje katastrofické výsledky u multi-person ÚZ: 4–6/25 splněných kritérií místo reálných ~20/25. Příčina: model systematicky přidával jméno osoby do `nazev` (`"Ztotožnění – Ivana Horáková"` místo `"Ztotožnění osoby"`). Exact-match tyto položky odfiltroval jako halucinaci.
+
+**Rozhodnutí:**
+1. `_canonicalize_criterion_name()` normalizuje obě strany na srovnatelný klíč.
+2. Strip: prefix `**N. Kritérium:`, trailing `**`, person suffix `– [A-Z][a-záčšž]+ [A-Z][a-záčšž]+` (heuristika na konci stringu).
+3. Lower-case + strip.
+4. `nazev` v DB/UI normalizován na expected verzi; původní LLM verze v `_llm_actual_name`.
+5. Multi-person duplikáty: zachová první výskyt.
+
+**Kompromis:** Heuristika strippingu person suffixu závisí na patternech jmen. Dvouslovná příjmení nebo netypická jména mohou selhat. Plus: person-specific kontext v UI ztrácíme (vidíme jen generický název). Akceptovatelné — kontext je v `oduvodneni` a `citace`.
+
+---
+
 ## 2026-04-24: Individuální zpětná vazba — separátní LLM volání po evaluaci (v3.8.7)
 
 **Status:** Decided & Implemented
