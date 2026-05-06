@@ -5,8 +5,11 @@ Tento modul zajišťuje, že se aplikace "nezasekne", když lektor spustí vyhod
 """
 
 import asyncio
-from typing import Dict, List, Any
+import logging
+from typing import Dict, List, Any, Set
 from fastapi import WebSocket
+
+logger = logging.getLogger("evaluz.queue")
 
 class EvaluationQueue:
     def __init__(self):
@@ -15,6 +18,9 @@ class EvaluationQueue:
         # Seznam aktivních prohlížečů, kterým posíláme aktualizace o stavu (EVAL_START, SUCCESS...).
         # MAPOVÁNÍ: {lecturer_id: [WebSocket, ...]}
         self.active_connections: Dict[int, List[WebSocket]] = {}
+        # Množina klíčů úkolů aktuálně ve frontě nebo právě zpracovávaných.
+        # Klíč: "{lecturer_id}:{scenario_id}:{filename}" — zabraňuje duplicitnímu vyhodnocení.
+        self._active_keys: Set[str] = set()
         
     async def connect(self, websocket: WebSocket, lecturer_id: int):
         """Zaregistruje prohlížeč pro příjem real-time oznámení přes WebSocket."""
@@ -49,15 +55,26 @@ class EvaluationQueue:
             except Exception as e:
                 print(f"Chyba při odesílání přes WS pro lektora {lecturer_id}: {e}")
                 
-    async def add_task(self, task_data: dict):
-        """Přidá studenta do fronty k vyhodnocení."""
+    def _task_key(self, task_data: dict) -> str:
+        fd = task_data.get('file_data', {})
+        return f"{task_data.get('lecturer_id')}:{task_data.get('scenario_id')}:{fd.get('filename', '')}"
+
+    async def add_task(self, task_data: dict) -> bool:
+        """Přidá studenta do fronty k vyhodnocení. Vrátí False pokud je student již ve frontě."""
+        key = self._task_key(task_data)
+        if key in self._active_keys:
+            logger.warning(f"[QUEUE] Duplicita — přeskakuji: {key}")
+            return False
+        self._active_keys.add(key)
         await self.queue.put(task_data)
+        return True
         
     async def clear_queue(self):
         """Smaže všechny čekající úkoly (např. po kliknutí na tlačítko 'Zastavit')."""
         while not self.queue.empty():
             try:
-                self.queue.get_nowait()
+                task_data = self.queue.get_nowait()
+                self._active_keys.discard(self._task_key(task_data))
                 self.queue.task_done()
             except asyncio.QueueEmpty:
                 break
@@ -80,6 +97,7 @@ class EvaluationQueue:
                 except Exception as e:
                     print(f"Chyba při zpracování úkolu: {e}")
                 finally:
+                    self._active_keys.discard(self._task_key(task_data))
                     self.queue.task_done()
 
         while True:

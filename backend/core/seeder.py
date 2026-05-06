@@ -61,6 +61,16 @@ Výstup: strukturovaný text, celkem 200–350 slov. Každá sekce 2–4 věty +
 **Pedagogická doporučení:** Navrhni konkrétní opakovací bloky a metodická zlepšení pro příští výuku."""
 
 
+def _seed_setting(db: Session, key: str, value: str):
+    """Vloží AppSettings klíč pokud neexistuje. Každý klíč má vlastní commit + rollback — žádný batch."""
+    try:
+        if not db.query(AppSettings).filter(AppSettings.key == key).first():
+            db.add(AppSettings(key=key, value=value))
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
 def _upsert_prompt(db: Session, phase_name: str, content: str, temperature: float):
     """Vytvoří nebo aktualizuje systémový prompt. Používá se pro automatický upgrade při změně PROMPT_VERSION."""
     existing = db.query(SystemPrompt).filter(SystemPrompt.phase_name == phase_name).first()
@@ -89,30 +99,16 @@ def seed_database(db: Session):
             db_prompt_version.value = PROMPT_VERSION
         else:
             db.add(AppSettings(key="PROMPT_VERSION", value=PROMPT_VERSION))
-        
-    # Seed Settings
-    if not db.query(AppSettings).filter(AppSettings.key == "VLLM_API_URL").first():
-        db.add(AppSettings(key="VLLM_API_URL", value=settings.VLLM_API_URL))
+        db.commit()
 
-    if not db.query(AppSettings).filter(AppSettings.key == "VLLM_MODEL_NAME").first():
-        db.add(AppSettings(key="VLLM_MODEL_NAME", value=settings.VLLM_MODEL_NAME))
-
-    if not db.query(AppSettings).filter(AppSettings.key == "SCHOOL_LOCATIONS").first():
-        db.add(AppSettings(key="SCHOOL_LOCATIONS", value='["ÚPVSP","VZ Holešov","VZ Brno","VZ Hrdlořezy","VZ Pardubice","VZ Jihlava"]'))
-
+    # Seed Settings — každý klíč má vlastní commit přes _seed_setting() (odolné vůči IntegrityError)
+    _seed_setting(db, "VLLM_API_URL", settings.VLLM_API_URL)
+    _seed_setting(db, "VLLM_MODEL_NAME", settings.VLLM_MODEL_NAME)
+    _seed_setting(db, "SCHOOL_LOCATIONS", '["ÚPVSP","VZ Holešov","VZ Brno","VZ Hrdlořezy","VZ Pardubice","VZ Jihlava"]')
     # Práh úspěšnosti pro filtrování kritérií v AI analytice třídy (Phase 3).
     # Kritéria pod tímto prahem + vždy top 5 nejhorších jdou do LLM promptu.
     # Policejní výcvik = vysoký standard → default 80 %.
-    if not db.query(AppSettings).filter(AppSettings.key == "ANALYTICS_THRESHOLD").first():
-        db.add(AppSettings(key="ANALYTICS_THRESHOLD", value="80"))
-
-    if not db.query(AppSettings).filter(AppSettings.key == "CHUNK_SIZE").first():
-        db.add(AppSettings(key="CHUNK_SIZE", value="6"))
-
-    if not db.query(AppSettings).filter(AppSettings.key == "CHUNK_THRESHOLD_TOKENS_PCT").first():
-        db.add(AppSettings(key="CHUNK_THRESHOLD_TOKENS_PCT", value="0.7"))
-
-    if not db.query(AppSettings).filter(AppSettings.key == "FEEDBACK_MAX_TOKENS").first():
-        db.add(AppSettings(key="FEEDBACK_MAX_TOKENS", value="250"))
-
-    db.commit()
+    _seed_setting(db, "ANALYTICS_THRESHOLD", "80")
+    _seed_setting(db, "CHUNK_SIZE", "6")
+    _seed_setting(db, "CHUNK_THRESHOLD_TOKENS_PCT", "0.7")
+    _seed_setting(db, "FEEDBACK_MAX_TOKENS", "250")
