@@ -88,6 +88,10 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
             if (json.error === 'pending_approvals') {
                 setData(null);
                 setPendingApprovals({ count: json.pending_count, total: json.total_evaluated });
+            } else if (json.status === 'no_analysis') {
+                // Žádná analýza zatím neexistuje — zobraz tlačítko "Generovat", nespouštěj LLM znovu.
+                setData(null);
+                setPendingApprovals(null);
             } else {
                 setData(json);
                 setPendingApprovals(null);

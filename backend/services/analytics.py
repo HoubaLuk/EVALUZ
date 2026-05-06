@@ -34,6 +34,7 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         }
 
     # 1. CACHE: Pokud už analýza existuje a uživatel si nevynutil novou (force=True), vrátíme tu uloženou.
+    # Bez force=True NIKDY nespouštíme AI generování — zabraňuje dvojitému volání při page refresh.
     if not force:
         q = db.query(ClassAnalysis).filter(
             ClassAnalysis.scenario_id == scenario_id,
@@ -42,6 +43,8 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         cached_analysis = apply_data_isolation(q, ClassAnalysis, current_user, db).first()
         if cached_analysis and cached_analysis.content_json:
             return cached_analysis.content_json
+        # Žádná cache a force=False → vrátíme prázdný stav, NE generování.
+        return {"status": "no_analysis"}
                 
     # Načteme všechna vyhodnocení pro tuto třídu a situaci
     q2 = db.query(StudentEvaluation).filter(
