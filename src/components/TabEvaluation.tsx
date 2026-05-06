@@ -103,12 +103,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             ws.onopen = () => {
                 wsConnectCountRef.current += 1;
                 if (wsConnectCountRef.current > 1) {
-                    // Backend restarted nebo spojení přerušeno — resetujeme zaseknutý stav
-                    setStudents(prev => prev.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
-                    setIsEvaluating(false);
-                    setEvaluationProgress(0);
-                    setTotalToEvaluate(0);
-                    setEvaluatedCount(0);
+                    // Reconnect: synchronizujeme stav z DB BEZ resetu 'evaluating' statusů.
+                    // Starý kód resetoval 'evaluating' → 'pending' před fetchEvaluations(),
+                    // čímž zničil preservation logic a způsoboval duplicitní evaluace.
                     fetchEvaluations();
                 }
             };
@@ -249,15 +246,16 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
     // SELF-HEALING: Pokud isEvaluating=true ale žádný student už nemá status 'evaluating',
     // znamená to, že všechna WS oznámení dorazila (nebo se ztratila) a UI zůstalo zaseklé.
-    // V takovém případě resetujeme spinner — obrana proti ztrátě WS zprávy při reconnectu.
+    // evaluatedCount === 0 guard odstraněn — s novým reconnect chováním (bez resetu statusů)
+    // se preservation logic v fetchEvaluations() postará o správný stav i po reconnectu.
     useEffect(() => {
-        if (!isEvaluating || students.length === 0 || evaluatedCount === 0) return;
+        if (!isEvaluating || students.length === 0) return;
         const anyStillRunning = students.some(s => s.status === 'evaluating');
         if (!anyStillRunning) {
             setIsEvaluating(false);
             setEvaluationProgress(0);
         }
-    }, [students, isEvaluating, evaluatedCount]);
+    }, [students, isEvaluating]);
 
     const toggleStudent = (id: number) => {
         setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
