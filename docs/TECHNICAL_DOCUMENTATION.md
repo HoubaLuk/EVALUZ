@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.10.0  
-**Poslední aktualizace:** 5. května 2026  
+**Verze:** 3.10.1  
+**Poslední aktualizace:** 6. května 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
 ## Obsah
@@ -90,8 +90,11 @@ Endpoint `/evaluate/ws?lecturer_id=X&token=Y` — duplex spojení per-lektor.
 
 Typy zpráv (server → client):
 - `EVAL_START` — student začal zpracování
-- `EVAL_DONE` — student dokončen, obsahuje výsledky
+- `EVAL_SUCCESS` — kritéria vyhodnocena a uložena do DB (bez zpětné vazby); frontend volá `fetchEvaluations()`
+- `FEEDBACK_DONE` — zpětná vazba doplněna do DB; frontend volá `fetchEvaluations()` znovu
 - `EVAL_ERROR` — student selhal (neblokuje ostatní)
+
+`EVAL_SUCCESS` přichází ihned po dokončení chunking+validace (typicky ~3–5 s). `FEEDBACK_DONE` přichází asynchronně po dalších ~15–60 s. Lektor vidí výsledky kritérií okamžitě; pole `zpetna_vazba` se doplní při druhém refresh.
 
 Frontend při odpojení WebSocket automaticky se reconnectuje a resetuje zaseknuté `evaluating` stavy.
 
@@ -114,6 +117,7 @@ Systém podporuje různé modely pro různé fáze, konfigurovatelné v Admin UI
 | `LLM_PLATFORM` | `vllm` / `openai` / `openrouter` / `ollama` / `lmstudio` |
 | `CHUNK_SIZE` | Počet kritérií na chunk (výchozí 6) |
 | `CHUNK_THRESHOLD_TOKENS_PCT` | Prahová hodnota pro přepnutí na chunking (výchozí 0.7) |
+| `FEEDBACK_MAX_TOKENS` | Max výstupní tokeny pro zpětnou vazbu (výchozí 250) |
 
 ### 2.2 Kontextová okna platforem (PLATFORM_CONTEXT_DEFAULTS)
 
@@ -142,8 +146,12 @@ Platforma se detekuje automaticky z `VLLM_API_URL` (OpenRouter URL má přednost
 #### Phase 2 — Evaluace ÚZ (hlavní pipeline)
 `evaluate_report()` v `llm_engine.py`. Podrobně viz sekce 2.4.
 
-#### Phase 2b — Individuální zpětná vazba
-`_generate_individual_feedback()` — samostatné LLM volání po sloučení chunk výsledků. Model vidí kompletní výsledek (seznam splněných/nesplněných kritérií), generuje personalizovanou zpětnou vazbu pro studenta (3–5 vět, max. 600 tokenů). Prompt editovatelný v Admin UI (`prompt_feedback`). Chyba zpětné vazby neblokuje uložení výsledků evaluace.
+#### Phase 2b — Individuální zpětná vazba (async)
+`_generate_individual_feedback()` — samostatné LLM volání po sloučení chunk výsledků. Model vidí kompletní výsledek (seznam splněných/nesplněných kritérií), generuje personalizovanou zpětnou vazbu (3–5 vět). Prompt editovatelný v Admin UI (`prompt_feedback`).
+
+**Od v3.10.1 běží mimo critical path (ADR-010):** `evaluate_report()` vrátí `zpetna_vazba=""`. Po odeslání `EVAL_SUCCESS` je spuštěn `asyncio.create_task(_run_feedback_task(...))` — ten volá `generate_feedback_for_record()` (public wrapper čtoucí nastavení z DB), provede partial update `json_result.zpetna_vazba` v DB, a odešle `FEEDBACK_DONE` WebSocket notifikaci.
+
+`FEEDBACK_MAX_TOKENS` konfigurovatelný v DB (výchozí 250 — 3–5 vět v češtině ≈ 150–180 tokenů). Chyba zpětné vazby neblokuje uložení výsledků evaluace.
 
 #### Phase 3 — Analýza třídy
 LLM dostane agregovaná data celé třídy a generuje pedagogický komentář. Kritéria s úspěšností nad `ANALYTICS_THRESHOLD` (výchozí 80 %) jsou z LLM promptu filtrována — LLM se soustředí na problematické oblasti. Frontend heatmapa zobrazuje kompletní statistiky všech kritérií bez ohledu na threshold.
@@ -205,10 +213,13 @@ _validate_and_fix_vysledky()   ← FIX A
   • přepočítá celkove_skore
        │
        ▼
-_generate_individual_feedback() ← Phase 2b
+    return parsed  ← zpetna_vazba="" (feedback není v critical path)
        │
-       ▼
-    return parsed
+       ▼ (po EVAL_SUCCESS broadcast — asyncio.create_task)
+_run_feedback_task()           ← Phase 2b (ADR-010)
+  generate_feedback_for_record()
+  → partial DB update json_result.zpetna_vazba
+  → FEEDBACK_DONE broadcast
 ```
 
 **Průchod `_evaluate_chunk()` — JSON fallback pipeline:**
@@ -376,7 +387,7 @@ Backend nečeká na externí skripty pro základní data. Při každém zápisu 
 
 `seeder.py` při každém startu:
 - Zkontroluje `PROMPT_VERSION` a případně přepíše výchozí prompty
-- Zajistí existenci `CHUNK_SIZE` a `CHUNK_THRESHOLD_TOKENS_PCT` v `AppSettings`
+- Zajistí existenci `CHUNK_SIZE`, `CHUNK_THRESHOLD_TOKENS_PCT` a `FEEDBACK_MAX_TOKENS` v `AppSettings`
 
 ### 5.2 Unicode & Cross-Platform kompatibilita
 
@@ -429,7 +440,7 @@ Citlivé hodnoty (DB heslo, LLM API klíče) v `backend/.env`. Tento soubor se N
 Při každém startu backend:
 1. Spustí Alembic migrace (`alembic upgrade head`)
 2. Záloha: `run_migrations()` přidá chybějící sloupce (kobercový nálet)
-3. `seeder.py` zkontroluje `PROMPT_VERSION` a případně přepíše výchozí prompty; zajistí existenci `CHUNK_SIZE`, `CHUNK_THRESHOLD_TOKENS_PCT`
+3. `seeder.py` zkontroluje `PROMPT_VERSION` a případně přepíše výchozí prompty; zajistí existenci `CHUNK_SIZE`, `CHUNK_THRESHOLD_TOKENS_PCT`, `FEEDBACK_MAX_TOKENS`
 
 ---
 
@@ -610,7 +621,38 @@ Pokud selže i úroveň 2 → `ValueError` (fail-fast, viz ADR-009). Level 3 (`_
 
 ---
 
+### ADR-010: Feedback mimo critical path evaluace (v3.10.1)
+
+**Kontext:** Testování na OpenRouter + gemma4 256k ukázalo, že `_generate_individual_feedback()` trvá 60–80 s při souběžné evaluaci (OpenRouter rate limiting po burst chunking requestů). Funkce byla volána uvnitř `evaluate_report()` — blokovalo to `EVAL_SUCCESS` notifikaci a tím zobrazení výsledků lektorovi.
+
+**Možnosti:**
+- *Zachovat current path*: Jednoduché, ale lektor čeká 90+ s i když kritéria jsou vyhodnocena za 3–5 s.
+- *Oddělit feedback od critical path*: `evaluate_report()` vrátí `zpetna_vazba=""`. Feedback se generuje asynchronně po `EVAL_SUCCESS`.
+
+**Rozhodnutí:** Feedback mimo critical path.
+1. `evaluate_report()` vrací `zpetna_vazba=""` (obě cesty — chunking i single-call).
+2. Nová funkce `generate_feedback_for_record(merged, db, student_log_prefix)` v `llm_engine.py` — public wrapper čtoucí LLM nastavení z DB a volající `_generate_individual_feedback()`.
+3. Nová funkce `_run_feedback_task(eval_record_id, lecturer_id, student_name, scen_id)` v `api/evaluate.py` — vlastní DB session, partial update `json_result.zpetna_vazba`, broadcast `FEEDBACK_DONE`.
+4. `asyncio.create_task(_run_feedback_task(...))` spuštěno v `process_single_file_bg` ihned po `EVAL_SUCCESS` broadcastu.
+5. Frontend: handler `FEEDBACK_DONE` → `fetchEvaluations()`.
+6. `FEEDBACK_MAX_TOKENS` snížen z 600 na 250 (výchozí), konfigurovatelný v DB.
+
+**Výsledek:** Lektor vidí výsledky kritérií za ~3–5 s (chunking fáze). Zpětná vazba se doplní async za dalších ~15–60 s bez blokování dalších evaluací.
+
+**Kompromis:** Mezi `EVAL_SUCCESS` a `FEEDBACK_DONE` lektor vidí prázdné pole zpětné vazby. To je vědomý UX trade-off — pole je jasně označeno jako „generuji…" nebo je jednoduše prázdné. Partial DB update (přepis `json_result`) je atomický na úrovni ORM — žádný souběžný problém (feedback task je jediný zapisovatel tohoto pole po EVAL_SUCCESS).
+
+---
+
 ## 9. Historie vývoje (Changelog)
+
+### v3.10.1 (6. 5. 2026) — Feedback mimo critical path (O2+O3)
+
+- **O2:** `FEEDBACK_MAX_TOKENS` konfigurovatelný v DB (výchozí 250, bylo 600). Seeded v `seeder.py`, čteno v `_generate_individual_feedback()` bez restartu.
+- **O3:** `_generate_individual_feedback()` odstraněna z `evaluate_report()`. Po `EVAL_SUCCESS` spuštěn `asyncio.create_task(_run_feedback_task(...))`. Feedback generován paralelně, partial DB update `json_result.zpetna_vazba`, nová WS zpráva `FEEDBACK_DONE`. Frontend: handler `FEEDBACK_DONE` → `fetchEvaluations()`.
+- `generate_feedback_for_record()` — nový public wrapper v `llm_engine.py`.
+- **Výsledek:** EVAL_SUCCESS přichází ~3–5 s po zahájení (chunking fáze). Zpětná vazba doplněna async. 52/52 testů pass.
+
+---
 
 ### v3.10.0 (5. 5. 2026) — LLM engine refactor: repair/recovery vrstvy smazány, frontend cleanup
 
@@ -761,4 +803,4 @@ Dokončení 7-etapového refaktoru `llm_engine.py`. Cílem bylo zjednodušení k
 
 ---
 
-*Poslední aktualizace dokumentace: 5. května 2026*
+*Poslední aktualizace dokumentace: 6. května 2026*

@@ -2,6 +2,27 @@
 
 ---
 
+## [v3.10.1] — 2026-05-06 — Feedback mimo critical path (O2+O3)
+
+### O2 — FEEDBACK_MAX_TOKENS konfigurovatelný
+
+- **`backend/services/llm_engine.py`** — `_generate_individual_feedback()`: `max_tokens=600` (hardcoded) nahrazeno čtením z DB klíče `FEEDBACK_MAX_TOKENS`. Výchozí hodnota 250 (3–5 vět v češtině ≈ 150–180 tokenů). Čteno při každém volání — bez restartu.
+- **`backend/core/seeder.py`** — seed `FEEDBACK_MAX_TOKENS=250` při prvním startu (INSERT IF NOT EXISTS).
+
+### O3 — Decoupling zpětné vazby od critical path
+
+- **`backend/services/llm_engine.py`** — `evaluate_report()` vrací `zpetna_vazba=""` (obě cesty — chunking i single-call). Nová public funkce `generate_feedback_for_record(merged, db, student_log_prefix)` — čte LLM nastavení z DB, sestaví klienta, zavolá `_generate_individual_feedback()`.
+- **`backend/api/evaluate.py`** — nová funkce `_run_feedback_task(eval_record_id, lecturer_id, student_name, scen_id)` (module-level, vlastní DB session). Po `EVAL_SUCCESS` broadcastu spuštěn `asyncio.create_task(_run_feedback_task(...))`. Task: načte `json_result` z DB, zavolá `generate_feedback_for_record()`, provede partial update `json_result.zpetna_vazba`, odešle `FEEDBACK_DONE` WebSocket zprávu.
+- **`src/components/TabEvaluation.tsx`** — handler `FEEDBACK_DONE` → `fetchEvaluations()`.
+
+### Výsledek
+
+- EVAL_SUCCESS přichází ~3–5 s po zahájení evaluace (chunking fáze hotová).
+- Zpětná vazba se doplní async za dalších ~15–60 s (závisí na modelu a rate limitingu).
+- 52/52 testů pass.
+
+---
+
 ## [v3.10.0] — 2026-05-05 — LLM engine refactor (E1–E7)
 
 7-etapový refaktor `llm_engine.py`. Cíl: zjednodušení kódu budovaného pro 8k kontext, který je s 128k vLLM zbytečně složitý.

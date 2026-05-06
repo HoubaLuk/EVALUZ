@@ -2,6 +2,30 @@
 
 ---
 
+## 2026-05-06: Feedback mimo critical path evaluace (v3.10.1 / ADR-010)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Testování na OpenRouter + gemma4 256k: evaluace 3 ÚZ trvala 90–115 s/student. Bottleneck byl `_generate_individual_feedback()` (~60–80 s) volaný uvnitř `evaluate_report()` — blokoval EVAL_SUCCESS notifikaci a tím zobrazení výsledků kritérií lektorovi. OpenRouter rate limiting po burst chunking requestů zpomaloval feedback ještě více. Samotný chunking hotov za ~2–3 s.
+
+**Možnosti:**
+- A: Zachovat current path — jednoduché, lektor ale čeká 90+ s i když kritéria jsou vyhodnocena za 3–5 s.
+- **B (zvoleno): Feedback jako asyncio background task** — `evaluate_report()` vrátí `zpetna_vazba=""`, kritéria okamžitě dostupná, zpětná vazba se doplní async.
+
+**Rozhodnutí:**
+1. `evaluate_report()` vrací `zpetna_vazba=""` (obě cesty — chunking i single-call).
+2. Nová `generate_feedback_for_record(merged, db, student_log_prefix)` v `llm_engine.py` — public wrapper, čte LLM nastavení z DB, staví klienta, volá `_generate_individual_feedback()`.
+3. Nová `_run_feedback_task(eval_record_id, ...)` v `api/evaluate.py` — vlastní DB session, partial update `json_result.zpetna_vazba`, broadcast `FEEDBACK_DONE`.
+4. `asyncio.create_task(_run_feedback_task(...))` spuštěno po EVAL_SUCCESS broadcastu.
+5. Frontend handler `FEEDBACK_DONE` → `fetchEvaluations()` (stejný pattern jako EVAL_SUCCESS).
+6. `FEEDBACK_MAX_TOKENS` snížen 600 → 250 (výchozí), konfigurovatelný bez restartu.
+
+**Dopad:** EVAL_SUCCESS za ~3–5 s, FEEDBACK_DONE za dalších ~15–60 s async. 52/52 testů pass.
+
+**Kompromis:** Mezi EVAL_SUCCESS a FEEDBACK_DONE je `zpetna_vazba` prázdná. Vědomý UX trade-off. Partial DB update (přepis `json_result`) je bezpečný — feedback task je jediný zapisovatel tohoto pole po EVAL_SUCCESS.
+
+---
+
 ## 2026-05-05: Fail-fast místo JSON repair — smazání _repair_truncated_json a _check_partial_recovery (v3.10.0 / ADR-009)
 
 **Status:** Decided & Implemented

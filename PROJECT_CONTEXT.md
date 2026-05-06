@@ -1,9 +1,9 @@
 # Projektový Kontext — EVALUZ
-**Verze: 3.10.0 | Poslední aktualizace: 2026-05-05**
+**Verze: 3.10.1 | Poslední aktualizace: 2026-05-06**
 
 ## Aktuální Stav
 
-Systém v produkčním provozu na ÚPVSP. v3.10.0 dokončuje 7-etapový refaktor LLM engine — `llm_engine.py` zkrácen z ~1000 na ~600 řádků odstraněním vrstev budovaných pro 8k kontext (nyní je k dispozici 128k vLLM). 52 testů pass (unit + integration).
+Systém v produkčním provozu na ÚPVSP. v3.10.1 decoupling zpětné vazby od critical path evaluace — lektor vidí výsledky kritérií okamžitě (~3–5 s), zpětná vazba se doplní asynchronně. 52 testů pass (unit + integration).
 
 ## 1. Vize a Cíl
 
@@ -32,11 +32,13 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 - **ProfileModal:** Osobní údaje, doložka, změna hesla. Samostatná komponenta oddělená od AdminModal.
 - **AdminModal:** Správa systému (prompty, LLM konfigurace, uživatelé). Viditelné pouze správcům.
 
-## 4. LLM Pipeline — Klíčové Principy (v3.10.0)
+## 4. LLM Pipeline — Klíčové Principy (v3.10.1)
 
 - **Adaptivní chunking**: `_estimate_tokens()` odhadne objem; pokud se vše vejde do 70 % kontextového okna → přímé volání; jinak chunky po `CHUNK_SIZE` kritériích + `asyncio.gather` parallelismus.
 - **Fail-fast JSON**: 2-úrovňový fallback (přímý parse → sanitizace → ValueError). S 128k kontextem je truncace prakticky nemožná.
 - **Kanonizační match**: `_canonicalize_criterion_name()` — strip prefixu, trailing `**`, person suffix. Eliminuje false-negative placeholdery u multi-person ÚZ.
+- **Feedback mimo critical path (ADR-010)**: `evaluate_report()` vrací `zpetna_vazba=""`. Po `EVAL_SUCCESS` broadcastu spuštěn `asyncio.create_task(_run_feedback_task(...))`. Frontend dostane `FEEDBACK_DONE` až po doplnění zpětné vazby do DB.
+- **`FEEDBACK_MAX_TOKENS`**: Konfigurovatelný v DB (výchozí 250). Byl 600 — 3× zbytečně velký pro 3–5 vět.
 - **Logging**: `logging.getLogger("evaluz.llm")`, httpx/httpcore ztišeny. Žádné print() v produkčním kódu.
 
 ## 5. Autentizace & RBAC
@@ -48,7 +50,7 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 
 ## 6. Klíčové Technické Detaily
 
-- **`CHUNK_SIZE` a `CHUNK_THRESHOLD_TOKENS_PCT`**: čteny z `AppSettings` per volání, seeded při startu.
+- **`CHUNK_SIZE`, `CHUNK_THRESHOLD_TOKENS_PCT`, `FEEDBACK_MAX_TOKENS`**: čteny z `AppSettings` per volání, seeded při startu.
 - **`PLATFORM_CONTEXT_DEFAULTS`**: vllm=131072, openai=128000, openrouter/ollama/lmstudio=8192.
 - **JSON parsing**: `json_result` / `content_json` mohou být dict nebo string (starší záznamy) — vždy `isinstance(raw, dict)`.
 - **Identita studenta**: Prioritní řetězec `student_identity` JSON → `cleaned_name` → `student_name`.
