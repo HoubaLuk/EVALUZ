@@ -358,6 +358,17 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
                 <div className="alert alert--negative" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Icon icon={faCircleExclamation} /> <span>{error}</span>
                 </div>
+            ) : !data ? (
+                <div className="card" style={{ height: 220, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, textAlign: 'center' }}>
+                    <Icon icon={faRotate} size="2x" style={{ color: 'var(--color-primary)', opacity: 0.5 }} />
+                    <div>
+                        <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: '1rem' }}>Analýza zatím nebyla vygenerována</p>
+                        <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>Schvalte všechny záznamy a klikněte na tlačítko níže.</p>
+                    </div>
+                    <button className="btn btn--primary btn--sm" onClick={() => fetchAnalytics(true)} disabled={loading}>
+                        <Icon icon={faRotate} spin={loading} /> Generovat analýzu
+                    </button>
+                </div>
             ) : data && data.stats.length === 0 ? (
                 <div className="card" style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                     <div className="empty-state">
