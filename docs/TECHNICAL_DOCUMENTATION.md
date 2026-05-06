@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.10.1  
+**Verze:** 3.10.5  
 **Poslední aktualizace:** 6. května 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -82,6 +82,7 @@ EVALUZ je webová aplikace pro AI-asistované hodnocení úředních záznamů (
 - **Izolaci**: Každý lektor má samostatnou frontu — evaluace jiného lektora neblokuje.
 - **Souběžnost**: Konfigurovatelná přes `LLM_CONCURRENCY_VLLM` / `LLM_CONCURRENCY_OPENROUTER` (výchozí 4). Asyncio semaphore limituje počet paralelních LLM volání.
 - **Fail-safe**: Chyba u jednoho studenta neukončí celou dávku. Chyba je broadcastována přes WebSocket; ostatní úlohy pokračují.
+- **Deduplicace (od v3.10.3)**: `_active_keys: Set[str]` sleduje klíče `{lecturer_id}:{scenario_id}:{filename}`. `add_task()` přeskočí studenta pokud je klíč aktivní (vrátí `False`). Klíč se uvolní v `_run_task()` finally — i při chybě. Zabraňuje duplicitnímu vyhodnocení při re-submitu dávky (např. page refresh).
 - **Zrušení**: `DELETE /evaluate/batch` vyčistí frontu nevyřízených úloh.
 
 ### 1.5 WebSocket a real-time UX
@@ -96,7 +97,7 @@ Typy zpráv (server → client):
 
 `EVAL_SUCCESS` přichází ihned po dokončení chunking+validace (typicky ~3–5 s). `FEEDBACK_DONE` přichází asynchronně po dalších ~15–60 s. Lektor vidí výsledky kritérií okamžitě; pole `zpetna_vazba` se doplní při druhém refresh.
 
-Frontend při odpojení WebSocket automaticky se reconnectuje a resetuje zaseknuté `evaluating` stavy.
+**WS reconnect (od v3.10.2):** `wsConnectCountRef` počítá připojení; při reconnectu (count > 1) `onopen` volá pouze `fetchEvaluations()` bez jakéhokoli resetu stavů. Zamezuje automatickému re-submitu dávky po reconnectu. Self-healing `useEffect` monitoruje `students` pole a resetuje `isEvaluating` jakmile žádný student nemá status `'evaluating'`.
 
 ---
 
@@ -155,6 +156,8 @@ Platforma se detekuje automaticky z `VLLM_API_URL` (OpenRouter URL má přednost
 
 #### Phase 3 — Analýza třídy
 LLM dostane agregovaná data celé třídy a generuje pedagogický komentář. Kritéria s úspěšností nad `ANALYTICS_THRESHOLD` (výchozí 80 %) jsou z LLM promptu filtrována — LLM se soustředí na problematické oblasti. Frontend heatmapa zobrazuje kompletní statistiky všech kritérií bez ohledu na threshold.
+
+**Analytics force gate (od v3.10.4):** `generate_class_summary()` spustí AI generování pouze s `force=True`. Bez force a bez cache vrátí `{"status":"no_analysis"}` — frontend zobrazí card s tlačítkem "Generovat analýzu". Zabraňuje duplicitnímu LLM volání při page refresh.
 
 ### 2.4 Adaptivní chunking
 
@@ -388,6 +391,8 @@ Backend nečeká na externí skripty pro základní data. Při každém zápisu 
 `seeder.py` při každém startu:
 - Zkontroluje `PROMPT_VERSION` a případně přepíše výchozí prompty
 - Zajistí existenci `CHUNK_SIZE`, `CHUNK_THRESHOLD_TOKENS_PCT` a `FEEDBACK_MAX_TOKENS` v `AppSettings`
+
+**Od v3.10.3:** `_seed_setting(db, key, value)` — každý klíč má vlastní `db.commit()` + `try/except rollback`. Odstraňuje batch commit způsobující `IntegrityError` na existujících DB.
 
 ### 5.2 Unicode & Cross-Platform kompatibilita
 
@@ -643,7 +648,67 @@ Pokud selže i úroveň 2 → `ValueError` (fail-fast, viz ADR-009). Level 3 (`_
 
 ---
 
+### ADR-011: EvaluationQueue deduplicace — Set klíčů místo DB check (v3.10.3)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Page refresh během evaluace způsoboval re-submit dávky → 2 souběžné LLM požadavky na stejný ÚZ → OpenRouter throttloval → 200–400s místo ~50s. WS reconnect fix (v3.10.2) eliminoval automatický re-submit, ale manuální re-submit (nebo programový race condition) byl stále možný.
+
+**Možnosti:**
+- A: DB check — před přidáním do fronty ověřit, že `json_result IS NULL` a záznam neexistuje s datem < 5 min. Pomalé (DB query per task) a nepřesné (nezachytí tasks aktivně zpracovávané).
+- **B (zvoleno): In-memory Set** — `_active_keys: Set[str]` na instanci `EvaluationQueue`. Přidá se při `add_task()`, odstraní se v `_run_task()` finally. O(1) lookup, žádný DB overhead.
+
+**Rozhodnutí:** Set klíčů `{lecturer_id}:{scenario_id}:{filename}`. Pokrývá jak čekající (v queue) tak aktivně zpracovávané studenty. `add_task()` vrací `False` pro duplicitu — volající může logovat/ignorovat.
+
+**Kompromis:** In-memory stav → ztráta při restartu serveru. Přijatelné: restart vyčistí i asyncio queue; lektor re-submituje vědomě.
+
+---
+
+### ADR-012: Analytics force gate — explicitní oddělit read od generate (v3.10.4)
+
+**Status:** Decided & Implemented
+
+**Kontext:** `GET /analytics/class/1/summary` bez `force=True` měl fallthrough: pokud cache neexistuje → spustí AI generování stejně. Page refresh během generování zavolal endpoint znovu (force=False), cache ještě nebyla zapsána → druhé souběžné LLM volání → 2× ~20s OpenRouter request, 2× zápis do cache.
+
+**Možnosti:**
+- A: Generační lock/semafor v backendu — složité, musí být distribuované pro více workerů.
+- B: Return 202 Accepted + polling — komplexní frontend logika.
+- **C (zvoleno): Striktní oddělení** — `force=False` NIKDY nespouští generování. Pokud cache neexistuje → `{"status":"no_analysis"}`. Generování pouze `force=True` (explicitní klik uživatele).
+
+**Rozhodnutí:** Jednořádková změna v `generate_class_summary()`. Frontend přijme `no_analysis` a zobrazí card s tlačítkem. UX je jasnější: uživatel vědomě spouští generování.
+
+**Kompromis:** Po invalidaci cache (re-evaluace studenta) se analytics neaktualizuje automaticky. Lektor musí kliknout "Generovat analýzu". Přijatelné — Man-in-the-Loop principy zachovány.
+
+---
+
 ## 9. Historie vývoje (Changelog)
+
+### v3.10.5 (6. 5. 2026) — Analytics prázdný stav UX
+
+- **`src/components/TabAnalytics.tsx`** — Explicitní prázdný stav při `data=null`: card s ikonou, vysvětlujícím textem a tlačítkem "Generovat analýzu" (volá `fetchAnalytics(force=true)`). Dříve se zobrazila prázdná plocha bez jakékoli výzvy k akci.
+
+---
+
+### v3.10.4 (6. 5. 2026) — Analytics force gate
+
+- **`backend/services/analytics.py`** — `generate_class_summary()`: bez `force=True` se AI generování nikdy nespustí. Pokud cache neexistuje a `force=False`, vrátí `{"status":"no_analysis"}`. Opravuje race condition: page refresh během generování spouštěl druhé souběžné LLM volání.
+- **`src/components/TabAnalytics.tsx`** — Handler pro `status="no_analysis"`: `setData(null)` bez erroru. Zobrazí prázdný stav (viz v3.10.5).
+
+---
+
+### v3.10.3 (6. 5. 2026) — Queue deduplicace + seeder fix
+
+- **`backend/services/evaluation_queue.py`** — `EvaluationQueue` dostala `_active_keys: Set[str]` sledující klíče `{lecturer_id}:{scenario_id}:{filename}`. `add_task()` vrátí `False` a přeskočí studenta pokud je klíč aktivní. `_run_task()` finally uvolní klíč. `clear_queue()` čistí i `_active_keys`.
+- **`backend/core/seeder.py`** — Nový helper `_seed_setting(db, key, value)`: každý `AppSettings` klíč dostane vlastní `db.commit()` + `try/except rollback`. Odstraňuje batch commit způsobující `IntegrityError` při unique violation na existujících DB.
+
+---
+
+### v3.10.2 (6. 5. 2026) — WS reconnect fix
+
+- **`src/components/TabEvaluation.tsx`** — Přidán `wsConnectCountRef` (useRef) počítající připojení. `ws.onopen` při reconnectu (count > 1) volá pouze `fetchEvaluations()` bez resetu stavů. Starý kód resetoval `'evaluating' → 'pending'` před fetchem, čímž ničil logiku zachování evaluating statusu a způsoboval automatické re-odesílání dávek po reconnectu.
+- **`src/components/TabEvaluation.tsx`** — Opraven self-healing `useEffect`: odstraněna podmínka `evaluatedCount === 0` (bránila správnému self-healingu po WS reconnectu).
+
+---
 
 ### v3.10.1 (6. 5. 2026) — Feedback mimo critical path (O2+O3)
 

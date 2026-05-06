@@ -2,6 +2,43 @@
 
 ---
 
+## 2026-05-06: Analytics force gate — oddělení read od generate (v3.10.4 / ADR-012)
+
+**Status:** Decided & Implemented
+
+**Kontext:** `GET /analytics/class/1/summary` bez `force=True` propadl k AI generování pokud cache neexistovala. Page refresh během generování (force=False, cache ještě nezapsána) → druhé souběžné LLM volání → 2× ~20s OpenRouter request. Logováno: dvě "Generování AI analýzy trvalo Xs" v logu v sekundovém odstupu.
+
+**Možnosti:**
+- A: Lock/semafor na generování — složité, distribuovaný state.
+- B: 202 + polling — komplexní.
+- **C (zvoleno): Striktní gate** — force=False bez cache → `{"status":"no_analysis"}`. Generování = výhradně force=True.
+
+**Rozhodnutí:** Jedna podmínka v `generate_class_summary()`. Frontend handler pro `no_analysis` + nový prázdný stav s tlačítkem "Generovat analýzu" (v3.10.5).
+
+**Dopad:** Žádné nechtěné dvojité generování. UX jasnější — lektor vědomě spouští generování.
+
+**Kompromis:** Po invalidaci cache lektor musí kliknout manuálně. Vědomé rozhodnutí — konzistentní s Man-in-the-Loop principy projektu.
+
+---
+
+## 2026-05-06: EvaluationQueue deduplicace — in-memory Set (v3.10.3 / ADR-011)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Page refresh + manuální re-submit dávky → 2 souběžné LLM požadavky na stejný ÚZ → OpenRouter throttle → 200–400s místo ~50s. WS reconnect fix (ADR-011 předchůdce, v3.10.2) eliminoval automatický re-submit, ale ručně/programově bylo stále možné přidat stejného studenta dvakrát.
+
+**Možnosti:**
+- A: DB check (`json_result IS NULL`, datum) — O(n) DB query, nepřesné pro aktivně zpracovávané.
+- **B (zvoleno): In-memory Set** — `_active_keys: Set[str]` na `EvaluationQueue` instanci. O(1), pokrývá queue i aktivní zpracování.
+
+**Rozhodnutí:** Klíč `{lecturer_id}:{scenario_id}:{filename}`. `add_task()` vrací `bool`. Klíč uvolněn v `_run_task()` finally. `clear_queue()` čistí i Set.
+
+**Dopad:** Eliminuje duplicitní evaluace při jakémkoli re-submitu. OpenRouter rate limiting se neaktivuje kvůli souběžným requestům na stejný ÚZ.
+
+**Kompromis:** In-memory → ztráta při restartu. Přijatelné: restart vyčistí i asyncio queue.
+
+---
+
 ## 2026-05-06: Feedback mimo critical path evaluace (v3.10.1 / ADR-010)
 
 **Status:** Decided & Implemented

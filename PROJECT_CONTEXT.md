@@ -1,9 +1,9 @@
 # Projektový Kontext — EVALUZ
-**Verze: 3.10.1 | Poslední aktualizace: 2026-05-06**
+**Verze: 3.10.5 | Poslední aktualizace: 2026-05-06**
 
 ## Aktuální Stav
 
-Systém v produkčním provozu na ÚPVSP. v3.10.1 decoupling zpětné vazby od critical path evaluace — lektor vidí výsledky kritérií okamžitě (~3–5 s), zpětná vazba se doplní asynchronně. 52 testů pass (unit + integration).
+Systém v produkčním provozu na ÚPVSP. v3.10.5 — stabilizace pipeline: WS reconnect fix (v3.10.2), deduplicace fronty + seeder fix (v3.10.3), analytics force gate (v3.10.4), analytics UX prázdný stav (v3.10.5). 52 testů pass.
 
 ## 1. Vize a Cíl
 
@@ -32,13 +32,14 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 - **ProfileModal:** Osobní údaje, doložka, změna hesla. Samostatná komponenta oddělená od AdminModal.
 - **AdminModal:** Správa systému (prompty, LLM konfigurace, uživatelé). Viditelné pouze správcům.
 
-## 4. LLM Pipeline — Klíčové Principy (v3.10.1)
+## 4. LLM Pipeline — Klíčové Principy (v3.10.5)
 
 - **Adaptivní chunking**: `_estimate_tokens()` odhadne objem; pokud se vše vejde do 70 % kontextového okna → přímé volání; jinak chunky po `CHUNK_SIZE` kritériích + `asyncio.gather` parallelismus.
 - **Fail-fast JSON**: 2-úrovňový fallback (přímý parse → sanitizace → ValueError). S 128k kontextem je truncace prakticky nemožná.
 - **Kanonizační match**: `_canonicalize_criterion_name()` — strip prefixu, trailing `**`, person suffix. Eliminuje false-negative placeholdery u multi-person ÚZ.
 - **Feedback mimo critical path (ADR-010)**: `evaluate_report()` vrací `zpetna_vazba=""`. Po `EVAL_SUCCESS` broadcastu spuštěn `asyncio.create_task(_run_feedback_task(...))`. Frontend dostane `FEEDBACK_DONE` až po doplnění zpětné vazby do DB.
 - **`FEEDBACK_MAX_TOKENS`**: Konfigurovatelný v DB (výchozí 250). Byl 600 — 3× zbytečně velký pro 3–5 vět.
+- **`EvaluationQueue._active_keys`**: Set klíčů `{lecturer_id}:{scenario_id}:{filename}` — deduplicace fronty. `add_task()` přeskočí studenta pokud je klíč aktivní. Uvolní se v `_run_task()` finally.
 - **Logging**: `logging.getLogger("evaluz.llm")`, httpx/httpcore ztišeny. Žádné print() v produkčním kódu.
 
 ## 5. Autentizace & RBAC

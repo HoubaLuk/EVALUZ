@@ -1,7 +1,7 @@
 # EVALUZ — Technická architektura a dokumentace
 
 > **Upozornění:** Tento soubor je archivní snímek z verze 3.8.7 (23. 4. 2026).  
-> Aktuální a autoritativní dokumentace je v **[docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md)** (v3.10.0).  
+> Aktuální a autoritativní dokumentace je v **[docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md)** (v3.10.5).  
 > Historie rozhodnutí: [docs/CHANGELOG.md](docs/CHANGELOG.md) | [.memory/decisions.md](.memory/decisions.md)
 
 **Verze systému (archiv):** 3.8.7  

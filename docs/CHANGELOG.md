@@ -2,6 +2,33 @@
 
 ---
 
+## [v3.10.5] — 2026-05-06 — Analytics prázdný stav UX
+
+- **`src/components/TabAnalytics.tsx`** — Explicitní prázdný stav při `data=null`: card s ikonou, vysvětlujícím textem a tlačítkem "Generovat analýzu" (volá `fetchAnalytics(force=true)`). Dříve se zobrazila prázdná plocha bez jakékoli výzvy k akci.
+
+---
+
+## [v3.10.4] — 2026-05-06 — Analytics force gate
+
+- **`backend/services/analytics.py`** — `generate_class_summary()`: bez `force=True` se AI generování nikdy nespustí. Pokud cache neexistuje a `force=False`, vrátí `{"status":"no_analysis"}`. Opravuje race condition: page refresh během generování spouštěl druhé souběžné LLM volání (force=False bez cache propadl k AI generování).
+- **`src/components/TabAnalytics.tsx`** — Handler pro `status="no_analysis"`: `setData(null)` bez erroru. Zobrazí prázdný stav (viz v3.10.5).
+
+---
+
+## [v3.10.3] — 2026-05-06 — Queue deduplicace + seeder fix
+
+- **`backend/services/evaluation_queue.py`** — `EvaluationQueue` dostala `_active_keys: Set[str]` sledující klíče `{lecturer_id}:{scenario_id}:{filename}`. `add_task()` vrátí `False` a přeskočí studenta pokud je klíč aktivní. `_run_task()` finally uvolní klíč. `clear_queue()` čistí i `_active_keys`. Zabraňuje duplicitnímu vyhodnocení při jakémkoli re-submitu dávky.
+- **`backend/core/seeder.py`** — Nový helper `_seed_setting(db, key, value)`: každý `AppSettings` klíč dostane vlastní `db.commit()` + `try/except rollback`. Odstraňuje batch commit způsobující `IntegrityError` při unique violation (nový klíč FEEDBACK_MAX_TOKENS nebyl seeded na existujících DB). Prompt upgrade sekce dostala vlastní `db.commit()`.
+
+---
+
+## [v3.10.2] — 2026-05-06 — WS reconnect fix
+
+- **`src/components/TabEvaluation.tsx`** — Přidán `wsConnectCountRef` (useRef) počítající připojení. `ws.onopen` při reconnectu (count > 1) volá pouze `fetchEvaluations()` bez resetu stavů. Starý kód resetoval `'evaluating' → 'pending'` před fetchem, čímž ničil logiku zachování evaluating statusu a způsoboval automatické re-odesílání dávek po reconnectu.
+- **`src/components/TabEvaluation.tsx`** — Opraven self-healing `useEffect`: odstraněna podmínka `evaluatedCount === 0` (bránila správnému self-healingu po WS reconnectu).
+
+---
+
 ## [v3.10.1] — 2026-05-06 — Feedback mimo critical path (O2+O3)
 
 ### O2 — FEEDBACK_MAX_TOKENS konfigurovatelný
