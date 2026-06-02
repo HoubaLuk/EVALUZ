@@ -165,13 +165,18 @@ Před sestavením promptu `evaluate_report()` odhadne tokeny:
 
 ```python
 def _estimate_tokens(text: str) -> int:
-    """~3.5 chars/token pro česky psaný text (konzervativní odhad)."""
-    return max(1, len(text) // 3)
+    """Odhadne počet tokenů podle délky textu.
+
+    Používáme 2,5 znaků/token — konzervativní odhad pro českou diakritiku.
+    Qwen a podobné modely tokenizují češtinu hustěji než angličtinu (cca 2,0–2,5 zn/token),
+    hodnota 3,5 původně kalibrovaná na angličtinu podhodnocovala vstup až o 40 %.
+    """
+    return max(1, int(len(text) / 2.5))
 ```
 
 Rozhodovací logika:
 ```
-est_tokens = _estimate_tokens(criteria_markdown + report_text)
+est_tokens = _estimate_tokens(system_prompt + report_text + criteria_markdown) + max_tokens
 budget     = context_window × CHUNK_THRESHOLD_TOKENS_PCT  (výchozí 0.7)
 
 if est_tokens <= budget:
@@ -183,6 +188,29 @@ else:
 ```
 
 `CHUNK_SIZE` a `CHUNK_THRESHOLD_TOKENS_PCT` jsou čteny z DB (`AppSettings`) při každém volání — lze měnit za běhu bez restartu.
+
+#### Token budget — ostrý provoz (25 kritérií + 10 normostran)
+
+| Složka | Znaky | Tokeny (`/2.5`) |
+|---|---|---|
+| 10 normostran (10 × 1 800 zn.) | 18 000 | ~7 200 |
+| System prompt | ~3 500 | ~1 400 |
+| User instrukce + boilerplate | ~1 400 | ~560 |
+| 6 kritérií (chunk) | ~2 500 | ~1 000 |
+| **Input celkem/chunk** | | **~10 160** |
+| Output/chunk (6 × 500 + 300) | | 3 300 |
+| **Celkem/chunk** | | **~13 460** |
+
+Pro spolehlivý provoz je doporučeno spustit vLLM s `--max-model-len 32768`. Hodnota 16 384 je pro 10+ normostran těsná; 4 096 (vLLM default) nestačí vůbec.
+
+#### Overflow retry (`_llm_call_with_overflow_retry`)
+
+Při HTTP 400 "context length exceeded" mechanismus automaticky sníží `max_tokens` na `limit − input_tokens − 300` a zopakuje volání. Od v3.10.6 regex detekuje obě varianty chybové zprávy:
+
+- **OpenAI formát**: `(\d+) in the messages`
+- **vLLM formát**: `your prompt contains at least (\d+) input tokens`
+
+Log per chunk (od v3.10.6): `[chunk N] n_criteria=X, est_input≈Y, max_tokens=Z, total≈W`
 
 ### 2.5 JSON parse pipeline (Phase 2 — detailní)
 

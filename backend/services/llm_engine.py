@@ -309,13 +309,16 @@ async def _llm_call_with_overflow_retry(client, kwargs: dict, prefix: str) -> ob
     except Exception as e:
         err = str(e)
         if "maximum context length" in err:
+            # OpenAI format: "... (\d+) in the messages ..."
+            # vLLM format:   "... your prompt contains at least (\d+) input tokens ..."
             m = re.search(
-                r"maximum context length is (\d+).*?(\d+) in the messages",
+                r"maximum context length is (\d+)"
+                r".*?(?:(\d+) in the messages|prompt contains at least (\d+) input tokens)",
                 err, re.DOTALL
             )
             if m:
                 limit = int(m.group(1))
-                input_tokens = int(m.group(2))
+                input_tokens = int(m.group(2) or m.group(3))
                 safe_tokens = max(512, limit - input_tokens - 300)
                 logger.warning(f"{prefix}Context overflow ({input_tokens}+{kwargs['max_tokens']}>{limit})"
                       f" — retry s max_tokens={safe_tokens}")
@@ -371,8 +374,13 @@ PLATFORM_CONTEXT_DEFAULTS: dict[str, int] = {
 
 
 def _estimate_tokens(text: str) -> int:
-    """Odhadne počet tokenů podle délky textu (~3,5 znaku/token pro češtinu)."""
-    return max(1, int(len(text) / 3.5))
+    """Odhadne počet tokenů podle délky textu.
+
+    Používáme 2,5 znaků/token — konzervativní odhad pro českou diakritiku.
+    Qwen a podobné modely tokenizují češtinu hustěji než angličtinu (cca 2,0–2,5 zn/token),
+    hodnota 3,5 původně kalibrovaná na angličtinu podhodnocovala vstup až o 40 %.
+    """
+    return max(1, int(len(text) / 2.5))
 
 
 def _get_setting(db: "Session", key: str, default: str) -> str:
@@ -492,7 +500,8 @@ Požadovaná struktura JSON odpovědi:
     kwargs.update(_build_llm_kwargs(platform, enable_thinking, context_window, use_json_mode))
 
     chunk_prefix = f"{prefix}[chunk {chunk_idx}] "
-    logger.info(f"{chunk_prefix}n_criteria={n_criteria}, max_tokens={chunk_max_tokens}")
+    est_input = _estimate_tokens(system_prompt + user_prompt)
+    logger.info(f"{chunk_prefix}n_criteria={n_criteria}, est_input≈{est_input}, max_tokens={chunk_max_tokens}, total≈{est_input + chunk_max_tokens}")
 
     async def _call_and_parse(call_kwargs: dict, attempt_label: str) -> dict:
         response = await _llm_call_with_overflow_retry(client, call_kwargs, chunk_prefix)

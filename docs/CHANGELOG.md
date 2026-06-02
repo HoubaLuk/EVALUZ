@@ -2,6 +2,32 @@
 
 ---
 
+## [v3.10.6] — 2026-06-02 — vLLM overflow fix + přesnější token odhad + UX chybových notifikací
+
+### llm_engine.py — overflow retry pro vLLM
+
+- **`_llm_call_with_overflow_retry()`** — opravena regex podmínka detekce překročení kontextu. Původní pattern `(\d+) in the messages` odpovídal pouze OpenAI formátu chybové zprávy; vLLM vrací `your prompt contains at least (\d+) input tokens`, takže retry se nikdy nespustil a volání okamžitě selhalo s HTTP 400. Nový regex zachytí obě varianty: OpenAI i vLLM. Mechanismus nyní správně sníží `max_tokens` na `limit − input_tokens − 300` a zopakuje volání.
+
+### llm_engine.py — konzervativnější token odhad pro češtinu
+
+- **`_estimate_tokens()`** — koeficient změněn z `3,5 zn/token` na `2,5 zn/token`. Česká diakritika se v modelech (Qwen, Mistral) tokenizuje hustěji než angličtina (~2,0–2,5 zn/token). Původní hodnota 3,5 podhodnocovala vstupní tokeny o 30–40 %, což mohlo způsobit chybné rozhodnutí single-call vs. chunking (model dostával prompt příliš velký pro kontext). Při ostrém provozu s 25 kritérii a 10 normostranami (≈ 9 000 skutečných tokenů vstupního textu) je přesný odhad kritický.
+- **`_evaluate_chunk()`** — přidán log `est_input≈X, total≈Y` per chunk. Umožňuje okamžitou diagnostiku tokenového rozpočtu v produkčních logách bez nutnosti externího tokenizéru.
+
+### TabEvaluation.tsx — vizuální rozlišení chybových notifikací
+
+- **`toastMessage` state** — typ změněn z `string | null` na `{ text: string; type: 'success' | 'error' } | null`. Všechna volání `setToastMessage()` aktualizována.
+- **Toast render** — chybová zpráva (typ `error`) zobrazena s červeným pozadím (`--color-negative`) a ikonou `faTriangleExclamation`; úspěch zůstává beze změny (sekundární barva, `faCircleCheck`). Dříve všechny notifikace vypadaly vizuálně stejně — chyba vyhodnocení se zobrazila jako zelená "success" hláška.
+
+### Doporučení pro vLLM deployment (ostrý provoz)
+
+Pro spolehlivý provoz s 25 kritérii a dokumenty o 10+ normostranách je třeba spustit vLLM s:
+```
+--max-model-len 32768
+```
+Hodnota 4096 (vLLM default) nestačí: 10 normostran generuje ≈ 7 200 vstupních tokenů; spolu s výstupem 3 300 tokenů/chunk by byl celkový limit překročen i při 16 384.
+
+---
+
 ## [v3.10.5] — 2026-05-06 — Analytics prázdný stav UX
 
 - **`src/components/TabAnalytics.tsx`** — Explicitní prázdný stav při `data=null`: card s ikonou, vysvětlujícím textem a tlačítkem "Generovat analýzu" (volá `fetchAnalytics(force=true)`). Dříve se zobrazila prázdná plocha bez jakékoli výzvy k akci.

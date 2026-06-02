@@ -68,7 +68,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const evalDetailScrollRef = useRef<HTMLDivElement>(null);
     const studentListScrollRef = useRef<HTMLDivElement>(null);
     const [isCancelling, setIsCancelling] = useState(false);
-    const [toastMessage, setToastMessage] = useState<string | null>(null);
+    const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
     // MLOps/RAG State
     const [isRagEnabled, setIsRagEnabled] = useState(false);
@@ -124,7 +124,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 } else if (data.type === 'EVAL_ERROR') {
                     setEvaluatedCount(prev => prev + 1);
                     setErrorCount(prev => prev + 1);
-                    setToastMessage(`Chyba u studenta: ${data.error}`);
+                    setToastMessage({ text: `Chyba u studenta: ${data.error}`, type: 'error' });
                     setTimeout(() => setToastMessage(null), 5000);
                     setStudents(prev => prev.map(s => {
                         const sName = (s.name || "").normalize('NFC');
@@ -322,7 +322,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         formData.append('scenario_display_name', scenarioName || '');
 
         try {
-            setToastMessage("Identifikuji autory úředních záznamů...");
+            setToastMessage({ text: "Identifikuji autory úředních záznamů...", type: 'success' });
             const res = await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
@@ -332,7 +332,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             if (res.ok) {
                 // Refetch k syncu ID + jmen
                 await fetchEvaluations();
-                setToastMessage("Data o studentech nahrána.");
+                setToastMessage({ text: "Data o studentech nahrána.", type: 'success' });
                 setTimeout(() => setToastMessage(null), 3000);
             }
         } catch (err) {
@@ -456,7 +456,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
             if (response.status === 202 || response.ok) {
                 const totalStudentsSent = filesToUpload.length + studentIdsFromDB.length;
-                setToastMessage(`Dávka odeslána. Vyhodnocování ${totalStudentsSent} studentů probíhá na pozadí.`);
+                setToastMessage({ text: `Dávka odeslána. Vyhodnocování ${totalStudentsSent} studentů probíhá na pozadí.`, type: 'success' });
                 setTimeout(() => setToastMessage(null), 5000);
             } else {
                 const errorData = await response.json();
@@ -486,9 +486,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     fetchEvaluations();
 
                     if (errorCount > 0) {
-                        setToastMessage(`Vyhodnocování dokončeno s ${errorCount} chybami. Zkontrolujte prosím seznam záznamů.`);
+                        setToastMessage({ text: `Vyhodnocování dokončeno s ${errorCount} chybami. Zkontrolujte prosím seznam záznamů.`, type: 'error' });
                     } else {
-                        setToastMessage("Dávka úspěšně zpracována.");
+                        setToastMessage({ text: "Dávka úspěšně zpracována.", type: 'success' });
                     }
 
                     setTimeout(() => {
@@ -511,7 +511,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
             if (res.ok) {
-                setToastMessage("Zpracování dalších ÚZ bylo zastaveno.");
+                setToastMessage({ text: "Zpracování dalších ÚZ bylo zastaveno.", type: 'success' });
                 // Note: The UI logic (isEvaluating=false) will probably be handled automatically 
                 // when the queue empties out (or not if we don't get SUCCESS/ERROR for them).
                 // Let's manually trigger a refresh to clear pending statuses and stop.
@@ -660,7 +660,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             });
 
             if (response.ok) {
-                setToastMessage("Změny úspěšně uloženy. Analytika bude automaticky přepočítána.");
+                setToastMessage({ text: "Změny úspěšně uloženy. Analytika bude automaticky přepočítána.", type: 'success' });
                 setTimeout(() => setToastMessage(null), 4000);
                 setStudents(current => current.map(s => s.id === student.id ? { ...s, isDirty: false } : s));
             } else {
@@ -699,7 +699,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             });
 
             if (response.ok) {
-                setToastMessage("⭐ Zlatý příklad byl úspěšně uložen do sítě.");
+                setToastMessage({ text: "⭐ Zlatý příklad byl úspěšně uložen do sítě.", type: 'success' });
                 setTimeout(() => setToastMessage(null), 4000);
             } else {
                 const errData = await response.json();
@@ -747,7 +747,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                         return nameA.localeCompare(nameB, 'cs');
                     });
                 });
-                setToastMessage("Jméno studenta bylo ručně upraveno.");
+                setToastMessage({ text: "Jméno studenta bylo ručně upraveno.", type: 'success' });
                 setTimeout(() => setToastMessage(null), 3000);
             } else {
                 throw new Error("Failed to save name");
@@ -794,9 +794,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
             {/* Toast */}
             {toastMessage && (
-                <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', background: 'var(--color-secondary)', color: '#fff', padding: '8px 14px', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.25)', fontSize: '0.875rem', fontWeight: 600 }}>
-                    <Icon icon={faCircleCheck} />
-                    <span>{toastMessage}</span>
+                <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', background: toastMessage.type === 'error' ? 'var(--color-negative, #c0392b)' : 'var(--color-secondary)', color: '#fff', padding: '8px 14px', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.25)', fontSize: '0.875rem', fontWeight: 600 }}>
+                    <Icon icon={toastMessage.type === 'error' ? faTriangleExclamation : faCircleCheck} />
+                    <span>{toastMessage.text}</span>
                     <button className="btn btn--sm btn--icon-only" style={{ marginLeft: 4, background: 'transparent', border: 'none', color: '#fff' }} onClick={() => setToastMessage(null)}>
                         <Icon icon={faXmark} />
                     </button>
@@ -1082,7 +1082,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                         });
                                                         if (!approveRes.ok) throw new Error('Schválení selhalo');
                                                         setStudents(prev => prev.map(s => s.id === activeStudentData.id ? { ...s, is_approved: true } : s));
-                                                        setToastMessage("Hodnocení schváleno.");
+                                                        setToastMessage({ text: "Hodnocení schváleno.", type: 'success' });
                                                         setTimeout(() => setToastMessage(null), 3000);
                                                         const combinedSubtitle = `${className || 'Neznámá třída'} - ${scenarioName || scenarioId || 'Neznámá situace'}`;
                                                         const res = await fetch(`${API_BASE_URL}/export/evaluation/${activeStudentData.id}/pdf?scenario_id=${encodeURIComponent(combinedSubtitle)}`, {
