@@ -4,25 +4,38 @@
 
 ## [v3.10.7] — 2026-06-03 — Oprava matching kritérií pro multi-person ÚZ (PARTIAL RECOVERY fix)
 
-### llm_engine.py — _PERSON_SUFFIX_RE + fallback substring match
+### llm_engine.py — _canonicalize_criterion_name + _PERSON_SUFFIX_RE + fallback match
+
+Tři koordinované změny řeší `PARTIAL RECOVERY: 6/25` na scénářích kde kritéria
+obsahují jméno osoby jako součást názvu (multi-person ÚZ, např. scen-2 s
+Ivana Horáková + Tadeáš Kadlec).
 
 - **`_PERSON_SUFFIX_RE`** — regex rozšířen o volitelnou závorku za jménem osoby:
   `(?:\s*\([^)]*\))?` na konci. Předchozí pattern `\s*$` selhal pokud za jménem
   následovala závorka, např. `– Ivana Horáková (negativní)` nebo
-  `– Tadeáš Kadlec (Příkaz k dodání do VTOS)`. Suffix se nestripoval → kanonické
-  jméno neodpovídalo expected → 19/25 kritérií označeno jako `llm_omitted`.
-  Potvrzeno testy: `výsledek lustrace – patros - ivana horáková (negativní)`
-  → `výsledek lustrace – patros` ✓
+  `– Tadeáš Kadlec (Příkaz k dodání do VTOS jako důvod)`. Suffix se nestripoval →
+  kanonická jména nesedět → 19/25 kritérií označeno `llm_omitted`.
 
-- **`_validate_and_fix_vysledky()`** — přidán fallback substring match pro případ,
-  kdy regex nestačí. Pokud kanonický klíč LLM výstupu není nalezen přesnou shodou,
-  hledáme expected kritérium jehož canonical je podřetězcem LLM canonical nebo naopak.
-  Matchování loguje na DEBUG úroveň. Fallback je záchrana, primární cesta je stále
-  přesná kanonická shoda.
+- **`_canonicalize_criterion_name()`** — přidána normalizace pomlček před aplikací
+  suffix regexu: em-dash (—) a en-dash (–) → hyphen (-). LLM (Qwen3.6 i jiné)
+  konzistentně mění typ pomlčky v názvech kritérií, což způsobovalo neshodu i
+  při jinak správném obsahu. Pořadí kroků: strip prefix → strip bold → normalizace
+  pomlček → strip person suffix → lowercase.
 
-**Dopad:** Scénáře s multi-person ÚZ (kritéria obsahují jméno osoby jako součást
-názvu, např. scen-2 s Ivana Horáková + Tadeáš Kadlec) přestávaly matchovat —
-výsledek byl `PARTIAL RECOVERY: 6/25`. Po opravě by mělo být `25/25`.
+- **`_validate_and_fix_vysledky()`** — přidán fallback substring match jako záchrana
+  pro zbývající edge-cases: pokud přesná kanonická shoda selže, hledáme expected
+  kritérium jehož canonical je podřetězcem LLM canonical nebo naopak. Loguje na DEBUG.
+
+**Potvrzeno testováním:**
+```
+"7. Kritérium: Ztotožnění osoby – ... – Ivana Horáková"  → match ✓
+"8. Kritérium: Výsledek lustrace – PATROS - Ivana Horáková (negativní)"  → match ✓
+```
+
+**Zbývající omezení:** Pokud LLM zkrátí název kritéria (parafráze místo doslovné kopie),
+matching selže i po těchto opravách. Příklad z testování:
+LLM vrátil `"podání vysvětlení"`, expected bylo `"poučení před podáním vysvětlení"`.
+Jedná se o LLM halucinaci/zkrácení — řeší se na úrovni promptu, ne matchingu.
 
 ---
 

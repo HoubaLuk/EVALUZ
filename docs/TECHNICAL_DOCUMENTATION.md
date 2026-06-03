@@ -239,7 +239,7 @@ _merge_chunk_results()
        │
        ▼
 _validate_and_fix_vysledky()   ← FIX A
-  • kanonizační match (odfiltruje halucinovaná kritéria)
+  • kanonizační match (viz sekce 2.6)
   • doplní chybějící jako placeholder (_llm_omitted=True, body=0)
   • přepočítá celkove_skore
        │
@@ -289,17 +289,35 @@ Scannuje znak po znaku. Uvnitř JSON string hodnoty:
 
 ### 2.6 Kanonizační match (FIX A — podrobně)
 
-`_canonicalize_criterion_name()` normalizuje název kritéria pro porovnání:
-1. Strip prefixu `**N. Kritérium:` (LLM někdy zkopíruje formát z promptu)
-2. Strip trailing markdown bold `**`
-3. Strip person-specific suffixu `– Jméno Příjmení` (heuristika kotvená na konec stringu — nenarušuje popisné pomlčky uprostřed jako `– minimálně jméno, příjmení`)
-4. Lower-case + strip
+`_canonicalize_criterion_name()` normalizuje název kritéria pro porovnání (od v3.10.7):
 
-Příklad: LLM vrátí `"Ztotožnění osoby – Ivana Horáková"`, expected je `"Ztotožnění osoby"` → oba kanonizují na `"ztotožnění osoby"` → match. `nazev` v DB/UI je normalizován na expected verzi, původní LLM verze zachována v `_llm_actual_name` pro audit.
+1. **Strip prefixu** `**N. Kritérium:` — LLM někdy zkopíruje formát z promptu
+2. **Strip trailing bold** `**`
+3. **Normalizace pomlček** — em-dash (—) a en-dash (–) → hyphen (-); LLM konzistentně mění typ pomlčky
+4. **Strip person-suffix** — heuristika `_PERSON_SUFFIX_RE` odstraní poslední ` – Jméno Příjmení` a volitelnou závorku za jménem, např. `– Ivana Horáková (negativní)`. Kotveno na konec stringu — nenarušuje popisné pomlčky uprostřed jako `– minimálně jméno, příjmení`
+5. **Lower-case + strip**
 
-**Multi-person duplikát**: Model může stejné kritérium vrátit víckrát (jednou pro každou osobu v ÚZ). Zachovává se první výskyt; duplicity jsou logovány.
+```
+Příklady (v3.10.7):
+"7. Kritérium: Ztotožnění osoby – ... – Ivana Horáková"
+  → strip prefix → strip dash-normalize → strip suffix
+  → "ztotožnění osoby – minimálně jméno, příjmení, datum narození"  ✓
 
-**Oddělovač kritérií**: Mezi kritéria v promptu je vkládán řetězec `#############` (konstanta `CRITERIA_DELIMITER`). `_split_criteria_chunks()` má primární cestu přes delimiter, legacy regex lookahead jako fallback pro starší data.
+"8. Kritérium: Výsledek lustrace – PATROS - Ivana Horáková (negativní)"
+  → "výsledek lustrace - patros"  ✓  (závorka za jménem tolerována od v3.10.7)
+```
+
+`nazev` v DB/UI se normalizuje na expected verzi; původní LLM název zůstane v `_llm_actual_name` pro audit.
+
+**Fronta expected kritérií** (`canonical_queue`): každé expected kritérium = samostatný FIFO slot. Dvě kritéria se stejným kanonickým základem (např. `"ztotožnění osoby – ..."` pro Horáková i Kadlece) mají každé vlastní slot — zabraňuje ztrátě jednoho při merge.
+
+**Fallback substring match** (od v3.10.7): pokud přesná kanonická shoda selže, hledá expected kritérium, jehož canonical je podřetězcem LLM canonical nebo naopak. Loguje na DEBUG. Primární cestou zůstává přesný match.
+
+**Zbývající omezení**: pokud LLM parafráuje název kritéria (zkrátí nebo přepíše), matching selže i po kanonizaci. Jedná se o LLM halucinaci — řeší se na úrovni promptu, ne matchingu.
+
+**Multi-person duplikát**: model může stejné kritérium vrátit vícekrát. Zachovává se první výskyt; duplicity jsou logovány.
+
+**Oddělovač kritérií**: mezi kritéria v promptu je vkládán řetězec `#############` (konstanta `CRITERIA_DELIMITER`). `_split_criteria_chunks()` má primární cestu přes delimiter, legacy regex lookahead jako fallback pro starší data.
 
 ### 2.7 Diagnostika — raw dump
 
