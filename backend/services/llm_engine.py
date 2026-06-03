@@ -68,9 +68,11 @@ def _canonicalize_criterion_name(name: str) -> str:
     Aplikuje:
     1) Strip prefixu `**N. Kritérium:`/`N. Kritérium:` (LLM někdy zkopíruje formát z promptu).
     2) Strip trailing `**` z markdown bold.
-    3) Strip person-specific suffixu (poslední ` – Jméno Příjmení`) — heuristika pro multi-person ÚZ,
+    3) Normalizace pomlček: em-dash (—) a en-dash (–) → hyphen (-). LLM někdy mění typ pomlčky.
+    4) Strip person-specific suffixu (poslední ` – Jméno Příjmení`) — heuristika pro multi-person ÚZ,
        kde model "personalizuje" generické kritérium jménem osoby z textu.
-    4) Lower-case + strip whitespace.
+       Závorka za jménem je tolerována: `– Jan Novák (negativní)`.
+    5) Lower-case + strip whitespace.
 
     NEodstraňuje popisné pomlčky uprostřed (např. "minimálně jméno, příjmení, datum narození")
     — heuristika je kotvená na konec stringu (`$`).
@@ -78,8 +80,10 @@ def _canonicalize_criterion_name(name: str) -> str:
     if not isinstance(name, str):
         return ""
     s = _CRITERION_PREFIX_RE.sub('', name).strip()
-    # Strip trailing markdown bold (`**`) — LLM někdy zkopíruje celé `**N. Kritérium: X**`
+    # Strip trailing markdown bold (`**`)
     s = re.sub(r'\*+\s*$', '', s).strip()
+    # Normalizace pomlček → hyphen (LLM mění – na - nebo naopak)
+    s = s.replace('—', '-').replace('–', '-')
     # Iteruj: může být víc person-suffixů za sebou (např. "X – Jan Novák – Tadeáš Kadlec")
     while True:
         new_s = _PERSON_SUFFIX_RE.sub('', s).strip()
