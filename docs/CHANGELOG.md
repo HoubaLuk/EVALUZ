@@ -2,6 +2,30 @@
 
 ---
 
+## [v3.10.7] — 2026-06-03 — Oprava matching kritérií pro multi-person ÚZ (PARTIAL RECOVERY fix)
+
+### llm_engine.py — _PERSON_SUFFIX_RE + fallback substring match
+
+- **`_PERSON_SUFFIX_RE`** — regex rozšířen o volitelnou závorku za jménem osoby:
+  `(?:\s*\([^)]*\))?` na konci. Předchozí pattern `\s*$` selhal pokud za jménem
+  následovala závorka, např. `– Ivana Horáková (negativní)` nebo
+  `– Tadeáš Kadlec (Příkaz k dodání do VTOS)`. Suffix se nestripoval → kanonické
+  jméno neodpovídalo expected → 19/25 kritérií označeno jako `llm_omitted`.
+  Potvrzeno testy: `výsledek lustrace – patros - ivana horáková (negativní)`
+  → `výsledek lustrace – patros` ✓
+
+- **`_validate_and_fix_vysledky()`** — přidán fallback substring match pro případ,
+  kdy regex nestačí. Pokud kanonický klíč LLM výstupu není nalezen přesnou shodou,
+  hledáme expected kritérium jehož canonical je podřetězcem LLM canonical nebo naopak.
+  Matchování loguje na DEBUG úroveň. Fallback je záchrana, primární cesta je stále
+  přesná kanonická shoda.
+
+**Dopad:** Scénáře s multi-person ÚZ (kritéria obsahují jméno osoby jako součást
+názvu, např. scen-2 s Ivana Horáková + Tadeáš Kadlec) přestávaly matchovat —
+výsledek byl `PARTIAL RECOVERY: 6/25`. Po opravě by mělo být `25/25`.
+
+---
+
 ## [v3.10.6] — 2026-06-02 — vLLM overflow fix + přesnější token odhad + UX chybových notifikací
 
 ### llm_engine.py — overflow retry pro vLLM

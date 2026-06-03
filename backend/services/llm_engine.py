@@ -51,12 +51,14 @@ def _dump_raw_llm_output(prefix: str, raw: str, error: Exception) -> str:
 
 _CRITERION_PREFIX_RE = re.compile(r'^\**\s*\d+\.\s*Krit[eé]rium\s*:?\s*', re.IGNORECASE)
 # Person-suffix heuristika: poslední ` – ` (em-dash, en-dash, hyphen) následované
-# vzorem dvou Velkých-slov (jméno + příjmení s českou diakritikou) až do konce.
-# Aplikuje se POUZE na poslední segment, aby nepoškodila popisné pomlčky typu
+# vzorem dvou Velkých-slov (jméno + příjmení s českou diakritikou) + volitelná závorka na konci.
+# Aplikuje se POUZE na poslední segment, aby nepoškodila popisné pomlčky uprostřed, např.
 # "Ztotožnění osoby – minimálně jméno, příjmení, datum narození".
+# Závorka za jménem je povolena: "– Ivana Horáková (negativní)", "– Tadeáš Kadlec (Příkaz...)".
 _PERSON_SUFFIX_RE = re.compile(
     r'\s*[–—-]\s*[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+'
-    r'(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+){1,3}\s*$'
+    r'(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+){1,3}'
+    r'(?:\s*\([^)]*\))?\s*$'
 )
 
 
@@ -132,27 +134,41 @@ def _validate_and_fix_vysledky(
         canonical = _canonicalize_criterion_name(actual_name)
 
         if canonical_queue.get(canonical):
-            # Pop ze fronty — každý slot spotřebuje jen jednu položku
             expected_name = canonical_queue[canonical].pop(0)
-            if actual_name != expected_name:
-                v['_llm_actual_name'] = actual_name
-            v['nazev'] = expected_name
-
-            # Normalizace body: autoritativní hodnota z DB (splneno=True), 0 (splneno=False).
-            # Model nemůže ovlivnit počet bodů — body hodnota v DB je ground truth.
-            if v.get('splneno', False):
-                if expected_criteria_bodies and expected_name in expected_criteria_bodies:
-                    v['body'] = expected_criteria_bodies[expected_name]
-                # Pokud body z DB není k dispozici, ponecháme co model vrátil (fallback)
-            else:
-                v['body'] = 0
-
-            known.append(v)
         elif canonical in canonical_queue:
-            # Fronta pro tento canonical je prázdná → model vrátil kritérium vícekrát (multi-person).
+            # Fronta pro tento canonical je prázdná → multi-person duplikát.
             duplicate_names.append(actual_name)
+            continue
         else:
-            unknown_names.append(actual_name or '<bez názvu>')
+            # Fallback: hledáme expected kritérium, jehož canonical je podřetězec
+            # nebo nadřetězec LLM canonical. Zachytí případy kde závorka nebo
+            # drobný přípisek způsobí, že regex nestripuje suffix dokonale.
+            fallback_match = None
+            for cq_key, cq_slots in canonical_queue.items():
+                if not cq_slots:
+                    continue
+                if cq_key in canonical or canonical in cq_key:
+                    fallback_match = cq_key
+                    break
+            if fallback_match:
+                expected_name = canonical_queue[fallback_match].pop(0)
+                logger.debug(f"{prefix}  fallback match: '{canonical}' → '{fallback_match}'")
+            else:
+                unknown_names.append(actual_name or '<bez názvu>')
+                continue
+
+        if actual_name != expected_name:
+            v['_llm_actual_name'] = actual_name
+        v['nazev'] = expected_name
+
+        # Normalizace body: autoritativní hodnota z DB (splneno=True), 0 (splneno=False).
+        if v.get('splneno', False):
+            if expected_criteria_bodies and expected_name in expected_criteria_bodies:
+                v['body'] = expected_criteria_bodies[expected_name]
+        else:
+            v['body'] = 0
+
+        known.append(v)
 
     if unknown_names:
         logger.warning(f"{prefix}⚠ Odfiltrováno {len(unknown_names)} neznámých kritérií "
