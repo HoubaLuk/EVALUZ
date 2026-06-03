@@ -152,6 +152,18 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         return () => window.removeEventListener('evaluz-sync-complete', handleSyncComplete);
     }, [scenarioId]);
 
+    // Page Visibility API: když se záložka vrátí do popředí a probíhá vyhodnocování,
+    // okamžitě překreslit stav z DB (WS timer mohl být browser-em pozastaven).
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && isEvaluating) {
+                fetchEvaluations();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [isEvaluating]);
+
     const [isSaving, setIsSaving] = useState(false);
 
     const fetchEvaluations = async () => {

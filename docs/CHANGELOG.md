@@ -2,6 +2,17 @@
 
 ---
 
+## [v3.10.8] — 2026-06-03 — Page Visibility API fix (UI zaseknutí při vyhodnocování)
+
+### TabEvaluation.tsx — visibilitychange listener
+
+- Přidán `document.addEventListener('visibilitychange', ...)` v `useEffect` závislém na `isEvaluating`. Pokud uživatel přepne záložku a vrátí se zpět *v době aktivního vyhodnocování*, browser mohl pozastavit JS timery (setTimeout reconnect WS). Po návratu záložky do popředí (`visibilityState === 'visible'`) se okamžitě zavolá `fetchEvaluations()` — výsledky se načtou z DB bez nutnosti manuálního refreshe.
+- Listener se registruje jen pokud `isEvaluating === true`, takže nemá dopad na výkon při nečinnosti.
+
+**Kontext:** Single-call evaluace trvá ~105 s. WS timer pro auto-reconnect (3 s) mohl být prohlížečem pozastaven při přepnutí záložky → uživatel viděl loading bez výsledků i po dokončení, dokud neprovedl F5.
+
+---
+
 ## [v3.10.7] — 2026-06-03 — Oprava matching kritérií pro multi-person ÚZ (PARTIAL RECOVERY fix)
 
 ### llm_engine.py — _canonicalize_criterion_name + _PERSON_SUFFIX_RE + fallback match
