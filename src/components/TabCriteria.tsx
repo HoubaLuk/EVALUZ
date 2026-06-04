@@ -34,6 +34,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
   const [isUploading, setIsUploading] = useState(false);
   const [isFetchingCriteria, setIsFetchingCriteria] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [criteriaCount, setCriteriaCount] = useState<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,6 +43,7 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
       role: 'assistant',
       content: 'Dobrý den, jsem váš AI asistent pro tvorbu hodnotících kritérií. Vložte prosím název modelové situace a svá heslovitá kritéria. Budu se vás následně doptávat na detaily.',
     }]);
+    setCriteriaCount(null);
     if (!scenarioId) { setCriteriaMarkdown('Vyberte prosím situaci v levém panelu.'); return; }
     fetchCriteria();
   }, [scenarioId]);
@@ -58,9 +60,18 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
       const res = await fetch(`${API_BASE_URL}/criteria/${scenarioId}`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
       });
-      if (res.ok) { const data = await res.json(); setCriteriaMarkdown(data.markdown_content); }
-      else setCriteriaMarkdown('');
-    } catch (error) { setCriteriaMarkdown(''); }
+      if (res.ok) {
+        const data = await res.json();
+        setCriteriaMarkdown(data.markdown_content);
+        setCriteriaCount(data.criteria_count ?? null);
+      } else {
+        setCriteriaMarkdown('');
+        setCriteriaCount(null);
+      }
+    } catch (error) {
+      setCriteriaMarkdown('');
+      setCriteriaCount(null);
+    }
     finally { setIsFetchingCriteria(false); }
   };
 
@@ -151,8 +162,15 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
         body: JSON.stringify({ scenario: scenarioId, markdown_content: criteriaMarkdown }),
       });
       if (res.ok) {
+        const data = await res.json();
+        const savedCount: number = data.criteria_count ?? 0;
+        setCriteriaCount(savedCount);
         setSaveSuccess(true);
         if (onCriteriaSaved) onCriteriaSaved();
+        if (savedCount === 0) {
+          setSaveError('Kritéria uložena jako prázdná — evaluace nebude možná. Doplňte kritéria a uložte znovu.');
+          setSaveSuccess(false);
+        }
         fetchCriteria();
       } else {
         const errorData = await res.json();
@@ -261,7 +279,19 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
           <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
             HODNOTÍCÍ KRITÉRIA: {scenarioName ? scenarioName.toUpperCase() : (scenarioId ? scenarioId.toUpperCase() : 'NEVYBRÁNO')}
           </span>
-          <Icon icon={faShield} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {scenarioId && criteriaCount !== null && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                background: criteriaCount > 0 ? 'rgba(255,255,255,0.18)' : 'var(--color-negative, #c0392b)',
+                color: '#fff', padding: '2px 10px', borderRadius: 12, fontSize: '0.75rem', fontWeight: 700,
+              }}>
+                <Icon icon={criteriaCount > 0 ? faCircleCheck : faCircleExclamation} size="xs" />
+                Uloženo: {criteriaCount} {criteriaCount === 1 ? 'kritérium' : (criteriaCount >= 2 && criteriaCount <= 4 ? 'kritéria' : 'kritérií')}
+              </span>
+            )}
+            <Icon icon={faShield} />
+          </div>
         </div>
 
         <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

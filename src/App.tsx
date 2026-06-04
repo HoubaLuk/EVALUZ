@@ -582,6 +582,7 @@ export default function EvaluzDashboard() {
                 scenarioName={activeScenario?.name}
                 onEvaluatedChange={setHasEvaluations}
                 lecturerId={lecturerId}
+                isActive={activeTab === 'evaluation'}
               />
             </div>
 

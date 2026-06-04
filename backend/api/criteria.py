@@ -100,15 +100,24 @@ def get_criteria(scenario: str, db: Session = Depends(get_db), current_user: Lec
     """
     NAČTENÍ KRITÉRIÍ:
     Vrátí aktuálně uložený Markdown text kritérií pro daný scénář a lektora.
+    Od v3.10.9 vrací také `criteria_count` — počet rozparsovaných kritérií v tabulce Criterion.
     """
     criteria_record = db.query(EvaluationCriteria).filter(
         EvaluationCriteria.scenario_name == scenario,
         EvaluationCriteria.lecturer_id == current_user.id
     ).first()
     if not criteria_record:
-           return {"scenario": scenario, "markdown_content": "Kritéria zatím nebyla definována."}
-    
-    return {"scenario": scenario, "markdown_content": criteria_record.markdown_content}
+        return {"scenario": scenario, "markdown_content": "Kritéria zatím nebyla definována.", "criteria_count": 0}
+
+    count = db.query(Criterion).filter(
+        Criterion.evaluation_criteria_id == criteria_record.id
+    ).count()
+
+    return {
+        "scenario": scenario,
+        "markdown_content": criteria_record.markdown_content or "",
+        "criteria_count": count,
+    }
 
 
 @router.post("/save")
@@ -150,4 +159,8 @@ def save_criteria(request: SaveCriteriaRequest, db: Session = Depends(get_db), c
         db.add(new_crit)
     
     db.commit()
-    return {"status": "success", "message": f"Kritéria uložena a rozparsována na {len(parsed_items)} položek."}
+    return {
+        "status": "success",
+        "message": f"Kritéria uložena a rozparsována na {len(parsed_items)} položek.",
+        "criteria_count": len(parsed_items),
+    }

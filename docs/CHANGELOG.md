@@ -2,6 +2,27 @@
 
 ---
 
+## [v3.10.9] — 2026-06-04 — Ochrana evaluace bez kritérií + vizuální počet kritérií
+
+### Problém
+
+Lektor mohl spustit dávkové vyhodnocování i bez uložených kritérií — v UI nebyl nikde vidět počet uložených kritérií a frontend přítomnost kritérií před odesláním dávky nekontroloval. Backend navíc mohl při NULL hodnotě `markdown_content` selhat s HTTP 500 místo čistého 404.
+
+### Backend
+
+- **`backend/api/evaluate.py`** — oprava potenciálního `AttributeError`: `(criteria_record.markdown_content or '').strip()`. Sloupec `markdown_content` je `nullable=True`; při NULL hodnotě dříve hrozila 500 místo korektní 404. Blokace evaluace bez kritérií tím zůstává spolehlivá.
+- **`backend/api/criteria.py`** — `GET /criteria/{scenario}` nově vrací `criteria_count` (počet rozparsovaných kritérií z tabulky `Criterion`). `POST /criteria/save` vrací `criteria_count` (= počet rozparsovaných položek). Prázdný/NULL markdown vrací `criteria_count: 0`.
+
+### Frontend
+
+- **`src/components/TabCriteria.tsx`** — state `criteriaCount`, badge v hlavičce editoru: **„Uloženo: X kritérií"** (zvýrazněné červeně při 0). Po uložení s 0 kritérii se zobrazí varování *„Kritéria uložena jako prázdná — evaluace nebude možná."* Reset countu při změně scénáře.
+- **`src/components/TabEvaluation.tsx`** — state `criteriaCount`, chip v action baru **„Kritéria: X"** (zelený při >0, červený s ikonou varování při 0). `handleBatchEvaluate()` před spuštěním dávky provede čerstvý fetch počtu kritérií ze serveru a při 0 zobrazí error toast + evaluaci nezahájí (chrání i případ zastaralého stavu po editaci v jiné záložce). Nový `isActive` prop obnoví počet při přepnutí na záložku.
+- **`src/App.tsx`** — předání `isActive={activeTab === 'evaluation'}` do `TabEvaluation`.
+
+Bez potvrzovacích dialogů, pouze vizuální zpětná vazba + tvrdá blokace při 0 kritérií. Existující vyhodnocení se nemění.
+
+---
+
 ## [v3.10.8] — 2026-06-03 — Page Visibility API fix (UI zaseknutí při vyhodnocování)
 
 ### TabEvaluation.tsx — visibilitychange listener

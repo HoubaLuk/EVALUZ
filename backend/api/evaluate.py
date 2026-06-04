@@ -293,7 +293,7 @@ async def evaluate_batch(
     query = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id)
     criteria_record = apply_data_isolation(query, EvaluationCriteria, current_user, db).first()
     
-    if not criteria_record or not criteria_record.markdown_content.strip():
+    if not criteria_record or not (criteria_record.markdown_content or '').strip():
         print(f">>> BATCH ERROR: Nebyla nalezena kritéria v tabulce 'EvaluationCriteria' pro scenario: '{scenario_id}', lecturer_id: {current_user.id}")
         raise HTTPException(
             status_code=404, 

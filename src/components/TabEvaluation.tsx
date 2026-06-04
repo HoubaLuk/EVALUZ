@@ -36,6 +36,7 @@ interface TabEvaluationProps {
     scenarioName?: string;
     onEvaluatedChange?: (hasEvaluated: boolean) => void;
     lecturerId?: number | null;
+    isActive?: boolean;
 }
 
 /**
@@ -43,7 +44,7 @@ interface TabEvaluationProps {
  * Tato komponenta je srdcem aplikace pro vyučujícího. Umožňuje nahrávat soubory studentů, 
  * spouštět AI analýzu a sledovat výsledky v reálném čase.
  */
-export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange, lecturerId }: TabEvaluationProps) {
+export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId, className, scenarioName, onEvaluatedChange, lecturerId, isActive }: TabEvaluationProps) {
     const { showAlert, showConfirm, showPrompt } = useDialog();
     const [students, setStudents] = useState<Student[]>([]);
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -69,6 +70,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const studentListScrollRef = useRef<HTMLDivElement>(null);
     const [isCancelling, setIsCancelling] = useState(false);
     const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+    const [criteriaCount, setCriteriaCount] = useState<number | null>(null);
 
     // MLOps/RAG State
     const [isRagEnabled, setIsRagEnabled] = useState(false);
@@ -246,7 +248,37 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         setStudents([]);
         if (onEvaluatedChange) onEvaluatedChange(false);
         fetchEvaluations();
+        fetchCriteriaCount();
     }, [scenarioId]);
+
+    // Při aktivaci záložky Vyhodnocování obnovíme počet kritérií — lektor je mohl mezitím
+    // upravit/uložit v záložce Kritéria (obě záložky jsou trvale mountované, scenarioId se nemění).
+    useEffect(() => {
+        if (isActive) fetchCriteriaCount();
+    }, [isActive]);
+
+    // Načte počet uložených kritérií pro aktuální scénář (zobrazení v action baru + blokace evaluace).
+    // Vrací aktuální počet (nebo null při chybě sítě) — handleBatchEvaluate ho používá pro spolehlivou blokaci.
+    const fetchCriteriaCount = async (): Promise<number | null> => {
+        if (!scenarioId) { setCriteriaCount(null); return null; }
+        try {
+            const res = await fetch(`${API_BASE_URL}/criteria/${scenarioId}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const count = data.criteria_count ?? 0;
+                setCriteriaCount(count);
+                return count;
+            } else {
+                setCriteriaCount(0);
+                return 0;
+            }
+        } catch (error) {
+            setCriteriaCount(null);
+            return null;
+        }
+    };
 
     // Průběžně synchronizujeme hasEvaluations do App.tsx — kdykoli se změní seznam studentů.
     // Tím se odemkne záložka "Analýza třídy" i bez page refresh po EVAL_SUCCESS nebo schválení.
@@ -388,6 +420,17 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const handleBatchEvaluate = async () => {
         if (!scenarioId) {
             showAlert("Vyberte prosím nejprve Modelovou situaci z postranního panelu.");
+            return;
+        }
+
+        // Čerstvý fetch počtu kritérií ze serveru — chrání i případ, kdy lektor uložil/smazal
+        // kritéria v jiné záložce a stav v této komponentě je zastaralý.
+        const freshCount = await fetchCriteriaCount();
+        if (!freshCount || freshCount === 0) {
+            setToastMessage({
+                text: "Nelze zahájit vyhodnocování — pro tuto situaci nemáte uložena žádná hodnotící kritéria. Přejděte na záložku Kritéria a uložte je.",
+                type: 'error',
+            });
             return;
         }
 
@@ -837,6 +880,21 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                         <button className="btn btn--negative btn--sm" onClick={handleBulkDelete}>
                             <Icon icon={faTrash} /> Smazat vybrané ({selectedIds.length})
                         </button>
+                    )}
+                    {scenarioId && criteriaCount !== null && (
+                        <span
+                            title={criteriaCount > 0
+                                ? `Pro tuto situaci je uloženo ${criteriaCount} hodnotících kritérií.`
+                                : 'Pro tuto situaci nemáte uložena žádná kritéria. Vyhodnocování nelze spustit.'}
+                            style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 5,
+                                background: criteriaCount > 0 ? 'var(--color-secondary)' : 'var(--color-negative, #c0392b)',
+                                color: '#fff', padding: '4px 10px', borderRadius: 12, fontSize: '0.75rem', fontWeight: 700,
+                            }}
+                        >
+                            <Icon icon={criteriaCount > 0 ? faShield : faTriangleExclamation} size="xs" />
+                            Kritéria: {criteriaCount}
+                        </span>
                     )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
