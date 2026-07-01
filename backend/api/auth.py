@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from typing import Optional
+from enum import Enum
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -101,24 +102,51 @@ def get_current_lecturer_export(token: str, db: Session = Depends(get_db)):
 
 # --- Endpoints ---
 
-def apply_data_isolation(query, entity_class, current_user: Lecturer, db: Session):
+class DataScope(str, Enum):
     """
-    Applies data isolation rules based on the user's role:
-    - Superadmin: sees all records.
-    - Admin: sees records created by users in the same school_location.
-    - Vyucujici: sees only their own records.
+    Explicitní rozsah viditelnosti dat pro apply_data_isolation().
+    Viz PLAN.md — princip "Fail-Closed" / "Explicitní Data Scope".
     """
-    if getattr(current_user, 'is_superadmin', False):
+    PERSONAL = "personal"   # výchozí — vždy jen current_user, bez ohledu na roli
+    LOCATION = "location"   # pouze explicitně manažerské endpointy (Admin/Superadmin)
+    GLOBAL = "global"       # pouze explicitně manažerské endpointy (Superadmin)
+
+
+def apply_data_isolation(
+    query,
+    entity_class,
+    current_user: Lecturer,
+    db: Session,
+    scope: DataScope = DataScope.PERSONAL,
+):
+    """
+    Aplikuje izolaci dat podle explicitně požadovaného rozsahu (scope), NIKOLI
+    podle role uživatele odvozené implicitně uvnitř této funkce:
+
+    - PERSONAL (výchozí): vždy jen záznamy current_user.id — platí univerzálně,
+      i pro Admin/Superadmin. Osobní pracovní plocha nikdy neprosakuje cizí data.
+    - LOCATION: vyžaduje is_admin nebo is_superadmin (jinak 403). Vrací záznamy
+      všech lektorů se stejnou school_location jako current_user. Smí volat
+      pouze explicitně manažerské endpointy.
+    - GLOBAL: vyžaduje is_superadmin (jinak 403). Vrací záznamy bez omezení.
+      Smí volat pouze explicitně manažerské/superadmin endpointy.
+    """
+    if scope == DataScope.GLOBAL:
+        if not getattr(current_user, 'is_superadmin', False):
+            raise HTTPException(status_code=403, detail="Nedostatečná oprávnění pro globální rozsah dat.")
         return query
-        
-    if getattr(current_user, 'is_admin', False) and getattr(current_user, 'school_location', None):
-        # Admin vidí záznamy všech lektorů ze stejné lokality
+
+    if scope == DataScope.LOCATION:
+        if not (getattr(current_user, 'is_admin', False) or getattr(current_user, 'is_superadmin', False)):
+            raise HTTPException(status_code=403, detail="Nedostatečná oprávnění pro rozsah dat v rámci lokality.")
+        if not getattr(current_user, 'school_location', None):
+            raise HTTPException(status_code=403, detail="Nedostatečná oprávnění pro rozsah dat v rámci lokality.")
         lecturer_ids = [
             l.id for l in db.query(Lecturer).filter(Lecturer.school_location == current_user.school_location).all()
         ]
         return query.filter(entity_class.lecturer_id.in_(lecturer_ids))
-        
-    # Základní Vyučující vidí pouze svoje záznamy
+
+    # DataScope.PERSONAL — fail-closed default, žádná výjimka pro Admin/Superadmin.
     return query.filter(entity_class.lecturer_id == current_user.id)
 
 @router.get("/check")

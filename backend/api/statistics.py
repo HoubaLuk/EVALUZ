@@ -6,7 +6,7 @@ import json
 
 from core.database import get_db
 from models.db_models import StudentEvaluation, Lecturer, ClassRoom, AppSettings
-from api.auth import get_current_lecturer
+from api.auth import get_current_lecturer, apply_data_isolation, DataScope
 
 router = APIRouter(
     prefix="/statistics",
@@ -14,22 +14,18 @@ router = APIRouter(
 )
 
 
-def _get_allowed_lecturer_ids(current_user: Lecturer, db: Session) -> Optional[List[int]]:
-    """Returns list of lecturer IDs visible to current user, or None if superadmin (no restriction)."""
-    if current_user.is_superadmin:
-        return None
-    if current_user.is_admin and current_user.school_location:
-        return [l.id for l in db.query(Lecturer.id).filter(Lecturer.school_location == current_user.school_location).all()]
-    return [current_user.id]
-
-
 @router.get("/filter-options")
 def get_filter_options(db: Session = Depends(get_db), current_user: Lecturer = Depends(get_current_lecturer)):
-    """Returns available filter values (facilities, classes, scenarios) respecting RBAC."""
+    """Returns available filter values (facilities, classes, scenarios) respecting RBAC.
+
+    Manažerský endpoint — explicitně se přihlašuje k rozšířenému rozsahu dat
+    (scope=GLOBAL pro superadmina, scope=LOCATION pro admina) přes
+    apply_data_isolation(). Nikdy nespoléhá na implicitní chování dle role.
+    """
     if not (current_user.is_superadmin or current_user.is_admin):
         raise HTTPException(status_code=403, detail="Nedostatečná oprávnění.")
 
-    allowed_ids = _get_allowed_lecturer_ids(current_user, db)
+    scope = DataScope.GLOBAL if current_user.is_superadmin else DataScope.LOCATION
 
     # Facilities — only for superadmin, read from AppSettings
     facilities: List[str] = []
@@ -42,9 +38,7 @@ def get_filter_options(db: Session = Depends(get_db), current_user: Lecturer = D
                 pass
 
     # Classes — with RBAC
-    class_query = db.query(ClassRoom)
-    if allowed_ids is not None:
-        class_query = class_query.filter(ClassRoom.lecturer_id.in_(allowed_ids))
+    class_query = apply_data_isolation(db.query(ClassRoom), ClassRoom, current_user, db, scope=scope)
     classes_raw = class_query.all()
     # Deduplicate by name (multiple lecturers may have same class name)
     seen_names: Dict[str, int] = {}
@@ -58,14 +52,15 @@ def get_filter_options(db: Session = Depends(get_db), current_user: Lecturer = D
     # Scenarios — with RBAC, return id + display name.
     # Filtrujeme jen scénáře s alespoň jednou dokončenou evaluací (json_result IS NOT NULL),
     # aby se v dropdownu nezobrazovaly scénáře se samými fast-scanned (nevyhodnocenými) záznamy.
-    scenario_query = db.query(
-        StudentEvaluation.scenario_name,
-        func.max(StudentEvaluation.scenario_display_name)
-    ).filter(
-        StudentEvaluation.json_result.isnot(None)
-    ).group_by(StudentEvaluation.scenario_name)
-    if allowed_ids is not None:
-        scenario_query = scenario_query.filter(StudentEvaluation.lecturer_id.in_(allowed_ids))
+    scenario_query = apply_data_isolation(
+        db.query(
+            StudentEvaluation.scenario_name,
+            func.max(StudentEvaluation.scenario_display_name)
+        ).filter(
+            StudentEvaluation.json_result.isnot(None)
+        ).group_by(StudentEvaluation.scenario_name),
+        StudentEvaluation, current_user, db, scope=scope
+    )
     scenarios = sorted(
         [{"id": r[0], "name": r[1] or r[0]} for r in scenario_query.all() if r[0]],
         key=lambda x: x["name"]
