@@ -2,6 +2,43 @@
 
 ---
 
+## [v3.11.2] — 2026-07-29 — Zamčené závislosti a oprava `.env` propagace pro nasazení
+
+### Problém
+
+Příprava nasazení na testovací server odhalila, že `backend/requirements.txt` neobsahuje žádný exaktní pin a `docker-compose.yml` nepředával backendu `.env` proměnné kromě `DATABASE_URL`.
+
+### Build & Deploy
+
+- **`backend/requirements.lock.txt`** (nový) — zamčené verze závislostí generované uvnitř `python:3.10-slim` (shoda s runtime v `backend/Dockerfile`, ne s lokálním dev venv na Python 3.13). Ověřeno 55/55 testů (`backend/tests/`) v obraze postaveném s tímto lockem před commitem.
+- **`backend/Dockerfile`** — instaluje z `requirements.lock.txt` místo volného `requirements.txt`.
+- **`docker-compose.yml`** — doplněn `env_file: .env` pro službu `backend`. Dříve se do kontejneru explicitně předávalo pouze `DATABASE_URL` — `JWT_SECRET_KEY`, `CORS_ORIGINS`, `APP_ENV` a další proměnné z `.env` se do kontejneru vůbec nedostaly, takže produkční validace secrets v `core/config.py` (sekce 4) nikdy neproběhla. `docker-compose.prod.yml` měl `env_file` už správně nastavené.
+- Viz ADR-013 (zamčené závislosti).
+
+---
+
+## [v3.11.1] — 2026-07-01 — Oprava destruktivní normalizace pomlček v matchingu kritérií
+
+### Backend — LLM pipeline
+
+- **`backend/services/llm_engine.py`** — `_canonicalize_criterion_name` už neničí popisné pomlčky uprostřed názvu kritéria (např. „Ztotožnění osoby – minimálně jméno, příjmení, datum narození"). Plošný `.replace('—', '-').replace('–', '-')` byl odstraněn — `_PERSON_SUFFIX_RE` sám o sobě matchuje em-dash/en-dash/hyphen přes `[–—-]`, normalizace před stripem person-suffixu byla zbytečná a nerozlišovala mezi suffixem a popisnou pomlčkou uprostřed řetězce.
+
+---
+
+## [v3.11.0] — 2026-07-01 — RBAC: explicitní fail-closed `DataScope` (post-incident)
+
+### Problém
+
+Forenzní audit incidentu z 2026-06-30 (lecturer_id=3 viděla cizí scénáře a evaluace patřící lecturer_id=1) zjistil, že `apply_data_isolation()` odvozovala viditelnost dat implicitně z role volajícího (`is_admin`/`is_superadmin`). Protože přes stejnou funkci procházely i osobní endpointy (např. `GET /analytics/class/{id}`), Admin/SuperAdmin viděl na vlastním Evaluation tabu i cizí vyhodnocení a scénáře jiných vyučujících. `GET /statistics/filter-options` navíc tato cizí scénář ID vracel do frontendu, který je pak dotazoval přes osobní endpointy.
+
+### Bezpečnost
+
+- **`apply_data_isolation()`** (`backend/api/auth.py`) — nový explicitní parametr `scope: DataScope` (`PERSONAL` / `LOCATION` / `GLOBAL`), defaultně `PERSONAL` (fail-closed bez ohledu na roli). Pouze `backend/api/statistics.py` (manažerský dashboard) nově explicitně žádá `scope=LOCATION`/`GLOBAL`.
+- Nový regresní kryt: `backend/tests/test_data_isolation.py` (3 testy).
+- Plán a forenzní rozbor: `PLAN.md`. Architektonické zdůvodnění: ADR-014.
+
+---
+
 ## [v3.10.9] — 2026-06-04 — Ochrana evaluace bez kritérií + vizuální počet kritérií
 
 ### Problém

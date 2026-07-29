@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.10.5  
-**Poslední aktualizace:** 6. května 2026  
+**Verze:** 3.11.2  
+**Poslední aktualizace:** 29. července 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
 ## Obsah
@@ -461,30 +461,48 @@ NFC normalizace všech názvů souborů a textových vstupů na backendu i ve We
 
 ## 6. Produkční nasazení
 
-### 6.1 Docker Compose
+Existují dva Compose soubory pro dvě různé topologie — použij ten odpovídající cíli nasazení, ne jen výchozí `docker-compose.yml`.
 
-Tři služby: `db` (PostgreSQL 17-alpine), `backend` (FastAPI), `frontend` (Nginx + React SPA).
+### 6.1 `docker-compose.yml` — jednoduchá topologie (frontend = vlastní nginx)
+
+Tři služby: `db` (PostgreSQL), `backend` (FastAPI), `frontend` (Nginx + React SPA, nginx běží přímo v tomto kontejneru).
 
 Porty:
 - `8001:80` — HTTP (redirect na HTTPS)
 - `8443:443` — HTTPS (self-signed nebo vlastní certifikát, volume `./ssl:/etc/nginx/ssl`)
-- Port 8000 (backend) není exponován navenek — přístup pouze přes Nginx proxy.
+- Port 8000 (backend) není exponován navenek — přístup pouze přes frontend kontejner.
 
 Volumes:
 - `pgdata` — PostgreSQL data (named volume)
 - `./backend/data:/app/data` — uploadovaná data
 - `./logs/llm_parse_errors:/app/logs/llm_parse_errors` — diagnostické dumpy JSON chyb
 
+### 6.1b `docker-compose.prod.yml` — topologie se samostatným reverse proxy
+
+Čtyři služby: `db`, `backend`, `frontend` (jen statické soubory) a samostatný `proxy` (nginx, konfigurace v `nginx/evaluz.conf`), který routuje `/api/` na backend a `/` na frontend. Backend i frontend jsou interní (síť `internal`), přístupné pouze přes `proxy`.
+
+Port:
+- `3000:80` — jediný exponovaný port (nginx proxy). Externí reverse proxy hostitele/organizace by měl na tento port směrovat HTTPS provoz.
+
+Použití:
+```bash
+cp .env.example .env && nano .env
+docker compose -f docker-compose.prod.yml up -d --build
+```
+Aktualizace na novou verzi: `git pull origin main && docker compose -f docker-compose.prod.yml up -d --build` (Alembic migrace proběhnou automaticky při restartu backendu).
+
 ### 6.2 Generování SSL certifikátu
 
 ```bash
 ./generate-ssl.sh
 ```
-Generuje self-signed certifikát pro intranetové nasazení. Pro produkci nahradit vlastním certifikátem (Let's Encrypt nebo CA organizace).
+Generuje self-signed certifikát pro intranetové nasazení (relevantní pro `docker-compose.yml`; `docker-compose.prod.yml` řeší TLS na úrovni externího reverse proxy hostitele). Pro produkci nahradit vlastním certifikátem (Let's Encrypt nebo CA organizace).
 
 ### 6.3 Environment variables
 
-Citlivé hodnoty (DB heslo, LLM API klíče) v `backend/.env`. Tento soubor se NIKDY nesmí nahrávat do Gitu. LLM konfigurace je také editovatelná za běhu přes Admin UI (uložena v `app_settings`).
+Citlivé hodnoty (DB heslo, JWT secret, CORS, LLM API klíče) v `.env` v **kořeni repozitáře** (ne `backend/.env` — oba docker-compose soubory čtou `.env` relativně ke svému umístění, tedy z rootu). Tento soubor se NIKDY nesmí nahrávat do Gitu (`.gitignore: .env*`). Šablona: `.env.example`. Oba compose soubory musí mít u služby `backend` (a `docker-compose.prod.yml` i u `db`) nastavené `env_file: .env` — bez toho se do kontejneru nedostane nic kromě explicitně vyjmenovaných `environment:` proměnných a validace secrets v `core/config.py` (viz sekce 4) se nikdy neuplatní. LLM konfigurace je také editovatelná za běhu přes Admin UI (uložena v `app_settings`) — `.env` hodnoty `VLLM_API_URL`/`VLLM_MODEL_NAME` slouží jen jako počáteční seed.
+
+`backend/Dockerfile` instaluje závislosti z `backend/requirements.lock.txt` (zamčené verze, viz ADR-013), ne z volného `requirements.txt` — po úpravě `requirements.txt` je nutné lock přegenerovat postupem v hlavičce toho souboru.
 
 ### 6.4 Inicializace a migrace
 
@@ -502,17 +520,18 @@ Při každém startu backend:
 ```
 backend/tests/
 ├── conftest.py                  # sys.path, sdílené fixtures pro unit testy
-├── test_llm_pipeline.py         # unit testy (36 testů)
+├── test_llm_pipeline.py         # unit testy (43 testů)
+├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
     ├── conftest.py              # in-memory SQLite, MockLLMRouter, FastAPI client
     ├── mock_llm.py              # MockLLMRouter — FIFO respx interceptor
-    └── test_evaluate_endpoint.py  # integrační testy (10 testů)
+    └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **52 testů** (spuštění: `cd backend && pytest tests/ -v`)
+Celkem: **55 testů** (spuštění: `cd backend && pytest tests/ -v`). Testy je nutné spouštět přes venv/interpreter, který má nainstalované `requirements.txt` + `requirements-dev.txt` (např. `backend/venv/bin/pytest`) — systémový/globální `pytest` bez těchto závislostí selže na `ModuleNotFoundError`.
 
-### 7.2 Unit testy (`test_llm_pipeline.py` — 36 testů)
+### 7.2 Unit testy (`test_llm_pipeline.py` — 43 testů)
 
 Pokrývají klíčové vrstvy `llm_engine.py` bez sítě, DB ani vLLM:
 - `_canonicalize_criterion_name`: strip prefix, person suffix, popisné pomlčky
@@ -523,7 +542,7 @@ Pokrývají klíčové vrstvy `llm_engine.py` bez sítě, DB ani vLLM:
 - `parse_criteria_markdown`: delimiter + legacy
 - Integrační test reprodukující reálný case Kořař z 29. 4. 2026
 
-### 7.3 Integrační testy (`test_evaluate_endpoint.py` — 10 testů)
+### 7.3 Integrační testy (`test_evaluate_endpoint.py` — 9 testů)
 
 Používají **in-memory SQLite** (izolace per-test, bez I/O), **respx** pro interceptaci httpx volání na `http://mock-vllm:8001/v1`, a fresh FastAPI app bez lifespan (bez zapisování na disk).
 
@@ -542,6 +561,10 @@ Používají **in-memory SQLite** (izolace per-test, bez I/O), **respx** pro int
 5. `test_no_partial_recovery_flag_anywhere` — `_partial_recovery` nikdy není v odpovědi (E6)
 6. `test_fast_scan_identity_not_overwritten` — E3b regress (identita nepřepíše platnou)
 7–9. E2 adaptivní chunking testy (budget vs. single-call path)
+
+### 7.3b RBAC regresní testy (`test_data_isolation.py` — 3 testy)
+
+Pokrývají incident z ADR-014 (fail-closed `DataScope`): ověřují, že osobní endpointy (`/analytics/class/{id}` apod.) nikdy nevrátí data jiného vyučujícího ani při roli Admin/SuperAdmin, a že `GET /statistics/filter-options` nezobrazí cizí scénáře, které by šlo zneužít přes osobní endpoint.
 
 ### 7.4 Konfigurace
 
@@ -724,6 +747,39 @@ Pokud selže i úroveň 2 → `ValueError` (fail-fast, viz ADR-009). Level 3 (`_
 **Rozhodnutí:** Jednořádková změna v `generate_class_summary()`. Frontend přijme `no_analysis` a zobrazí card s tlačítkem. UX je jasnější: uživatel vědomě spouští generování.
 
 **Kompromis:** Po invalidaci cache (re-evaluace studenta) se analytics neaktualizuje automaticky. Lektor musí kliknout "Generovat analýzu". Přijatelné — Man-in-the-Loop principy zachovány.
+
+---
+
+### ADR-013: Zamčené závislosti generované uvnitř cílového kontejneru (v3.11.2)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Příprava nasazení na testovací server odhalila, že `backend/requirements.txt` neobsahuje žádný exaktní pin (`==`) — pouze holé názvy balíčků nebo `>=` floor. `docker compose build` tak při každém buildu stahuje aktuálně nejnovější kompatibilní verze z PyPI, které se mohou lišit od verzí otestovaných lokálně. Navíc lokální dev venv běží na Python 3.13, zatímco `backend/Dockerfile` je `python:3.10-slim` — lock vygenerovaný z dev venv (`pip freeze`) obsahoval balíčky (např. `numpy==2.5.1`), které pro Python 3.10 na PyPI vůbec neexistují, a build v Dockeru selhal.
+
+**Možnosti:**
+- A: Ponechat volné `requirements.txt` — jednoduché, ale nereprodukovatelné (viz Dev/Prod Parity riziko).
+- B: Zamknout verze pomocí `pip freeze` z lokálního dev venv — rychlé, ale nekompatibilní s runtime verzí Pythonu v Dockerfile (viz výše).
+- **C (zvoleno):** Vygenerovat lock soubor spuštěním `pip install -r requirements.txt && pip freeze` **uvnitř kontejneru se stejným base image jako Dockerfile** (`python:3.10-slim`), ne v lokálním venv.
+
+**Rozhodnutí:** `backend/requirements.lock.txt` obsahuje verze rozřešené přímo v `python:3.10-slim`. `backend/Dockerfile` instaluje z tohoto souboru (`pip install -r requirements.lock.txt`), ne z volného `requirements.txt`. Před commitem ověřeno 55/55 testů v obraze postaveném s tímto lockem.
+
+**Kompromis:** Lock je nutné ručně přegenerovat po každé úpravě `requirements.txt` (postup v hlavičce `requirements.lock.txt`) — bez automatizace (Dependabot/Renovate) hrozí, že lock zestárne a přestane odrážet bezpečnostní opravy upstream balíčků.
+
+---
+
+### ADR-014: RBAC `DataScope` — explicitní a fail-closed místo odvozeného z role (v3.11.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Forenzní audit po incidentu z v3.10.9 zjistil, že `apply_data_isolation()` odvozovala viditelnost dat implicitně z role volajícího (`is_admin`/`is_superadmin`). Protože přes stejnou funkci procházely i osobní endpointy (např. `GET /analytics/class/{id}`), Admin/SuperAdmin viděl na vlastním Evaluation tabu i cizí vyhodnocení a scénáře jiných vyučujících. `GET /statistics/filter-options` navíc tato cizí scénář ID vracel do frontendu, který je pak dotazoval přes osobní endpointy — cross-tenant únik dat.
+
+**Možnosti:**
+- A: Opravit `apply_data_isolation()` tak, aby detekovala "osobní" vs. "manažerské" endpointy podle URL cesty — křehké, snadno se rozejde při přidání nového endpointu.
+- **B (zvoleno):** Explicitní parametr `scope: DataScope` (`PERSONAL` / `LOCATION` / `GLOBAL`) na každém volání, default `PERSONAL` — fail-closed bez ohledu na roli volajícího.
+
+**Rozhodnutí:** Každý endpoint musí explicitně požádat o širší scope. Pouze `backend/api/statistics.py` (manažerský dashboard) opt-in na `scope=LOCATION`/`GLOBAL`. Nový default (`PERSONAL`) znamená, že chybějící/zapomenutý parametr vede k bezpečnějšímu chování (méně dat), ne k úniku.
+
+**Kompromis:** Každé nové volání `apply_data_isolation()` vyžaduje vědomé rozhodnutí o scope — o něco víc psaní na volací straně výměnou za to, že chybějící rozhodnutí selže bezpečně. Regresní kryt: `backend/tests/test_data_isolation.py` (viz sekce 7.3b).
 
 ---
 

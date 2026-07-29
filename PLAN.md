@@ -1,6 +1,6 @@
 # PLAN.md — Náprava RBAC Data Isolation (post-incident, v3.10.9 → v3.11.0)
 
-Status: **FÁZE RED aktivní.** Implementační kód zatím NEBYL měněn — viz `backend/tests/test_data_isolation.py`.
+Status: **HOTOVO (v3.11.0, commit `2378b5a`, 2026-07-01).** Fáze GREEN byla implementována přesně dle návrhu níže — `DataScope` Enum, fail-closed `PERSONAL` default, `statistics.py` explicitně žádá `LOCATION`/`GLOBAL`. `backend/tests/test_data_isolation.py` (3 testy) prochází. Viz ADR-014 v `docs/TECHNICAL_DOCUMENTATION.md` a `docs/CHANGELOG.md`.
 
 ## 1. Kontext incidentu (hard-won knowledge z forenzního auditu)
 
