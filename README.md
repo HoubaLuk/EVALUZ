@@ -165,6 +165,12 @@ docker compose -f docker-compose.prod.yml up -d --build
 # Alembic migrace proběhnou automaticky při restartu backendu
 ```
 
+> **Zamčené závislosti:** `backend/Dockerfile` instaluje z `backend/requirements.lock.txt`
+> (přesné verze ověřené proti test suite v `python:3.10-slim`), ne z volného `requirements.txt`.
+> Po přidání/změně balíčku v `requirements.txt` je nutné lock přegenerovat — postup je
+> v hlavičce `requirements.lock.txt`. Bez toho `--build` prostě znovu použije zamčené verze
+> z posledního commitu, i kdyby `requirements.txt` mezitím povolil novější verzi.
+
 ### Kontejnery a porty
 
 | Kontejner | Interní port | Exponovaný | Popis |

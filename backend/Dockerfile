@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Závislosti nainstalovat před kopírováním kódu (cache layer)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.lock.txt = zamčené verze ověřené proti test suite (viz komentář v souboru).
+COPY requirements.txt requirements.lock.txt .
+RUN pip install --no-cache-dir -r requirements.lock.txt
 
 # Kopírovat kód aplikace
 COPY . .

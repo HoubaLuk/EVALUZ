@@ -24,6 +24,8 @@ services:
       context: ./backend
     container_name: evaluz_backend
     restart: always
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://evaluz_admin:${POSTGRES_PASSWORD:-securepassword123}@db:5432/evaluz_db
       # Optional: LLM adresa
