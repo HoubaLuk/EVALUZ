@@ -2,6 +2,30 @@
 
 ---
 
+## 2026-08-05: Cross-proces WebSocket doručení + LLM concurrency scaling pro víc lektorů (v3.12.0 / ADR-015, ADR-016)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Pilotní testování odhalilo 100% reprodukovatelný bug — dávkové vyhodnocení ÚZ doběhlo na backendu (LLM zavolán, DB commit OK), ale UI se to nikdy nedozvědělo, kolečko se po ~2-3 minutách zastavilo bez výsledku. Kořenová příčina: `backend/Dockerfile` spouští `uvicorn main:app --workers 2` — dva nezávislé OS procesy bez sdíleného stavu. `EvaluationQueue` (WebSocket registr i `_active_keys` dedup z ADR-011) je module-level singleton, ale instancovaný ZVLÁŠŤ v každém procesu. Pokud `POST /evaluate/batch` a WebSocket spojení téhož lektora skončily na různých procesech (OS je distribuuje nedeterministicky, žádná session affinity), broadcast dokončení tiše zasáhl jen registr toho procesu, co úkol zpracoval. Souběžně se zjistilo (při rozvaze nad nasazením pro víc současně pracujících lektorů), že stejný per-proces problém postihuje i LLM concurrency limit — `_resolve_worker_concurrency()` předávala nastavenou hodnotu z Administrace beze změny do každého procesu, takže s 2 workery mohl být na sdílený vLLM server vyslán až 2× vyšší počet souběžných požadavků, než admin zamýšlel.
+
+**Diagnostika:** Čistě čtením kódu (3 paralelní Explore agenti + Plan agent), bez reprodukčního prostředí — diagnóza i minimální oprava navržena a ověřena předem, než se cokoliv změnilo.
+
+**Možnosti (WebSocket doručení):**
+- A: `--workers 1` — eliminuje split-brain okamžitě, ale neškáluje HTTP propustnost do budoucna.
+- B: Redis pub/sub — nová infrastrukturní závislost bez jiného důvodu k zavedení.
+- **C (zvoleno): Postgres LISTEN/NOTIFY** — Postgres už je k dispozici, žádná nová infrastruktura, řeší problém trvale i při budoucím zvýšení `--workers`.
+
+**Rozhodnutí:**
+1. `broadcast()` v `evaluation_queue.py` publikuje přes `pg_notify` na kanál `evaluz_eval_events`; každý proces poslouchá na vlastním `asyncpg` spojení (`start_listening`, spuštěné v `main.py` lifespan) a doručuje jen svým lokálně registrovaným socketům.
+2. `_resolve_worker_concurrency()` dělí nastavenou LLM concurrency počtem worker procesů (`settings.UVICORN_WORKERS`, nové nastavení). `backend/Dockerfile` definuje `ENV UVICORN_WORKERS=2` jako jediný zdroj pravdy pro `--workers` i pro toto dělení — při změně počtu workerů stačí upravit jednu proměnnou.
+3. Souběžně opraveny dva menší bugy ze stejného pilotního reportu: uložení kritérií po AI chatu (`TabCriteria.tsx` bralo jen text za posledním `---`, ne prvním — u delších seznamů kritérií se tak uložilo jen poslední kritérium) a needeaktivace nového scénáře (`Sidebar.tsx` nezavolal `onSelectScenario`, takže nahrané ÚZ "zmizely" při pozdějším ručním přepnutí scénáře).
+
+**Dopad:** Doručení výsledků do UI i LLM concurrency limit jsou teď korektní bez ohledu na počet worker procesů — bezpečné zvýšit `--workers` v budoucnu, pokud HTTP propustnost začne být úzkým hrdlem. Nové testy `backend/tests/test_evaluation_queue.py` (10 testů) — `EvaluationQueue` dřív neměla žádné pokrytí. Ověřeno end-to-end proti reálně běžícímu `--workers 2` backendu (ruční `NOTIFY` přes `psql` → doručeno připojenému WS klientovi).
+
+**Kompromis:** `_active_keys` dedup (ADR-011) zůstává per-proces — teoreticky nedokonalé při souběžném double-submitu téhož lektora, pokud oba požadavky skončí na různých procesech (mimo rozsah nahlášeného bugu, zaznamenáno jako známé omezení). Dělení LLM concurrency je celočíselné — u malých hodnot může efektivní celkový limit být o trochu nižší než nastavený.
+
+---
+
 ## 2026-05-06: Analytics force gate — oddělení read od generate (v3.10.4 / ADR-012)
 
 **Status:** Decided & Implemented

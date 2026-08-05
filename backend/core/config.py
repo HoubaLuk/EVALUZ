@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     # Logování: "DEBUG" | "INFO" | "WARNING" | "ERROR"
     LOG_LEVEL: str = "INFO"
 
+    # Počet uvicorn worker procesů (musí odpovídat --workers v Dockerfile CMD —
+    # tam se čte ze STEJNÉ env proměnné, viz komentář u ENV UVICORN_WORKERS).
+    # EvaluationQueue vytváří per-proces semafor pro LLM concurrency (main.py
+    # _resolve_worker_concurrency) — bez tohoto nastavení by se s N procesy
+    # efektivní limit souběžných LLM volání znásobil N×, bez ohledu na to,
+    # co admin nastavil v Administraci (LLM_CONCURRENCY_VLLM/OPENROUTER).
+    UVICORN_WORKERS: int = 2
+
     @field_validator("JWT_SECRET_KEY")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:

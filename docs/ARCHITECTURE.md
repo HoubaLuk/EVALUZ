@@ -25,14 +25,20 @@
 | `fetch()` s `Authorization` header | `get_current_lecturer` | v hlavičce |
 | `<a href="...?token=...">` | `get_current_lecturer_export` | v URL query param |
 
-## Řízení Přístupu (RBAC) & Izolace Dat [v3.5.0+]
+## Řízení Přístupu (RBAC) & Izolace Dat [v3.5.0+, DataScope od v3.11.0]
 - **Role:** `Vyučující`, `Admin`, `SuperAdmin`.
 - **Zabezpečení:** Middleware `verify_superadmin` chrání citlivé systémové operace (prompty, vLLM settings).
-- **Izolace:** Helper `apply_data_isolation` vynucuje filtraci dotazů na úrovni DB. Standardní uživatel (Vyučující) nikdy nevidí data z jiných `lecturer_id`. Administrátor vidí data v rámci `school_location`.
+- **Izolace:** Helper `apply_data_isolation(query, entity_class, current_user, db, scope: DataScope)` — explicitní parametr `scope` (`PERSONAL`/`LOCATION`/`GLOBAL`), default `PERSONAL` — fail-closed BEZ OHLEDU na roli volajícího (viz ADR-014, `docs/TECHNICAL_DOCUMENTATION.md`). Osobní endpointy (Evaluation tab, analytics) nikdy nevidí cizí data ani u Admin/SuperAdmin — širší scope musí endpoint explicitně vyžádat (jen `backend/api/statistics.py`, manažerský dashboard).
 
 ## LLM Robustnost
 - **Sanitizer:** Vlastní regex cleaning pro extract JSONu i z modelů s vnitřním uvažováním (Qwen, DeepSeek).
 - **vLLM Integration:** Přímé napojení na OpenAI-compatible API s dynamickým managementem tokenů a parametrů v DB.
+
+## Škálovatelnost — víc uvicorn worker procesů [od v3.12.0]
+- **`--workers ${UVICORN_WORKERS}`** (`backend/Dockerfile`, výchozí 2): `EvaluationQueue` (WebSocket registr, LLM concurrency semafor, dedup fronty) je per-proces singleton, ne sdílený stav.
+- **WebSocket doručení:** `broadcast()` publikuje přes Postgres `LISTEN/NOTIFY` (ADR-015) — každý proces poslouchá na vlastním `asyncpg` spojení a doručuje jen svým lokálně registrovaným socketům. Bez toho by broadcast na "špatný" proces tiše zmizel.
+- **LLM concurrency:** `main.py::_resolve_worker_concurrency()` dělí nastavenou hodnotu z Administrace počtem workerů (ADR-016), aby celkový součet napříč procesy odpovídal tomu, co admin skutečně nastavil, ne jeho násobku.
+- **Známé omezení:** dedup fronty (`_active_keys`, ADR-011) zůstává per-proces.
 
 ## Klientská Synchronizace
 - **HDD Sync:** Využívá `File System Access API`. 

@@ -2,6 +2,13 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# Jediný zdroj pravdy pro počet uvicorn worker procesů — čte ho jak `--workers`
+# níže, tak backend/core/config.py (settings.UVICORN_WORKERS), aby EvaluationQueue
+# mohla LLM concurrency (main.py _resolve_worker_concurrency) korektně rozdělit
+# mezi procesy místo jejího nezáměrného násobení počtem workerů (viz ADR-015/016).
+# Při změně počtu workerů měň JEN tuto proměnnou, ne --workers na řádku CMD zvlášť.
+ENV UVICORN_WORKERS=2
+
 # Systémové závislosti pro psycopg2, PyMuPDF a curl (healthcheck)
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -33,13 +40,16 @@ EXPOSE 8000
 # exec: předání signálů (SIGTERM) přímo uvicornu pro čisté vypnutí.
 # --proxy-headers: respektovat X-Forwarded-For / X-Forwarded-Proto z nginx
 # --forwarded-allow-ips=*: důvěřovat proxy (nginx je ve stejné Docker síti)
-# --workers 2: 2 procesy pro paralelní requesty. Eval worker je async (jeden proces
-#   souběžně zpracuje N studentů přes AppSettings.LLM_CONCURRENCY_*), --workers tedy
-#   neovlivňuje propustnost vyhodnocování. WebSocket doručení (EvaluationQueue) je
-#   ale bezpečné napříč více procesy JEN díky Postgres LISTEN/NOTIFY (ADR-015,
+# --workers ${UVICORN_WORKERS}: víc procesů pro paralelní HTTP requesty. Eval worker
+#   je async (EvaluationQueue), ale je to PER-PROCES singleton — main.py dělí
+#   nastavenou LLM concurrency počtem workerů (settings.UVICORN_WORKERS, ADR-016),
+#   takže celkový součet napříč procesy odpovídá tomu, co admin nastavil v
+#   Administraci, ne jeho násobku. WebSocket doručení (EvaluationQueue) je bezpečné
+#   napříč více procesy JEN díky Postgres LISTEN/NOTIFY (ADR-015,
 #   backend/services/evaluation_queue.py) — bez něj je in-memory registr spojení
 #   per-proces a broadcast na "špatný" proces se tiše ztratí. Necouvat na přímé
-#   in-memory broadcast, pokud se --workers zvýší nad 2.
+#   in-memory broadcast a NEZAPOMEŇ při změně počtu workerů měnit jen ENV
+#   UVICORN_WORKERS výše (ne tento řádek zvlášť).
 CMD ["sh", "-c", "\
   python -c \"\
 import os, psycopg2; \
@@ -56,7 +66,7 @@ exit(0 if av or not tabs else 1) \
   exec uvicorn main:app \
     --host 0.0.0.0 \
     --port 8000 \
-    --workers 2 \
+    --workers ${UVICORN_WORKERS} \
     --proxy-headers \
     --forwarded-allow-ips '*' \
     --log-level info \

@@ -801,6 +801,22 @@ Pokud selže i úroveň 2 → `ValueError` (fail-fast, viz ADR-009). Level 3 (`_
 
 ---
 
+### ADR-016: LLM concurrency dělená počtem uvicorn workerů (v3.12.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Při přípravě na nasazení pro víc současně pracujících lektorů se ukázalo, že `EvaluationQueue` je (stejně jako v ADR-015) per-proces singleton — `asyncio.Semaphore(concurrency)` uvnitř `worker()` se vytváří nezávisle v každém ze `--workers N` procesů. `main.py::_resolve_worker_concurrency()` načítá `LLM_CONCURRENCY_VLLM`/`LLM_CONCURRENCY_OPENROUTER` z Administrace (výchozí 8) a předávala ho **beze změny** do každého procesu — s `--workers 2` tedy mohl být na sdílený vLLM/GPU server současně vyslán až 2× vyšší počet požadavků (např. 16 místo 8), než admin skutečně nastavil, bez jakékoli koordinace mezi procesy. Neprojevilo se to při jednom lektorovi (jeho dávka se prostě rozložila mezi procesy), ale s víc lektory pracujícími souběžně by se mohl sdílený LLM server přetížit nad rámec zamýšlené kapacity.
+
+**Možnosti:**
+- A: Cross-proces koordinovaný semafor (např. přes Postgres advisory locky nebo Redis) — architektonicky přesné, ale zbytečná složitost pro tento rozsah nasazení.
+- **B (zvoleno):** Vydělit nastavenou concurrency počtem worker procesů (`settings.UVICORN_WORKERS`) — jednoduché, žádná nová infrastruktura, přesně obnovuje původně zamýšlený celkový limit.
+
+**Rozhodnutí:** `backend/core/config.py` — nové nastavení `UVICORN_WORKERS` (výchozí 2), čtené ze stejnojmenné env proměnné. `backend/Dockerfile` definuje `ENV UVICORN_WORKERS=2` jako JEDINÝ zdroj pravdy a `--workers ${UVICORN_WORKERS}` v CMD z něj čte — při změně počtu workerů stačí upravit jednu proměnnou, ne dvě nezávislá místa. `main.py::_resolve_worker_concurrency()` dělí načtenou hodnotu `settings.UVICORN_WORKERS` (`max(1, total // workers)`), takže součet napříč všemi procesy odpovídá tomu, co admin nastavil v Administraci.
+
+**Kompromis:** Dělení je celočíselné (`//`) — u malých hodnot concurrency (např. 3 při 2 workerech) může efektivní celkový limit být o trochu nižší než nastavená hodnota (zaokrouhleno dolů, `max(1, ...)` navíc garantuje aspoň 1 na proces). Přijatelné — bezpečnější podhodnotit než přehodnotit kapacitu sdíleného LLM serveru.
+
+---
+
 ## 9. Historie vývoje (Changelog)
 
 ### v3.10.5 (6. 5. 2026) — Analytics prázdný stav UX

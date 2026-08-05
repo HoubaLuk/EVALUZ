@@ -16,6 +16,12 @@ Pilotní testování odhalilo tři nahlášené bugy: (1) dávkové vyhodnocení
 - **`src/components/TabEvaluation.tsx`** — WebSocket `useEffect` zbytečně přepojoval při každém přepnutí scénáře (`scenarioId` v dependency array, ač se uvnitř nepoužívá) a leakoval reconnect timery při cleanupu (žádný `cancelled` příznak) — způsobovalo desítky zbytečných reconnectů/s v nginx logách a zhoršovalo expozici výše popsaného bugu. Opraveno + přidána polling pojistka (`fetchEvaluations()` každých 8s během `isEvaluating`) jako obrana do hloubky.
 - Nové testy: `backend/tests/test_evaluation_queue.py` (10 testů — dedup ADR-011, broadcast fallback/NOTIFY větev, `_on_notify` filtrace podle lektora, souběžný disconnect během doručování).
 
+### Škálovatelnost pro víc souběžných lektorů (ADR-016)
+
+- **`backend/main.py`** — `_resolve_worker_concurrency()` dřív předávala nastavenou `LLM_CONCURRENCY_VLLM`/`OPENROUTER` beze změny do KAŽDÉHO worker procesu (`EvaluationQueue` je per-proces singleton stejně jako u ADR-015) — s `--workers 2` tak mohl efektivní limit souběžných LLM volání proti sdílenému vLLM serveru být 2× vyšší, než admin v Administraci nastavil. Neprojevilo se to u jednoho lektora, ale hrozilo by přetížení serveru při víc lektorech pracujících souběžně. Opraveno dělením nastavené hodnoty počtem workerů.
+- **`backend/core/config.py`** — nové nastavení `UVICORN_WORKERS` (výchozí 2).
+- **`backend/Dockerfile`** — `ENV UVICORN_WORKERS=2` jako jediný zdroj pravdy, `--workers ${UVICORN_WORKERS}` v CMD z něj čte (dřív hardcoded `2` na dvou nezávislých místech).
+
 ### Backend — LLM pipeline
 
 - **`src/components/TabCriteria.tsx`** — `processLLMRequest` po AI-chatu parsoval odpověď jako `responseText.split('---')` + poslední prvek; u delších seznamů kritérií model přirozeně používal `---` i jako vnitřní markdown oddělovač, takže se uložilo jen poslední kritérium. Opraveno na "první výskyt → do konce" (stejný vzor jako existující `###` větev).

@@ -107,7 +107,17 @@ async def lifespan(app: FastAPI):
 
 
 def _resolve_worker_concurrency() -> int:
-    """Načte concurrency z DB dle aktuální LLM platformy."""
+    """
+    Načte concurrency z DB dle aktuální LLM platformy a rozdělí ji počtem uvicorn
+    worker procesů (settings.UVICORN_WORKERS).
+
+    EvaluationQueue je per-proces singleton (viz ADR-015) — s N worker procesy
+    vznikne N nezávislých semaforů, takže bez tohoto dělení by efektivní limit
+    souběžných LLM volání proti sdílenému vLLM/GPU serveru byl N×, co admin
+    nastavil v Administraci (LLM_CONCURRENCY_VLLM/OPENROUTER), nekoordinovaně
+    napříč procesy. Při více současně pracujících lektorech by to mohlo zahltit
+    server nad rámec kapacity, na kterou byl skutečně dimenzovaný.
+    """
     try:
         from models.db_models import AppSettings
         db = SessionLocal()
@@ -123,12 +133,21 @@ def _resolve_worker_concurrency() -> int:
                 platform = "openai"
             key = "LLM_CONCURRENCY_OPENROUTER" if platform == "openrouter" else "LLM_CONCURRENCY_VLLM"
             row = db.query(AppSettings).filter(AppSettings.key == key).first()
-            return int(row.value) if row and row.value else (2 if platform == "openrouter" else 8)
+            total_concurrency = int(row.value) if row and row.value else (2 if platform == "openrouter" else 8)
         finally:
             db.close()
     except Exception as e:
         logger.warning(f"Nepodařilo se načíst concurrency z DB ({e}), použito výchozí: 4")
-        return 4
+        total_concurrency = 4
+
+    workers = max(1, settings.UVICORN_WORKERS)
+    per_process = max(1, total_concurrency // workers)
+    if workers > 1:
+        logger.info(
+            f"Concurrency {total_concurrency} rozděleno mezi {workers} worker procesy "
+            f"→ {per_process}/proces (efektivní celkový limit: {per_process * workers})"
+        )
+    return per_process
 
 
 # ── Inicializace FastAPI ──────────────────────────────────────────────────────
