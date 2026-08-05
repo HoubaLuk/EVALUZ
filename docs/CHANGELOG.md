@@ -2,6 +2,31 @@
 
 ---
 
+## [v3.12.0] — 2026-08-05 — Oprava zaseknutého dávkového vyhodnocení + 2 UX bugy z pilotu
+
+### Problém
+
+Pilotní testování odhalilo tři nahlášené bugy: (1) dávkové vyhodnocení ÚZ se 100% reprodukovatelně zaseklo — kolečko se po ~2-3 minutách zastavilo bez výsledku, i u jediného ÚZ; (2) uložení kritérií po AI-asistovaném chatu uložilo jen poslední kritérium místo všech; (3) nový scénář se needeaktivoval, což vedlo ke ztrátě nahraných ÚZ souborů. Diagnostika: čtení kódu (3 paralelní Explore agenti), root cause nalezen u všech tří bez spekulace.
+
+### Bezpečnost/spolehlivost — WebSocket doručení (ADR-015)
+
+- **`backend/services/evaluation_queue.py`** — `broadcast()` už neiteruje `active_connections` přímo (per-proces registr), publikuje přes Postgres `pg_notify` na kanál `evaluz_eval_events`. Kořenová příčina: backend běží s `--workers 2` (dva nezávislé OS procesy bez sdíleného stavu); pokud `POST /evaluate/batch` a WebSocket spojení téhož lektora skončily na různých procesech, broadcast dokončení tiše zasáhl jen registr toho procesu, co úkol zpracoval — DB byla v pořádku, ale UI se to nikdy nedozvědělo. Ověřeno end-to-end (ruční `NOTIFY` přes `psql` → doručeno připojenému WS klientovi).
+- **`backend/main.py`** — `lifespan()` spouští `eval_queue.start_listening(DATABASE_URL)` v každém worker procesu (jen PostgreSQL, SQLite dev prostředí přeskočeno).
+- Nová závislost `asyncpg` (`requirements.txt`/`requirements.lock.txt`, přegenerováno uvnitř `python:3.10-slim`).
+- **`src/components/TabEvaluation.tsx`** — WebSocket `useEffect` zbytečně přepojoval při každém přepnutí scénáře (`scenarioId` v dependency array, ač se uvnitř nepoužívá) a leakoval reconnect timery při cleanupu (žádný `cancelled` příznak) — způsobovalo desítky zbytečných reconnectů/s v nginx logách a zhoršovalo expozici výše popsaného bugu. Opraveno + přidána polling pojistka (`fetchEvaluations()` každých 8s během `isEvaluating`) jako obrana do hloubky.
+- Nové testy: `backend/tests/test_evaluation_queue.py` (10 testů — dedup ADR-011, broadcast fallback/NOTIFY větev, `_on_notify` filtrace podle lektora, souběžný disconnect během doručování).
+
+### Backend — LLM pipeline
+
+- **`src/components/TabCriteria.tsx`** — `processLLMRequest` po AI-chatu parsoval odpověď jako `responseText.split('---')` + poslední prvek; u delších seznamů kritérií model přirozeně používal `---` i jako vnitřní markdown oddělovač, takže se uložilo jen poslední kritérium. Opraveno na "první výskyt → do konce" (stejný vzor jako existující `###` větev).
+- **`backend/core/seeder.py`** — `DEFAULT_PROMPT_PHASE1` doplněn o explicitní zákaz opakování `---` a číslovaný formát hlavičky kritéria (`**N. Kritérium: ...**`) odpovídající `_CRITERION_HEADER_RE` parseru. `PROMPT_VERSION` 3.9 → 3.10.
+
+### UX
+
+- **`src/components/Sidebar.tsx`**, **`src/App.tsx`** — vytvoření nového scénáře nyní scénář rovnou aktivuje a přepne na záložku Kritéria (dřív zůstal needeaktivovaný, což při pozdějším ručním přepnutí resetovalo rozpracované nahrané ÚZ). Uložení kritérií nyní automaticky přepne na záložku Vyhodnocování.
+
+---
+
 ## [v3.11.2] — 2026-07-29 — Zamčené závislosti a oprava `.env` propagace pro nasazení
 
 ### Problém

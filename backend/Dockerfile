@@ -33,7 +33,13 @@ EXPOSE 8000
 # exec: předání signálů (SIGTERM) přímo uvicornu pro čisté vypnutí.
 # --proxy-headers: respektovat X-Forwarded-For / X-Forwarded-Proto z nginx
 # --forwarded-allow-ips=*: důvěřovat proxy (nginx je ve stejné Docker síti)
-# --workers 2: 2 procesy pro paralelní requesty (eval worker je async, takže 2 stačí)
+# --workers 2: 2 procesy pro paralelní requesty. Eval worker je async (jeden proces
+#   souběžně zpracuje N studentů přes AppSettings.LLM_CONCURRENCY_*), --workers tedy
+#   neovlivňuje propustnost vyhodnocování. WebSocket doručení (EvaluationQueue) je
+#   ale bezpečné napříč více procesy JEN díky Postgres LISTEN/NOTIFY (ADR-015,
+#   backend/services/evaluation_queue.py) — bez něj je in-memory registr spojení
+#   per-proces a broadcast na "špatný" proces se tiše ztratí. Necouvat na přímé
+#   in-memory broadcast, pokud se --workers zvýší nad 2.
 CMD ["sh", "-c", "\
   python -c \"\
 import os, psycopg2; \

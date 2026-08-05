@@ -1,6 +1,6 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.11.2  
-**Poslední aktualizace:** 29. července 2026  
+**Verze:** 3.12.0  
+**Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
 ## Obsah
@@ -522,6 +522,7 @@ backend/tests/
 ├── conftest.py                  # sys.path, sdílené fixtures pro unit testy
 ├── test_llm_pipeline.py         # unit testy (43 testů)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
+├── test_evaluation_queue.py     # EvaluationQueue: dedup, broadcast/NOTIFY, doručení (10 testů, viz ADR-015)
 └── integration/
     ├── __init__.py
     ├── conftest.py              # in-memory SQLite, MockLLMRouter, FastAPI client
@@ -529,7 +530,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **55 testů** (spuštění: `cd backend && pytest tests/ -v`). Testy je nutné spouštět přes venv/interpreter, který má nainstalované `requirements.txt` + `requirements-dev.txt` (např. `backend/venv/bin/pytest`) — systémový/globální `pytest` bez těchto závislostí selže na `ModuleNotFoundError`.
+Celkem: **65 testů** (spuštění: `cd backend && pytest tests/ -v`). Testy je nutné spouštět přes venv/interpreter, který má nainstalované `requirements.txt` + `requirements-dev.txt` (např. `backend/venv/bin/pytest`) — systémový/globální `pytest` bez těchto závislostí selže na `ModuleNotFoundError`.
 
 ### 7.2 Unit testy (`test_llm_pipeline.py` — 43 testů)
 
@@ -780,6 +781,23 @@ Pokud selže i úroveň 2 → `ValueError` (fail-fast, viz ADR-009). Level 3 (`_
 **Rozhodnutí:** Každý endpoint musí explicitně požádat o širší scope. Pouze `backend/api/statistics.py` (manažerský dashboard) opt-in na `scope=LOCATION`/`GLOBAL`. Nový default (`PERSONAL`) znamená, že chybějící/zapomenutý parametr vede k bezpečnějšímu chování (méně dat), ne k úniku.
 
 **Kompromis:** Každé nové volání `apply_data_isolation()` vyžaduje vědomé rozhodnutí o scope — o něco víc psaní na volací straně výměnou za to, že chybějící rozhodnutí selže bezpečně. Regresní kryt: `backend/tests/test_data_isolation.py` (viz sekce 7.3b).
+
+---
+
+### ADR-015: EvaluationQueue WebSocket doručení přes Postgres LISTEN/NOTIFY (v3.12.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Pilotní testování odhalilo 100% reprodukovatelný bug — dávkové vyhodnocení ÚZ doběhne na backendu (LLM zavolán, JSON zparsován, DB commit OK), ale UI se to nikdy nedozví: kolečko se po ~2-3 minutách zastaví, ÚZ zůstanou nevyhodnocené. `backend/Dockerfile` spouští `uvicorn main:app --workers 2` — dva nezávislé OS procesy. `EvaluationQueue.active_connections` (registr WebSocket spojení) i `_active_keys` (dedup množina, ADR-011) jsou čistě in-memory objekty na module-level singletonu `eval_queue`, instancovaném **zvlášť v každém procesu**, bez sdíleného stavu. Jádro OS distribuuje příchozí WS spojení i HTTP požadavky mezi oba procesy nedeterministicky (žádná session affinity). Pokud `POST /evaluate/batch` a WS spojení téhož lektora skončí na RŮZNÝCH procesech, broadcast dokončení (`eval_queue.broadcast(...)`) zasáhne jen registr toho procesu, který úkol zpracoval — `broadcast()` u neznámého `lecturer_id` tiše vrátí, žádná výjimka, žádný log. DB je v pořádku (Postgres je sdílený), ale prohlížeč na druhém procesu se nikdy nic nedozví. Efektivně házení mincí při každém páru (WS spojení, HTTP request) — vysvětluje, proč se bug neprojevil při každém testování.
+
+**Možnosti:**
+- A: `--workers 1` — eliminuje split-brain okamžitě, jedna řádková změna. Zvažováno jako rychlá provizorní oprava; propustnost vyhodnocování by neklesla (souběžnost je řešená `asyncio.Semaphore` uvnitř jednoho procesu, ne počtem OS procesů), ale neškáluje na budoucí nasazení s vyšší HTTP zátěží/více replikami.
+- B: Redis pub/sub — architektonicky čisté, ale nová infrastrukturní závislost bez jiného důvodu k zavedení.
+- **C (zvoleno):** Postgres LISTEN/NOTIFY — Postgres už je k dispozici (sdílená DB), žádná nová infrastruktura. Řeší problém trvale i při budoucím zvýšení `--workers`.
+
+**Rozhodnutí:** `backend/services/evaluation_queue.py` — `broadcast()` už neiteruje `active_connections` přímo, vždy publikuje `SELECT pg_notify($1, $2)` na kanál `evaluz_eval_events` přes dedikované `asyncpg` spojení. Každý proces v `main.py`'s `lifespan()` spustí `eval_queue.start_listening(DATABASE_URL)` (jen pro PostgreSQL — SQLite dev prostředí LISTEN/NOTIFY nepodporuje, `broadcast()` tam degraduje na přímé lokální doručení). Synchronní asyncpg callback `_on_notify` naplánuje asynchronní doručení jen socketům registrovaným v TOM procesu, který NOTIFY přijal — což zahrnuje i proces, který NOTIFY sám vyslal (Postgres doručuje všem posluchačům kanálu). Vedlejší oprava zdarma: doručení iteruje kopii listu (`list(...)`), ne živý sdílený list — řeší mutation-during-iteration hazard při souběžném `disconnect()`.
+
+**Kompromis:** O něco vyšší latence per-message (DB round-trip místo přímé in-memory operace) — zanedbatelné pro tento use-case (desítky zpráv, ne tisíce/s). Retry smyčka v `start_listening` (5s backoff) řeší výpadek DB spojení, ale `_active_keys` dedup (ADR-011) zůstává per-proces — teoreticky nedokonalé při souběžném double-submitu napříč procesy ve stejném okamžiku (mimo rozsah nahlášeného bugu, zaznamenáno jako známé omezení).
 
 ---
 

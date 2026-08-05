@@ -543,6 +543,10 @@ export default function EvaluzDashboard() {
             activeClassId={activeClassId}
             activeScenarioId={activeScenarioId}
             onSelectScenario={handleSelectScenario}
+            onScenarioCreated={(classId, scenarioId) => {
+              handleSelectScenario(classId, scenarioId);
+              setActiveTab('criteria');
+            }}
           />
         )}
 
@@ -569,7 +573,7 @@ export default function EvaluzDashboard() {
               <TabCriteria
                 scenarioId={activeScenarioId}
                 scenarioName={activeScenario?.name || null}
-                onCriteriaSaved={() => setHasCriteria(true)}
+                onCriteriaSaved={() => { setHasCriteria(true); setActiveTab('evaluation'); }}
               />
             </div>
 

@@ -17,6 +17,7 @@ export interface SidebarProps {
   activeClassId: string | null;
   activeScenarioId: string | null;
   onSelectScenario: (classId: string, scenarioId: string) => void;
+  onScenarioCreated?: (classId: string, scenarioId: string) => void;
 }
 
 export type EditMode =
@@ -26,7 +27,7 @@ export type EditMode =
   | { type: 'rename_class'; classId: string; currentName: string }
   | { type: 'rename_scenario'; classId: string; scenId: string; currentName: string };
 
-export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, onSelectScenario }: SidebarProps) {
+export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, onSelectScenario, onScenarioCreated }: SidebarProps) {
   const { showConfirm } = useDialog();
 
   const [editMode, setEditMode] = React.useState<EditMode>(null);
@@ -67,11 +68,16 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
       };
       saveClasses([...classes, newClass]);
     } else if (editMode.type === 'new_scenario' && val) {
+      const newScenId = `scen-${Date.now()}`;
       const newClasses = classes.map(c => c.id === editMode.classId ? {
         ...c, expanded: true,
-        scenarios: [...c.scenarios, { id: `scen-${Date.now()}`, name: val }],
+        scenarios: [...c.scenarios, { id: newScenId, name: val }],
       } : c);
       saveClasses(newClasses);
+      // Nový scénář se dřív needeaktivoval — lektor zůstal na starém scénáři, nahrál ÚZ
+      // pod ním, a teprve pozdější ruční přepnutí na nový scénář spustilo reset
+      // studentského stavu v TabEvaluation (vypadalo to jako "ztráta nahraných souborů").
+      onScenarioCreated?.(editMode.classId, newScenId);
     } else if (editMode.type === 'rename_class' && val && val !== editMode.currentName) {
       saveClasses(classes.map(c => c.id === editMode.classId ? { ...c, name: val } : c));
     } else if (editMode.type === 'rename_scenario' && val && val !== editMode.currentName) {
@@ -82,7 +88,7 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
     }
     setEditMode(null);
     setEditValue('');
-  }, [editMode, editValue, classes, saveClasses]);
+  }, [editMode, editValue, classes, saveClasses, onScenarioCreated]);
 
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') { e.preventDefault(); handleSaveEdit(); }

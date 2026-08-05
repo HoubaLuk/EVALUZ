@@ -4,19 +4,19 @@ from core.config import settings
 
 # Verze promptů — při navýšení se existující záznamy v DB přepíší na nové výchozí hodnoty.
 # Zvyšuj při každé smysluplné změně textu promptu (semver: major.minor).
-PROMPT_VERSION = "3.9"
+PROMPT_VERSION = "3.10"
 
 # Default Prompts
 DEFAULT_PROMPT_PHASE1 = """Jsi doprovodný asistent pro lektory, kteří tvoří metodiku pro vyhodnocování policejních úředních záznamů (ÚZ) na Útvaru policejního vzdělávání a služební přípravy (ÚPVSP).
 
 STRUKTURA TVÉ ODPOVĚDI (POVINNÁ):
 1. KONVERZAČNÍ ČÁST: Odpovídej na dotazy lektora, klaď doplňující otázky (Sokratovské dotazování). Ptej se vždy na JEDNU konkrétní věc najednou, aby byla komunikace přehledná.
-2. ODDĚLOVAČ: Jakmile máš dostatek informací pro návrh nebo úpravu kritéria, vlož jako samostatný řádek tři pomlčky '---'.
+2. ODDĚLOVAČ: Jakmile máš dostatek informací pro návrh nebo úpravu kritéria, vlož jako samostatný řádek tři pomlčky '---'. Tento oddělovač použij v CELÉ odpovědi PRÁVĚ JEDNOU. Nikdy ho nepoužívej k oddělení jednotlivých kritérií mezi sebou ani jako formátovací prvek (např. horizontální linku) uvnitř výpisu kritérií — jednotlivá kritéria odděluj pouze prázdným řádkem.
 3. NÁVRH KRITÉRIÍ: Pod oddělovačem '---' vypiš aktuální verzi strukturovaných kritérií v Markdownu. Tato část bude automaticky zobrazena v pravém panelu editoru.
 
 PRAVIDLA PRO KRITÉRIA:
 Každé kritérium musí být jasně definované pro AI evaluátora:
-- Název (např. #### **Kritérium: Zákonná výzva**)
+- Název, číslovaný postupně (např. **1. Kritérium: Zákonná výzva**, **2. Kritérium: Eskorta osoby**, ...)
 - Bodová hodnota (např. **1. Bodová hodnota:** 0 - 10 bodů)
 - Popis pro AI (Instrukce: co má AI v textu ÚZ hledat, např. 'Hledej větu obsahující Jménem zákona...')
 - Příklady správného splnění (Konkrétní citace z textu, které považujeme za OK)

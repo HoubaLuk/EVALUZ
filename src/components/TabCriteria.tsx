@@ -111,9 +111,13 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
       if (!res.ok) { const errorData = await res.json(); throw new Error(errorData.detail || 'Network response was not ok'); }
       const data = await res.json();
       const responseText = data.response;
-      if (responseText.includes('---')) {
-        const parts = responseText.split('---');
-        const possibleCriteria = parts[parts.length - 1].trim();
+      const sepIdx = responseText.indexOf('---');
+      if (sepIdx !== -1) {
+        // Bere text POUZE za prvním oddělovačem — model u delších seznamů kritérií
+        // občas použije '---' i jako markdown horizontální linku uvnitř samotného
+        // výpisu kritérií. Split-na-všech-výskytech + "poslední část" by v takovém
+        // případě zahodil všechna kritéria kromě posledního.
+        const possibleCriteria = responseText.slice(sepIdx + 3).trim();
         if (possibleCriteria.length > 30) setCriteriaMarkdown(possibleCriteria);
       } else if (responseText.includes('###')) {
         const headerIdx = responseText.indexOf('###');

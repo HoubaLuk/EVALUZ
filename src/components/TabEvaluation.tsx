@@ -97,6 +97,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     // --- WEBSOCET: SLEDOVÁNÍ STAVU V REÁLNÉM ČASE ---
     useEffect(() => {
         let ws: WebSocket;
+        let cancelled = false;
+        let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
         const connectWs = () => {
             if (!lecturerId) return;
             const wsToken = localStorage.getItem('upvsp_token') || '';
@@ -138,13 +140,35 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 }
             };
             ws.onclose = () => {
-                // Automatický reconnect při odpojení
-                setTimeout(connectWs, 3000);
+                // Automatický reconnect při odpojení — jen pokud tato instance efektu
+                // ještě není zrušená (jinak by se při cleanupu naplánoval osiřelý
+                // reconnect ze staré closure, který už nikdo neuklidí).
+                if (!cancelled) {
+                    reconnectTimer = setTimeout(connectWs, 3000);
+                }
             };
         };
         connectWs();
-        return () => ws?.close();
-    }, [scenarioId, lecturerId]);
+        return () => {
+            // Pořadí je důležité: nejdřív zrušit plánovaný reconnect a nastavit
+            // cancelled, teprve pak zavřít socket — ws.close() sama synchronně
+            // vyvolá onclose, který musí už vidět cancelled === true.
+            cancelled = true;
+            clearTimeout(reconnectTimer);
+            ws?.close();
+        };
+    }, [lecturerId]);
+
+    // Pojistka: dokud probíhá vyhodnocování, pravidelně dotáhni stav z DB i bez WS
+    // zprávy — ohraničuje worst-case "zaseklé kolečko" na jeden polling interval,
+    // kdyby WS zpráva byla z jakéhokoli důvodu ztracena.
+    useEffect(() => {
+        if (!isEvaluating) return;
+        const intervalId = setInterval(() => {
+            fetchEvaluations();
+        }, 8000);
+        return () => clearInterval(intervalId);
+    }, [isEvaluating]);
     useEffect(() => {
         const handleSyncComplete = () => {
             fetchEvaluations();

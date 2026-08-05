@@ -81,6 +81,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"Eval worker spuštěn: concurrency={concurrency}")
     worker_task = asyncio.create_task(eval_queue.worker(concurrency=concurrency))
 
+    # 4. LISTEN/NOTIFY (ADR-015) — pouze PostgreSQL. Nutné v KAŽDÉM uvicorn worker
+    #    procesu (--workers 2), jinak ten proces nikdy nedostane oznámení o úkolech
+    #    dokončených jiným procesem (viz evaluation_queue.py modulový docstring).
+    listen_task = None
+    if not settings.is_sqlite:
+        listen_task = asyncio.create_task(eval_queue.start_listening(settings.DATABASE_URL))
+
     yield
 
     # Úklid při vypnutí
@@ -89,6 +96,14 @@ async def lifespan(app: FastAPI):
         await worker_task
     except asyncio.CancelledError:
         pass
+
+    if listen_task is not None:
+        listen_task.cancel()
+        try:
+            await listen_task
+        except asyncio.CancelledError:
+            pass
+        await eval_queue.close()
 
 
 def _resolve_worker_concurrency() -> int:
