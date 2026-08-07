@@ -111,12 +111,21 @@ export function TabCriteria({ scenarioId, scenarioName, onCriteriaSaved }: TabCr
       if (!res.ok) { const errorData = await res.json(); throw new Error(errorData.detail || 'Network response was not ok'); }
       const data = await res.json();
       const responseText = data.response;
-      const sepIdx = responseText.indexOf('---');
-      if (sepIdx !== -1) {
-        // Bere text POUZE za prvním oddělovačem — model u delších seznamů kritérií
-        // občas použije '---' i jako markdown horizontální linku uvnitř samotného
-        // výpisu kritérií. Split-na-všech-výskytech + "poslední část" by v takovém
-        // případě zahodil všechna kritéria kromě posledního.
+      // Primárně hledáme hlavičku PRVNÍHO kritéria ("1. Kritérium:") — stejná kotva,
+      // jakou používá i backendový parser (parse_criteria_markdown v criteria_service.py),
+      // takže frontend a backend hledají přesně tu samou věc. Kotva na "1." konkrétně
+      // (ne libovolné číslo) zabrání falešnému zásahu, pokud model zmíní "kritérium 3"
+      // někde v konverzační části ještě před finálním výpisem.
+      // Robustnější než dřívější hledání '---' — model může '---' použít i jako
+      // oddělovač MEZI jednotlivými kritérii (ne jen jednou před celým výpisem), takže
+      // pozice prvního '---' není spolehlivý ukazatel začátku bloku kritérií.
+      const criterionHeaderMatch = responseText.match(/\*{0,2}\s*1\.\s*Krit[eé]rium/i);
+      if (criterionHeaderMatch && typeof criterionHeaderMatch.index === 'number') {
+        const possibleCriteria = responseText.slice(criterionHeaderMatch.index).trim();
+        if (possibleCriteria.length > 30) setCriteriaMarkdown(possibleCriteria);
+      } else if (responseText.includes('---')) {
+        // Fallback pro starší/jednodušší styl promptu s jediným oddělovačem '---'.
+        const sepIdx = responseText.indexOf('---');
         const possibleCriteria = responseText.slice(sepIdx + 3).trim();
         if (possibleCriteria.length > 30) setCriteriaMarkdown(possibleCriteria);
       } else if (responseText.includes('###')) {
