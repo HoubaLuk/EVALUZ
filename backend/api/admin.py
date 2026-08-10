@@ -109,10 +109,19 @@ def update_settings(updates: List[AppSettingUpdateInfo], db: Session = Depends(g
 
 
 @router.post("/test-llm")
-async def test_connection(config: TestConfigRequest, current_user: Lecturer = Depends(get_current_lecturer)):
+async def test_connection(
+    config: TestConfigRequest,
+    db: Session = Depends(get_db),
+    current_user: Lecturer = Depends(get_current_lecturer),
+):
     """
     Tests connection to a vLLM/OpenAI-compatible provider.
     Používá AsyncOpenAI — neblokuje event loop.
+
+    Kromě dostupnosti modelu ověří i kontextové okno (ADR-018): serverový `max_model_len`
+    je tvrdý limit, nastavení `VLLM_CONTEXT_WINDOW` v Administraci ho nemůže zvýšit.
+    Když je nastavené vyšší, admin to musí vidět tady — jinak se to projeví až chybou
+    HTTP 400 uprostřed vyhodnocování delšího ÚZ.
     """
     try:
         api_url = config.base_url.strip()
@@ -141,9 +150,31 @@ async def test_connection(config: TestConfigRequest, current_user: Lecturer = De
         )
 
         if response:
+            from services.llm_engine import fetch_server_max_model_len
+
+            message = f"Připojení k modelu '{config.model_id}' je v pořádku."
+            # force_refresh: po restartu vLLM s jiným --max-model-len musí test ukázat
+            # aktuální hodnotu, ne tu z cache.
+            server_ctx = await fetch_server_max_model_len(api_url, api_key, force_refresh=True)
+            configured_row = db.query(AppSettings).filter(
+                AppSettings.key == "VLLM_CONTEXT_WINDOW"
+            ).first()
+            configured_ctx = int(configured_row.value) if configured_row and configured_row.value else None
+
+            if server_ctx:
+                message += f" Kontextové okno serveru: {server_ctx} tokenů."
+                if configured_ctx and configured_ctx > server_ctx:
+                    message += (
+                        f" ⚠ V Administraci je nastaveno {configured_ctx}, což server neumí —"
+                        f" aplikace bude počítat s {server_ctx}. Snižte nastavení,"
+                        f" nebo spusťte vLLM s vyšším --max-model-len."
+                    )
+
             return {
                 "status": "success",
-                "message": f"Připojení k modelu '{config.model_id}' je v pořádku.",
+                "message": message,
+                "max_model_len": server_ctx,
+                "configured_context_window": configured_ctx,
             }
 
     except openai.AuthenticationError as e:

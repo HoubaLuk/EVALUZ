@@ -325,6 +325,30 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         }
     }, [students, isEvaluating]);
 
+    // WATCHDOG (ADR-017): backend nově garantuje terminální událost (EVAL_SUCCESS/EVAL_ERROR)
+    // pro KAŽDÝ zařazený ÚZ, takže se isEvaluating uvolní sám. Dřív spadlé úlohy neposlaly
+    // nic — evaluatedCount nikdy nedosáhl totalToEvaluate a studenti zůstali viset ve stavu
+    // 'evaluating', čímž se zablokovaly obě cesty ven (progress efekt i self-healing výše).
+    // Kolečko se točilo donekonečna a s ním i 8s polling.
+    // Tenhle časovač je poslední pojistka pro případ, že se WS zpráva ztratí při výpadku
+    // spojení. Hlídá TICHO, ne celkovou délku dávky — restartuje se s každým dokončeným ÚZ,
+    // takže 10 minut je proti běžným ~95 s na jeden ÚZ velkorysá rezerva.
+    useEffect(() => {
+        if (!isEvaluating) return;
+        const watchdogId = setTimeout(() => {
+            setIsEvaluating(false);
+            setEvaluationProgress(0);
+            setStudents(prev => prev.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
+            fetchEvaluations();
+            setToastMessage({
+                text: 'Vyhodnocování bylo ukončeno kvůli nečinnosti. Zkontrolujte seznam a nevyhodnocené ÚZ případně spusťte znovu.',
+                type: 'error',
+            });
+            setTimeout(() => setToastMessage(null), 8000);
+        }, 10 * 60 * 1000);
+        return () => clearTimeout(watchdogId);
+    }, [isEvaluating, evaluatedCount]);
+
     const toggleStudent = (id: number) => {
         setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };

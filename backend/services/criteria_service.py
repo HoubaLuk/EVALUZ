@@ -1,4 +1,7 @@
+import logging
 import re
+
+logger = logging.getLogger("evaluz.criteria")
 
 # Unikátní oddělovač kritérií (od v3.9.6) — synchronizováno s
 # `services.llm_engine.CRITERIA_DELIMITER`. Definujeme zde lokálně, abychom se vyhnuli
@@ -55,15 +58,31 @@ def parse_criteria_markdown(markdown_text: str) -> list:
         header_match = _CRITERION_HEADER_RE.match(first_line)
         if not header_match:
             # Hlavička scénáře, MS popis, prázdné odstavce — ignorujeme.
+            # Blok, který se o hlavičku POKOUŠÍ (obsahuje slovo „Kritérium"), ale neprošel,
+            # je ale podezřelý: nejspíš překlep ve formátu, kterým lektor tiše přijde
+            # o celé kritérium. Takový případ musí být hlasitý.
+            preview = first_line[:60].replace('\n', ' ')
+            if 'kritérium' in block[:200].lower() or 'kriterium' in block[:200].lower():
+                logger.warning(
+                    f"[CRITERIA] Blok přeskočen — hlavička neodpovídá formátu "
+                    f"`**N. Kritérium: název**`: '{preview}…'"
+                )
+            else:
+                logger.info(f"[CRITERIA] Blok bez hlavičky kritéria přeskočen: '{preview}…'")
             continue
 
         nazev = header_match.group(2).strip().strip('*').strip()
         if not nazev:
             # Header bez názvu — také ignorujeme (defenzivní).
+            logger.warning(f"[CRITERIA] Hlavička bez názvu kritéria přeskočena: '{first_line[:60]}…'")
             continue
 
         # Popis = zbytek textu (bez prvního řádku). Smaž delimiter, pokud zbyl.
         popis = re.sub(r'\s*#############\s*', ' ', '\n'.join(lines[1:])).strip()
+        # Splitter dělí PŘED hlavičkou dalšího kritéria, takže markdown oddělovač `---`
+        # zůstane viset na konci popisu toho předchozího. Kotveno na konec, aby to
+        # nepoškodilo popisné pomlčky uvnitř textu.
+        popis = re.sub(r'\n\s*-{3,}\s*$', '', popis).strip()
         if not popis:
             popis = nazev
 
@@ -74,7 +93,17 @@ def parse_criteria_markdown(markdown_text: str) -> list:
             try:
                 body = int(body_match.group(1))
             except (ValueError, TypeError):
-                pass
+                logger.warning(
+                    f"[CRITERIA] '{nazev}': hodnotu '{body_match.group(1)}' nelze převést "
+                    f"na číslo — použit default 1 bod."
+                )
+        else:
+            # Tiché dosazení 1 bodu bývalo neviditelné: max. skóre se změnilo a UI
+            # i logy hlásily OK. Pole se musí jmenovat přesně `**Bodová hodnota:** N`.
+            logger.warning(
+                f"[CRITERIA] '{nazev}': chybí pole `**Bodová hodnota:** N` "
+                f"— použit default 1 bod."
+            )
 
         results.append({
             "nazev": nazev,
@@ -82,4 +111,8 @@ def parse_criteria_markdown(markdown_text: str) -> list:
             "body": body
         })
 
+    logger.info(
+        f"[CRITERIA] Rozparsováno {len(results)} kritérií, "
+        f"maximum {sum(c['body'] for c in results)} bodů."
+    )
     return results

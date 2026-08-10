@@ -95,6 +95,33 @@ def _canonicalize_criterion_name(name: str) -> str:
     return s.lower().strip()
 
 
+def _pop_matching_slot(slots: list[str], actual_name: str, prefix: str) -> str:
+    """Vybere ze slotů se shodným kanonickým základem ten SPRÁVNÝ (ADR-019).
+
+    `_canonicalize_criterion_name` odstřihává jméno osoby na konci názvu, takže kritéria
+    lišící se jen osobou (např. „… – Ivana Horáková" vs. „… – Tadeáš Kadlec") sdílí jednu
+    frontu slotů. Slepé `pop(0)` je přiřazovalo podle POŘADÍ odpovědi modelu — kdyby model
+    obě varianty prohodil, výsledek jedné osoby by se tiše zobrazil pod druhou. Celkové
+    skóre by přitom zůstalo správné, takže by si toho nikdo nevšiml.
+
+    Prompt modelu ukládá zkopírovat název kritéria doslova, takže přednost má shoda celého
+    názvu. Když se nenajde, spadne se na původní poziční chování — při jediném slotu je
+    výsledek bit po bitu shodný s dřívějším a regrese tedy není možná.
+    """
+    needle = (actual_name or "").strip().lower()
+    if needle:
+        for i, candidate in enumerate(slots):
+            if candidate.strip().lower() == needle:
+                return slots.pop(i)
+    if len(slots) > 1:
+        logger.warning(
+            f"{prefix}⚠ Nejednoznačné přiřazení kritéria: '{actual_name}' sedí na "
+            f"{len(slots)} kritéria se shodným kanonickým základem a přesná shoda názvu "
+            f"nenalezena — přiřazuji podle pořadí k '{slots[0]}'"
+        )
+    return slots.pop(0)
+
+
 def _validate_and_fix_vysledky(
     parsed: dict,
     expected_criteria_names: list[str],
@@ -140,7 +167,7 @@ def _validate_and_fix_vysledky(
         canonical = _canonicalize_criterion_name(actual_name)
 
         if canonical_queue.get(canonical):
-            expected_name = canonical_queue[canonical].pop(0)
+            expected_name = _pop_matching_slot(canonical_queue[canonical], actual_name, prefix)
         elif canonical in canonical_queue:
             # Fronta pro tento canonical je prázdná → multi-person duplikát.
             duplicate_names.append(actual_name)
@@ -157,7 +184,9 @@ def _validate_and_fix_vysledky(
                     fallback_match = cq_key
                     break
             if fallback_match:
-                expected_name = canonical_queue[fallback_match].pop(0)
+                expected_name = _pop_matching_slot(
+                    canonical_queue[fallback_match], actual_name, prefix
+                )
                 logger.debug(f"{prefix}  fallback match: '{canonical}' → '{fallback_match}'")
             else:
                 unknown_names.append(actual_name or '<bez názvu>')
@@ -393,6 +422,88 @@ PLATFORM_CONTEXT_DEFAULTS: dict[str, int] = {
     "openai": 128000,
     "lmstudio": 8192,
 }
+
+# Sdílené AsyncOpenAI klienty: (api_url, api_key, timeout) → klient.
+# Dřív se klient i jeho httpx.AsyncClient vytvářely znovu při KAŽDÉM volání a nikdy se
+# nezavíraly — nový connection pool a TCP handshake pro každý ÚZ plus rostoucí počet
+# neuzavřených socketů. AsyncOpenAI je bezpečné sdílet mezi korutinami.
+_LLM_CLIENT_CACHE: dict[tuple[str, str, float], AsyncOpenAI] = {}
+
+
+def _get_llm_client(api_url: str, api_key: str, timeout: float = 300.0) -> AsyncOpenAI:
+    """Vrátí sdílený AsyncOpenAI klient pro danou kombinaci URL / klíče / timeoutu."""
+    cache_key = (api_url, api_key or "", timeout)
+    client = _LLM_CLIENT_CACHE.get(cache_key)
+    if client is None:
+        client = AsyncOpenAI(
+            base_url=api_url,
+            api_key=api_key or "sk-no-key-required",
+            default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
+            http_client=httpx.AsyncClient(
+                timeout=timeout,
+                limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+            ),
+        )
+        _LLM_CLIENT_CACHE[cache_key] = client
+    return client
+
+
+async def close_llm_clients() -> None:
+    """Zavře sdílené klienty — volá se ze `lifespan` při shutdownu aplikace."""
+    for client in list(_LLM_CLIENT_CACHE.values()):
+        try:
+            await client.close()
+        except Exception as e:
+            logger.warning(f"[LLM] Zavření klienta selhalo: {e}")
+    _LLM_CLIENT_CACHE.clear()
+
+
+# Cache zjištěného serverového limitu: api_url → max_model_len | None.
+# Hodnota se za běhu nemění (vLLM ji fixuje přes --max-model-len při startu a podle ní
+# alokuje KV cache), takže stačí zjistit jednou za život procesu.
+_SERVER_MAX_LEN_CACHE: dict[str, int | None] = {}
+
+
+async def fetch_server_max_model_len(api_url: str, api_key: str = "", force_refresh: bool = False) -> int | None:
+    """Zjistí skutečný `max_model_len` z běžícího LLM serveru (ADR-018).
+
+    `VLLM_CONTEXT_WINDOW` z Administrace se do vLLM NEPOSÍLÁ — `_build_llm_kwargs` předává
+    per-request kontext jen Ollamě (`num_ctx`). Je to čistě interní odhad aplikace pro
+    rozhodnutí single-call vs. chunking. Když je nastavený výš než serverový
+    `--max-model-len`, aplikace plánuje prompty, které server odmítne s HTTP 400.
+
+    `max_model_len` je rozšíření vLLM mimo OpenAI spec, proto se čte přímo z JSON odpovědi
+    `GET /v1/models`, ne přes typované modely OpenAI SDK.
+
+    Vrací None, když limit nelze zjistit (jiný provider, síťová chyba, starší build vLLM);
+    volající pak zůstane u hodnoty z Administrace.
+
+    `force_refresh=True` obejde cache — používá to tlačítko „Test LLM" v Administraci,
+    aby po restartu vLLM s jiným `--max-model-len` ukázalo aktuální hodnotu.
+    """
+    api_url = (api_url or "").rstrip("/")
+    if not api_url:
+        return None
+    if not force_refresh and api_url in _SERVER_MAX_LEN_CACHE:
+        return _SERVER_MAX_LEN_CACHE[api_url]
+
+    result: int | None = None
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        async with httpx.AsyncClient(timeout=5.0) as probe:
+            resp = await probe.get(f"{api_url}/models", headers=headers)
+            resp.raise_for_status()
+            for entry in ((resp.json() or {}).get("data") or []):
+                value = entry.get("max_model_len")
+                if isinstance(value, int) and value > 0:
+                    result = value if result is None else min(result, value)
+    except Exception as e:
+        logger.info(f"[CTX] max_model_len z {api_url} nezjištěn ({e}) — použije se nastavení z Administrace.")
+
+    if result:
+        logger.info(f"[CTX] Server {api_url} hlásí max_model_len={result}")
+    _SERVER_MAX_LEN_CACHE[api_url] = result
+    return result
 
 
 def _estimate_tokens(text: str) -> int:
@@ -676,12 +787,7 @@ async def generate_feedback_for_record(merged: dict, db: Session, student_log_pr
     platform = _resolve_platform(raw_platform, api_url)
     prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
 
-    client = AsyncOpenAI(
-        base_url=api_url,
-        api_key=api_key or "sk-no-key-required",
-        default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
-        http_client=httpx.AsyncClient(timeout=300.0)
-    )
+    client = _get_llm_client(api_url, api_key, timeout=300.0)
     return await _generate_individual_feedback(
         merged, db, client, platform, model_name, enable_thinking,
         context_window, top_p, presence_penalty, frequency_penalty, prefix
@@ -772,12 +878,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     prefix = f"[LOG - {student_log_prefix}] " if student_log_prefix else ""
     logger.info(f"{prefix}LLM volání: platform={platform}, url={api_url}, model={model_name}")
 
-    client = AsyncOpenAI(
-        base_url=api_url,
-        api_key=api_key or "sk-no-key-required",
-        default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
-        http_client=httpx.AsyncClient(timeout=300.0)
-    )
+    client = _get_llm_client(api_url, api_key, timeout=300.0)
 
     strict_system_prompt = system_prompt
 
@@ -787,6 +888,17 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
     chunk_size = int(_get_setting(db, "CHUNK_SIZE", "6"))
     threshold_pct = float(_get_setting(db, "CHUNK_THRESHOLD_TOKENS_PCT", "0.7"))
     ctx = context_window or PLATFORM_CONTEXT_DEFAULTS.get(platform, 8192)
+    # Strop ze serveru (ADR-018): server je autoritativní. Nastavení z Administrace smí
+    # limit jen SNÍŽIT, nikdy ho překročit — jinak dostane rozhodnutí o chunkingu falešně
+    # vysoký práh a single-call volání narazí na HTTP 400.
+    server_ctx = await fetch_server_max_model_len(api_url, api_key)
+    if server_ctx and server_ctx < ctx:
+        logger.warning(
+            f"{prefix}⚠ Kontextové okno v Administraci ({ctx}) přesahuje limit serveru "
+            f"({server_ctx}) — počítám s {server_ctx}. Srovnejte nastavení, nebo spusťte "
+            f"vLLM s vyšším --max-model-len."
+        )
+        ctx = server_ctx
     budget = int(ctx * threshold_pct)
     est = _estimate_tokens(strict_system_prompt + report_text + criteria_markdown) + max_tokens
     logger.info(f"{prefix}Token odhad: est={est}, budget={budget} ({threshold_pct*100:.0f}% z ctx={ctx}) → {'single-call' if est <= budget else f'chunking ({chunk_size}/chunk)'}")
@@ -991,12 +1103,7 @@ async def extract_identity(report_text: str, db: Session, student_log_prefix: st
 
     platform = _resolve_platform(raw_platform, api_url)
 
-    client = AsyncOpenAI(
-        base_url=api_url,
-        api_key=api_key or "sk-no-key-required",
-        default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
-        http_client=httpx.AsyncClient(timeout=60.0)
-    )
+    client = _get_llm_client(api_url, api_key, timeout=60.0)
     
     logger.info(f"[FAST-SCAN] platform={platform}, model={model_name}")
 
@@ -1127,12 +1234,7 @@ async def chat_completion(messages: list, system_prompt: str, temperature: float
     
     logger.info(f">>> LLM volání směřuje na: {api_url} s modelem: {model_name}")
 
-    client = AsyncOpenAI(
-        base_url=api_url,
-        api_key=api_key or "sk-no-key-required",
-        default_headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
-        http_client=httpx.AsyncClient(timeout=300.0)
-    )
+    client = _get_llm_client(api_url, api_key, timeout=300.0)
 
     formatted_messages = [{"role": "system", "content": system_prompt}]
     

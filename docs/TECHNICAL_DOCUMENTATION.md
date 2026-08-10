@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.12.0  
+**Verze:** 3.13.0  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -817,6 +817,67 @@ Pokud selže i úroveň 2 → `ValueError` (fail-fast, viz ADR-009). Level 3 (`_
 
 ---
 
+### ADR-017: Serializovaný přístup ke sdílenému asyncpg spojení + invariant terminální události (v3.13.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Testovací provoz odhalil, že z dávky 3 ÚZ se vyhodnotí jen první a zbylé se musí spouštět opakovaně ručně. Log ukazuje deterministický vzorec: dávka 3 → 1 přežije, dávka 4 → 1 přežije, dávka 1 → vždy OK; u ostatních `Chyba při zpracování úkolu: cannot perform operation: another operation is in progress`. Tahle hláška pochází výhradně z asyncpg a v celé aplikaci existuje jediné asyncpg spojení — `EvaluationQueue._pg_conn`, zavedené v ADR-015 pro LISTEN/NOTIFY. Jedno asyncpg spojení **nesmí obsluhovat dvě korutiny naráz**, ale `broadcast()` ho volá z každé úlohy; při dávce běží N úloh souběžně, první spojení zabere a zbylé okamžitě padnou. Regrese pochází přímo z ADR-015 — předtím `broadcast()` doručoval in-memory a žádné DB spojení nepoužíval.
+
+Druhá polovina problému je viditelnost: `broadcast(EVAL_START)` stál **mimo** `try` blok v `process_single_file_bg`, takže výjimka proletěla až do `_run_task`, kde se jen vypsala `print()` na stdout. Do prohlížeče nedorazilo nic — ani `EVAL_ERROR`. Frontend proto nikdy nedopočítal `evaluatedCount` na `totalToEvaluate` a studenti zůstali viset ve stavu `evaluating`, čímž se zablokovaly obě cesty k ukončení dávky (progress efekt i self-healing v `TabEvaluation.tsx`). Kolečko se točilo donekonečna a s ním i 8s polling — v logu 20 minut bez jediného LLM volání.
+
+Důsledek pro výkon: batching se nikdy neprojevil. Dávka 1 ÚZ trvala 96,1 s, „dávka 3" 98,7 s — identicky, protože běžel vždy jen jeden požadavek. Že GPU batching zvládá, dokládá starší záznam vLLM (`Running: 5 reqs`, 165 tok/s proti 36 tok/s u jediného požadavku, KV cache na 30 %).
+
+**Možnosti:**
+- A: Vlastní asyncpg spojení pro každou úlohu — korektní, ale N spojení navíc na dávku a nový lifecycle k údržbě.
+- B: Malý asyncpg pool jen pro NOTIFY — funkční, ale zbytečná infrastruktura pro operaci trvající zlomek milisekundy.
+- **C (zvoleno):** `asyncio.Lock` nad stávajícím spojením. `pg_notify` je sub-milisekundová operace, takže serializace nic nestojí a nepřidává žádnou novou komponentu.
+
+**Rozhodnutí:** `EvaluationQueue._notify_lock` chrání každé `execute()` nad `_pg_conn`. `broadcast(EVAL_START)` se přesunul dovnitř `try`. `_run_task` nově loguje přes `logger.error(..., exc_info=True)` a v `except` větvi odesílá `EVAL_ERROR` jako záchrannou síť. Tím vzniká invariant, o který se opírá celý frontend: **každý zařazený úkol vyprodukuje právě jednu terminální událost (`EVAL_SUCCESS`, nebo `EVAL_ERROR`)**. `TabEvaluation.tsx` má navíc watchdog (10 min ticha) pro případ, že se WS zpráva ztratí při výpadku spojení.
+
+Součástí je i oprava `clear_queue()`, která dosud mazala frontu **všem** lektorům a jen v tom procesu, na který dopadl HTTP request. Nově přijímá `lecturer_id`, úkoly cizích lektorů vrací do fronty a úklid rozesílá stávajícím kanálem `evaluz_eval_events` jako **řídicí zprávu** (vyhrazený klíč `__control`), kterou `_on_notify` odchytí před `_deliver_local` a vykoná lokálně v každém procesu, aniž by ji poslal do prohlížeče.
+
+**Kompromis:** Zámek serializuje notifikace i tehdy, kdy by to nutné nebylo — při desítkách zpráv na dávku neměřitelné. Řídicí zprávy sdílí kanál s uživatelskými, což vyžaduje disciplínu při rozšiřování protokolu (neznámý `__control` se loguje a ignoruje). Regresní test `ConcurrencyTrackingPgConn` souběžné použití spojení aktivně detekuje — ověřeno, že bez zámku selže (2 překryvy, doručena 1 zpráva ze 3).
+
+---
+
+### ADR-018: `max_model_len` ze serveru jako strop nad nastavením v Administraci (v3.13.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** V Administraci je `VLLM_CONTEXT_WINDOW` a působí jako by nastavovalo kontextové okno modelu. Nenastavuje — `_build_llm_kwargs` posílá per-request kontext jedině Ollamě (`num_ctx`); pro vLLM se v `extra_body` předává pouze `enable_thinking`. U vLLM je okno fixované při startu kontejneru přes `--max-model-len` a podle něj se alokuje KV cache; klient ho přes OpenAI API zvýšit nemůže. Hodnota z Administrace je tedy jen **interní odhad aplikace**, ze kterého se počítá práh pro chunking (`budget = ctx × CHUNK_THRESHOLD_TOKENS_PCT`).
+
+Na testovacím serveru byla nastavena na 64512, zatímco vLLM běželo s `--max-model-len 32768`. Aplikace tak počítala s prahem 45 158 tokenů — **nad tvrdým limitem serveru**. Delší ÚZ by aplikace poslala jako single-call v přesvědčení, že se vejde, a vLLM by ho odmítl HTTP 400. `_llm_call_with_overflow_retry` to částečně zahojí (opakuje s osekaným `max_tokens`), ale za cenu useknuté odpovědi. Riziko roste tím, že prázdná hodnota spadne na `PLATFORM_CONTEXT_DEFAULTS["vllm"] = 131072`.
+
+**Možnosti:**
+- A: Jen dokumentovat, že se hodnoty musí ručně srovnat — spoléhá na disciplínu a mlčí, když se rozejdou.
+- B: Nastavení z Administrace zrušit a číst výhradně ze serveru — ztratí se možnost ručně snížit strop u providerů, kteří limit nehlásí.
+- **C (zvoleno):** Číst `max_model_len` ze serveru a použít ho jako **strop**: `ctx = min(nastavení, server)`. Ruční nastavení zůstává jako pojistka směrem dolů, ale nikdy nemůže slíbit víc, než server umí.
+
+**Rozhodnutí:** `fetch_server_max_model_len()` čte `GET /v1/models` přímo přes `httpx` (pole `max_model_len` je rozšíření vLLM mimo OpenAI spec, typované modely SDK ho nezaručují) a cachuje výsledek podle URL — hodnota se za běhu serveru nemění. `evaluate_report()` strop uplatní a při rozporu loguje varování. `POST /admin/test-llm` zjištěnou hodnotu vrací a explicitně upozorní, když je nastavení v Administraci vyšší, takže to admin uvidí při testu spojení, ne až chybou uprostřed vyhodnocování.
+
+**Kompromis:** Jedno HTTP volání navíc při prvním vyhodnocení po startu procesu (5s timeout, selhání je neškodné — zůstane hodnota z Administrace). Cache znamená, že po restartu vLLM s jiným `--max-model-len` platí stará hodnota do restartu backendu; tlačítko „Test LLM" proto cache obchází (`force_refresh=True`).
+
+---
+
+### ADR-019: Deterministické přiřazení kritérií — přesná shoda před poziční frontou (v3.13.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** `_canonicalize_criterion_name` záměrně odstřihává jméno osoby na konci názvu kritéria (heuristika proti tomu, aby model „personalizoval" generické kritérium jménem z textu ÚZ). Kritéria lišící se pouze osobou tím spadnou pod jeden kanonický klíč. ADR-011 na to reagovalo frontou N slotů místo dictu, takže se žádné kritérium neztratí — jenže výběr slotu je `pop(0)`, tedy **poziční, podle pořadí odpovědi modelu**.
+
+Reálná sada MS2 „Vstup do obydlí" má tři takové dvojice (kritéria 6+12, 7+13 a 8+14 — prokázání totožnosti, ztotožnění osoby a lustrace PATROS, vždy pro Ivanu Horákovou a Tadeáše Kadlece). Když model obě varianty prohodí, odůvodnění jedné osoby se tiše uloží pod kritérium té druhé. Celkové skóre zůstane správné (počet položek i body z DB sedí), takže chybu nelze zpozorovat ani v UI, ani v logu. Zatím k tomu nedošlo, ale spolehlivost stojí jen na tom, že model dodržuje pořadí promptu.
+
+**Možnosti:**
+- A: Přejmenovat kolidující kritéria v UI — obchází příčinu, znehodnocuje didaktický obsah a spoléhá na to, že si to lektor u každé nové sady uhlídá.
+- B: Přestat odstřihávat person-suffix — vrátí původní problém s personalizací názvů modelem.
+- **C (zvoleno):** Zkusit nejdřív shodu celého názvu mezi zbývajícími sloty a teprve při neúspěchu spadnout na dosavadní `pop(0)`.
+
+**Rozhodnutí:** Helper `_pop_matching_slot()` hledá mezi sloty přesnou shodu názvu (case-insensitive, `strip()`); prompt modelu už dnes ukládá zkopírovat název doslova, takže ve valné většině případů uspěje. Když slotů zbývá víc než jeden a přesná shoda chybí, přiřazení se provede pozičně jako dřív, ale zaloguje se `WARNING` — tichý tip se tím mění v hlasitý. Chování je nezávislé na konkrétní sadě kritérií: řeší libovolnou dvojici lišící se jménem osoby, ať se osoby jmenují jakkoli.
+
+**Kompromis:** Při jediném slotu je výsledek bit po bitu shodný s předchozím chováním a bez přesné shody se nemění nic, takže regrese není možná — cenou je lineární průchod sloty místo `pop(0)`, což je při jednotkách slotů bezvýznamné. Regresní test ověřuje, že prohozené pořadí obou person-variant nyní sedne správně (se starým `pop(0)` prokazatelně selhává).
+
+---
+
 ## 9. Historie vývoje (Changelog)
 
 ### v3.10.5 (6. 5. 2026) — Analytics prázdný stav UX
@@ -1004,4 +1065,4 @@ Dokončení 7-etapového refaktoru `llm_engine.py`. Cílem bylo zjednodušení k
 
 ---
 
-*Poslední aktualizace dokumentace: 6. května 2026*
+*Poslední aktualizace dokumentace: 10. srpna 2026*

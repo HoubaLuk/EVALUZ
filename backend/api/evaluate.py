@@ -395,15 +395,17 @@ async def evaluate_batch(
         
         start_time = datetime.datetime.now()
         print(f">>> [QUEUE] Start vyhodnocování: {student_name} v {start_time.strftime('%H:%M:%S')}")
-        
-        # Notifikace start
-        await eval_queue.broadcast({
-            "type": "EVAL_START",
-            "student_name": student_name,
-            "scenario_id": scen_id
-        }, lecturer_id=current_user_id)
-        
+
         try:
+            # Notifikace start — UVNITŘ try (ADR-017). Dřív stála před ním, takže selhání
+            # notifikace shodilo celou evaluaci a úkol skončil bez terminální události:
+            # LLM se nezavolal, do UI nedorazilo nic a lektor musel dávku spouštět znovu.
+            await eval_queue.broadcast({
+                "type": "EVAL_START",
+                "student_name": student_name,
+                "scenario_id": scen_id
+            }, lecturer_id=current_user_id)
+
             if file_data.get('content'):
                 extracted_text = await extract_text(file_data['content'], file_data['filename'])
             else:
@@ -549,7 +551,11 @@ async def evaluate_batch(
 @router.delete("/batch")
 async def cancel_batch_evaluation(current_user: Lecturer = Depends(get_current_lecturer)):
     """
-    Vyčistí aktuální nevyřízenou frontu úloh v asynchronním workerovi.
+    Vyčistí nevyřízenou frontu úloh PŘIHLÁŠENÉHO lektora (ADR-017).
+
+    Dřív se mazala fronta všem lektorům a jen v tom z `--workers N` procesů, na který
+    request dopadl. `clear_queue(lecturer_id)` to řeší obojím směrem — filtruje podle
+    lektora a rozešle úklid přes NOTIFY do všech procesů.
     """
-    await eval_queue.clear_queue()
+    await eval_queue.clear_queue(lecturer_id=current_user.id)
     return {"status": "success", "message": "Zpracování zbývajících ÚZ bylo zastaveno."}

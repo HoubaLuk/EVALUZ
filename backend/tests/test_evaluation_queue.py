@@ -12,10 +12,11 @@ Pokrytí (viz ADR-011 a ADR-015 v docs/TECHNICAL_DOCUMENTATION.md):
 Žádný z testů nepotřebuje reálné PostgreSQL spojení — `_pg_conn` je buď `None`
 (fallback větev) nebo fake objekt simulující `asyncpg.Connection.execute`.
 """
+import asyncio
 import json
 import pytest
 
-from services.evaluation_queue import EvaluationQueue
+from services.evaluation_queue import CONTROL_KEY, NOTIFY_CHANNEL, EvaluationQueue
 
 
 class FakeWebSocket:
@@ -47,6 +48,33 @@ class FakePgConn:
 
     async def execute(self, query: str, *args):
         self.notified.append((query, args))
+        return "SELECT 1"
+
+
+class ConcurrencyTrackingPgConn(FakePgConn):
+    """asyncpg spojení, které souběžné použití DETEKUJE místo aby ho tiše povolilo.
+
+    Reálné asyncpg spojení v takové situaci vyhodí
+    `cannot perform operation: another operation is in progress` (ADR-017) — tahle
+    náhrada se chová stejně, aby regresní test selhal, kdyby zámek v `broadcast()` zmizel.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._in_flight = False
+        self.overlaps = 0
+
+    async def execute(self, query: str, *args):
+        if self._in_flight:
+            self.overlaps += 1
+            raise RuntimeError("cannot perform operation: another operation is in progress")
+        self._in_flight = True
+        try:
+            # Vynutí přepnutí korutin uprostřed „operace" — bez zámku se sem dostane další.
+            await asyncio.sleep(0)
+            self.notified.append((query, args))
+        finally:
+            self._in_flight = False
         return "SELECT 1"
 
 
@@ -198,6 +226,144 @@ class TestConcurrentDisconnect:
         await q._deliver_local({"type": "EVAL_SUCCESS"}, lecturer_id=1)
 
         assert ws_ok.sent == [{"type": "EVAL_SUCCESS"}]
+
+
+# ---------------------------------------------------------------------------
+# Souběžný broadcast nad JEDNÍM asyncpg spojením (ADR-017) — nahlášený bug
+# ---------------------------------------------------------------------------
+
+class TestConcurrentBroadcast:
+    async def test_parallel_broadcasts_do_not_overlap_on_shared_connection(self):
+        """Tři souběžné broadcasty (dávka 3 ÚZ) nesmí sáhnout na _pg_conn naráz.
+
+        Přesně tohle shodilo dávkové vyhodnocení: první úkol spojení zabral a zbylé
+        okamžitě spadly na `another operation is in progress` — z dávky 3 ÚZ se
+        vyhodnotil jen první.
+        """
+        q = EvaluationQueue()
+        conn = ConcurrencyTrackingPgConn()
+        q._pg_conn = conn
+
+        await asyncio.gather(*[
+            q.broadcast(
+                {"type": "EVAL_START", "student_name": f"student{i}.pdf"},
+                lecturer_id=1,
+            )
+            for i in range(3)
+        ])
+
+        assert conn.overlaps == 0
+        assert len(conn.notified) == 3
+
+    async def test_failing_handler_still_emits_terminal_event(self):
+        """Invariant: každý zařazený úkol vyprodukuje právě jednu terminální událost.
+
+        I když handler spadne dřív, než se dostane ke svému vlastnímu try/except,
+        musí do UI dorazit EVAL_ERROR — jinak zůstane kolečko viset napořád.
+        """
+        q = EvaluationQueue()
+        ws = FakeWebSocket()
+        await q.connect(ws, lecturer_id=7)
+
+        async def exploding_handler(task_data):
+            raise RuntimeError("cannot perform operation: another operation is in progress")
+
+        worker_task = asyncio.create_task(q.worker(concurrency=2))
+        try:
+            await q.add_task({
+                "handler": exploding_handler,
+                "lecturer_id": 7,
+                "scenario_id": "scen-2",
+                "file_data": {"filename": "Novák ÚZ.pdf"},
+            })
+            await asyncio.wait_for(q.queue.join(), timeout=2)
+            await _drain_pending_tasks()
+        finally:
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+
+        assert [m["type"] for m in ws.sent] == ["EVAL_ERROR"]
+        assert ws.sent[0]["student_name"] == "Novák ÚZ.pdf"
+        # Klíč se uvolnil → lektor může ÚZ poslat znovu bez restartu backendu.
+        assert q._active_keys == set()
+
+
+# ---------------------------------------------------------------------------
+# clear_queue per lektor + řídicí zpráva napříč procesy (ADR-017)
+# ---------------------------------------------------------------------------
+
+class TestClearQueueScoping:
+    async def test_clear_queue_keeps_other_lecturers_tasks(self):
+        """„Zastavit" u jednoho lektora nesmí shodit frontu druhému."""
+        q = EvaluationQueue()
+        mine = {"lecturer_id": 1, "scenario_id": "scen-2", "file_data": {"filename": "a.pdf"}}
+        theirs = {"lecturer_id": 2, "scenario_id": "scen-2", "file_data": {"filename": "b.pdf"}}
+        await q.add_task(mine)
+        await q.add_task(theirs)
+
+        await q.clear_queue(lecturer_id=1)
+
+        assert q.queue.qsize() == 1
+        assert q.queue.get_nowait()["lecturer_id"] == 2
+        assert q._task_key(mine) not in q._active_keys
+        assert q._task_key(theirs) in q._active_keys
+
+    async def test_clear_queue_publishes_control_message_when_listening(self):
+        """S aktivním LISTEN spojením se úklid rozešle přes NOTIFY do VŠECH procesů.
+
+        Fronta je per-proces (ADR-015), takže lokální úklid by minul úkoly zařazené
+        v tom druhém uvicorn procesu.
+        """
+        q = EvaluationQueue()
+        conn = FakePgConn()
+        q._pg_conn = conn
+        await q.add_task({"lecturer_id": 1, "scenario_id": "scen-2", "file_data": {"filename": "a.pdf"}})
+
+        await q.clear_queue(lecturer_id=1)
+
+        # Lokálně zatím nic — úklid proběhne teprve přes _on_notify (i v tomto procesu).
+        assert q.queue.qsize() == 1
+        assert len(conn.notified) == 1
+        payload = json.loads(conn.notified[0][1][1])
+        assert payload[CONTROL_KEY] == "clear_queue"
+        assert payload["lecturer_id"] == 1
+
+    async def test_control_message_is_not_delivered_to_sockets(self):
+        """Řídicí zpráva se vykoná lokálně, ale do prohlížeče se neposílá."""
+        q = EvaluationQueue()
+        ws = FakeWebSocket()
+        await q.connect(ws, lecturer_id=1)
+        await q.add_task({"lecturer_id": 1, "scenario_id": "scen-2", "file_data": {"filename": "a.pdf"}})
+
+        q._on_notify(
+            connection=None,
+            pid=123,
+            channel=NOTIFY_CHANNEL,
+            payload=json.dumps({"lecturer_id": 1, CONTROL_KEY: "clear_queue"}),
+        )
+        await _drain_pending_tasks()
+
+        assert ws.sent == []
+        assert q.queue.empty()
+
+    async def test_unknown_control_message_is_ignored(self):
+        """Neznámá řídicí zpráva nesmí spadnout ani prosáknout do prohlížeče."""
+        q = EvaluationQueue()
+        ws = FakeWebSocket()
+        await q.connect(ws, lecturer_id=1)
+
+        q._on_notify(
+            connection=None,
+            pid=123,
+            channel=NOTIFY_CHANNEL,
+            payload=json.dumps({"lecturer_id": 1, CONTROL_KEY: "neco_neznameho"}),
+        )
+        await _drain_pending_tasks()
+
+        assert ws.sent == []
 
 
 async def _drain_pending_tasks():

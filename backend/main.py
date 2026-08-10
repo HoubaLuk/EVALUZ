@@ -23,6 +23,7 @@ from core.database import get_db, init_db, run_alembic_migrations, SessionLocal
 from core.seeder import seed_database
 from __version__ import __version__
 from services.evaluation_queue import eval_queue
+from services.llm_engine import close_llm_clients
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -104,6 +105,10 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         await eval_queue.close()
+
+    # Sdílené AsyncOpenAI klienty (a jejich httpx connection pooly) — bez tohoto by
+    # zůstaly otevřené sockety při každém restartu kontejneru.
+    await close_llm_clients()
 
 
 def _resolve_worker_concurrency() -> int:

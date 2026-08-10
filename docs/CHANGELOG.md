@@ -2,6 +2,47 @@
 
 ---
 
+## [v3.13.0] — 2026-08-10 — Provozní robustnost dávkového vyhodnocování
+
+### Problém
+
+Z dávky 3 ÚZ se na testovacím serveru vyhodnotil jen první; zbylé se musely spouštět opakovaně ručně a kolečko v UI zůstalo viset. Log ukazoval deterministický vzorec (dávka 3 → 1 přežije, dávka 4 → 1 přežije, dávka 1 → vždy OK) s hláškou `cannot perform operation: another operation is in progress`. Diagnostika: čtení kódu proti backend/frontend/vLLM logům, kořenová příčina nalezena bez spekulace a ověřena regresním testem, který bez opravy prokazatelně selhává.
+
+### Kritické — fronta vyhodnocování (ADR-017)
+
+- **`backend/services/evaluation_queue.py`** — `broadcast()` volal `execute()` nad JEDNÍM sdíleným asyncpg spojením (`_pg_conn`, zavedeno v ADR-015) z každé úlohy zvlášť. Jedno asyncpg spojení nesmí obsluhovat dvě korutiny naráz, takže při dávce první úloha spojení zabrala a zbylé okamžitě spadly — regrese přímo z ADR-015, předtím `broadcast()` žádné DB spojení nepoužíval. Opraveno `asyncio.Lock` (`_notify_lock`) nad každým `execute()`.
+- **`backend/api/evaluate.py`** — `broadcast(EVAL_START)` stál mimo `try` blok, takže selhání notifikace shodilo celou evaluaci ještě před voláním LLM. Přesunuto dovnitř.
+- **`backend/services/evaluation_queue.py`** — `_run_task` nahradil `print()` za `logger.error(..., exc_info=True)` a v `except` větvi odesílá `EVAL_ERROR`. Tím vzniká invariant, o který se opírá celé UI: **každý zařazený úkol vyprodukuje právě jednu terminální událost**. Dřív spadlé úlohy neposlaly nic, `evaluatedCount` nikdy nedosáhl `totalToEvaluate` a `isEvaluating` zůstalo natrvalo `true` — odtud i 8s polling běžící 20 minut bez jediného LLM volání.
+- **`backend/services/evaluation_queue.py`, `backend/api/evaluate.py`** — `clear_queue()` mazala frontu VŠEM lektorům a jen v tom z `--workers 2` procesů, na který dopadl HTTP request. Nově `clear_queue(lecturer_id)` filtruje podle lektora (cizí úkoly vrací do fronty) a úklid rozesílá kanálem `evaluz_eval_events` jako řídicí zprávu (`__control`), kterou `_on_notify` vykoná lokálně v každém procesu a do prohlížeče ji neposílá.
+- **`src/components/TabEvaluation.tsx`** — watchdog na 10 minut ticha jako poslední pojistka proti zaseknutému kolečku, kdyby se WS zpráva ztratila při výpadku spojení. Restartuje se s každým dokončeným ÚZ, polling zůstává na 8 s.
+- Nové testy: souběžný `broadcast()` přes `ConcurrencyTrackingPgConn` (bez zámku selže — 2 překryvy, doručena 1 zpráva ze 3), terminální událost při pádu handleru, `clear_queue` per lektor, řídicí zpráva se nedoručí socketům.
+
+**Dopad na výkon:** batching se dosud vůbec neprojevil — dávka 1 ÚZ trvala 96,1 s a „dávka 3" 98,7 s, protože běžel vždy jen jeden požadavek. GPU přitom batching zvládá (starší záznam vLLM: `Running: 5 reqs`, 165 tok/s proti 36 tok/s u jediného požadavku, KV cache na 30 %).
+
+### Kontextové okno — autodetekce ze serveru (ADR-018)
+
+- **`backend/services/llm_engine.py`** — `VLLM_CONTEXT_WINDOW` z Administrace se do vLLM nikdy neposílalo (`_build_llm_kwargs` předává per-request kontext jen Ollamě přes `num_ctx`); je to čistě interní odhad pro rozhodnutí single-call vs. chunking. Na testovacím serveru bylo 64512 proti serverovým `--max-model-len 32768`, takže práh pro chunking (45 158) ležel **nad tvrdým limitem serveru**. Nová `fetch_server_max_model_len()` čte `max_model_len` z `GET /v1/models` a `evaluate_report()` ho uplatní jako strop (`ctx = min(nastavení, server)`) s varováním při rozporu.
+- **`backend/api/admin.py`** — „Test LLM" vrací zjištěný `max_model_len` a upozorní, když je nastavení v Administraci vyšší. Cache se pro test obchází (`force_refresh=True`), aby po restartu vLLM ukázal aktuální hodnotu.
+
+### Přiřazení kritérií (ADR-019)
+
+- **`backend/services/llm_engine.py`** — `_canonicalize_criterion_name` odstřihává jméno osoby na konci názvu, takže kritéria lišící se jen osobou sdílí jednu frontu slotů; výběr byl `pop(0)`, tedy poziční podle pořadí odpovědi modelu. V sadě MS2 „Vstup do obydlí" takto kolidují tři dvojice (kritéria 6+12, 7+13, 8+14 — Horáková / Kadlec). Při prohození pořadí by se odůvodnění jedné osoby tiše uložilo pod kritérium druhé, aniž by se změnilo skóre. Nový `_pop_matching_slot()` hledá nejdřív přesnou shodu názvu a na poziční chování spadne až v nouzi — tehdy navíc loguje `WARNING`. Při jediném slotu je chování beze změny, regrese tedy není možná.
+
+### Parser kritérií — viditelnost a úklid
+
+- **`backend/services/criteria_service.py`** — chybějící pole `**Bodová hodnota:** N` tiše dosazovalo 1 bod (měnilo maximum skóre bez jakékoli stopy); nyní `WARNING`. Blok se zahozenou hlavičkou se hlásí jako `WARNING`, pokud obsahuje slovo „Kritérium" (pravděpodobný překlep ve formátu = ztracené kritérium), jinak `INFO`. Přidán souhrn „rozparsováno N kritérií, maximum M bodů".
+- **`backend/services/criteria_service.py`** — splitter dělí PŘED hlavičkou dalšího kritéria, takže markdown oddělovač `---` zůstával viset na konci popisu předchozího. Ořez kotvený na konec řetězce, aby nepoškodil pomlčky uvnitř textu. Způsob zápisu kritérií v UI se nemění.
+
+### Hygiena
+
+- **`backend/services/llm_engine.py`, `backend/main.py`** — `AsyncOpenAI` + `httpx.AsyncClient` se vytvářely znovu při každém volání na 4 místech a nikdy se nezavíraly (nový connection pool a TCP handshake pro každý ÚZ). Nahrazeno sdíleným klientem (`_get_llm_client`) s `httpx.Limits`, uzavíraným v `lifespan` shutdownu přes `close_llm_clients()`. `admin.py::test_connection` ponechán samostatně — má záměrně timeout 20 s a `max_retries=0`.
+
+### Infrastruktura (mimo repozitář)
+
+- vLLM přechází na `--max-model-len 65536` **a zároveň** `--gpu-memory-utilization 0.85`. Při dosavadních 0.60 by KV cache (70 054 tokenů) dala pro 65 536 jen `Maximum concurrency 1,07×` a batching by se rozpadl; s 0.85 vychází ~152 000 tokenů → ~2,33× při 65k. Po restartu zůstává `VLLM_CONTEXT_WINDOW = 64512` platnou hodnotou (64512 < 65536) a nemění se; ADR-018 ji nadále hlídá automaticky.
+
+---
+
 ## [v3.12.0] — 2026-08-05 — Oprava zaseknutého dávkového vyhodnocení + 2 UX bugy z pilotu
 
 ### Problém
