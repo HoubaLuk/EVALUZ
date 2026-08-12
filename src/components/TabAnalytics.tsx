@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { API_BASE_URL } from '../utils/api';
+import { API_BASE_URL, getClassId } from '../utils/api';
 
 import {
     faDownload, faChartBar, faChartPie, faWandMagicSparkles, faRotate,
@@ -69,9 +69,10 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
         setLoading(true);
         setError(null);
         try {
+            const classId = await getClassId();
             let url = scenarioId
-                ? `${API_BASE_URL}/analytics/class/1/summary?scenario_id=${scenarioId}`
-                : `${API_BASE_URL}/analytics/class/1/summary`;
+                ? `${API_BASE_URL}/analytics/class/${classId}/summary?scenario_id=${scenarioId}`
+                : `${API_BASE_URL}/analytics/class/${classId}/summary`;
 
             if (force) {
                 url += scenarioId ? '&force=true' : '?force=true';
@@ -131,7 +132,8 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
      */
     const handleExportExcel = async () => {
         try {
-            const baseUrl = `${API_BASE_URL}/export/class/1/excel`;
+            const classId = await getClassId();
+            const baseUrl = `${API_BASE_URL}/export/class/${classId}/excel`;
             const params = new URLSearchParams();
             if (scenarioId) params.set('scenario_id', scenarioId);
             if (className) params.set('class_name', className);
@@ -146,7 +148,7 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
             const blobUrl = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = blobUrl;
-            a.download = `vysledky_trida_1.xlsx`;
+            a.download = `vysledky_trida_${classId}.xlsx`;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(blobUrl);
@@ -162,7 +164,7 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
                 body: JSON.stringify({
                     scenario_name: data?.scenario_id || scenarioId || 'Neznámý scénář',
                     type: 'Excel export (třída)',
-                    download_url: `/api/v1/export/class/1/excel${scenarioId ? `?scenario_id=${scenarioId}` : ''}`
+                    download_url: `/api/v1/export/class/${classId}/excel${scenarioId ? `?scenario_id=${scenarioId}` : ''}`
                 })
             });
         } catch (e: any) {
@@ -225,7 +227,8 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
         setPreviewStudentId(studentId);
         setPreviewLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/analytics/class/1`, {
+            const classId = await getClassId();
+            const res = await fetch(`${API_BASE_URL}/analytics/class/${classId}`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
             });
             if (res.ok) {

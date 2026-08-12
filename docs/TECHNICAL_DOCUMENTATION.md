@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.13.0  
+**Verze:** 3.13.1  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -878,6 +878,44 @@ Reálná sada MS2 „Vstup do obydlí" má tři takové dvojice (kritéria 6+12,
 
 ---
 
+### ADR-020: Silné reference na background tasky (v3.13.1)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Po nasazení v3.13.0 se dávka 3 ÚZ vyhodnotila celá, ale individuální zpětná vazba se uložila jen u některých studentů — u ostatních zůstalo pole prázdné. V logu nebyla žádná chyba ani traceback. Příčina: `_run_feedback_task` se spouštěl přes holé `asyncio.create_task()` a návratová hodnota se zahazovala. Dokumentace asyncio na to upozorňuje výslovně — event loop drží na tasky pouze **slabé** reference, takže je garbage collector může zlikvidovat uprostřed běhu. Projev je nedeterministický a naprosto tichý, což přesně odpovídalo pozorování „jednomu se vygenerovala, dvěma ne". Riziko navíc vzrostlo právě opravou fronty (ADR-017): dokud běžela jen jedna evaluace naráz, vznikal jeden task; po opravě jich vzniká N těsně po sobě.
+
+Stejný vzorec byl i na dalších třech místech — doručení WS zprávy, úklid fronty a spuštění samotné evaluace. To poslední bylo nejzávažnější: zahozený task uprostřed evaluace by porušil invariant terminální události z ADR-017, jen se to zatím neprojevilo.
+
+**Možnosti:**
+- A: Awaitovat feedback přímo v evaluačním handleru — zjednodušilo by životní cyklus, ale prodloužilo by dobu držení slotu semaforu a vrátilo zpětnou vazbu do critical path (přesně proti ADR-010).
+- B: Ukládat referenci ad hoc v každém volajícím — funkční, ale opakovaná boilerplate, na kterou se dřív nebo později zapomene.
+- **C (zvoleno):** Jedna sdílená pomocná funkce, kterou používají všechna fire-and-forget spuštění.
+
+**Rozhodnutí:** `backend/utils/tasks.py::spawn_background()` přidá task do modulového setu a odebere ho až v `add_done_callback`. Navíc loguje nezachycenou výjimku — bez toho by skončila jen jako „Task exception was never retrieved" při GC, tedy prakticky neviditelně. Všechna čtyři místa (`api/evaluate.py`, `services/evaluation_queue.py`) na ni byla převedena; holé `asyncio.create_task()` zůstává jen v `main.py` pro dlouhoběžné tasky, na které si `lifespan` referenci drží sám.
+
+**Kompromis:** Set roste s počtem souběžných tasků, ale položky se odstraňují v callbacku, takže velikost odpovídá skutečné souběžnosti (jednotky). Nové fire-and-forget spuštění musí použít `spawn_background` — to je konvence, kterou hlídá code review, ne typový systém.
+
+---
+
+### ADR-021: Frontend rezolvuje ID vlastní třídy místo natvrdo zadané jedničky (v3.13.1)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Lektor Zvěřina hlásil, že jeho ÚZ se sice kompletně vyhodnotí (backend log i DB v pořádku, `pocet_vysledku=25`, `skore=17`), ale v UI zůstává jako „Nezpracováno" a chybí tlačítko pro schválení. Diagnóza: `ClassRoom` se zakládá **zvlášť pro každého lektora** (`fast_scan_batch`, auto-increment ID), zatímco frontend měl na devíti místech natvrdo `/analytics/class/1`. Backend filtruje `class_id == 1` a zároveň `lecturer_id == current_user.id` (ADR-014), takže data v UI viděl jedině lektor, jehož třída měla shodou okolností ID 1. Ostatním se korektně vrátilo prázdné pole, `finalStatus` nikdy nepřeskočil na `evaluated` a schvalovací tlačítko se nevykreslilo, protože je uvnitř detailu vyhodnoceného záznamu.
+
+Nešlo o regresi z v3.13.0 — v nginx logu z 10. 8. je vidět, že týž lektor dostával na `/analytics/class/1?scenario_id=scen-2` odpověď o velikosti 2 bajtů (`[]`) i po dokončení svých evaluací, zatímco druhý lektor dostával desítky kilobajtů dat. Chyba byla přítomná od zavedení izolace dat, jen ji nikdo nespojil s „Nezpracováno".
+
+**Možnosti:**
+- A: Zrušit filtr podle třídy a scopovat jen podle lektora a scénáře — nejmenší zásah, ale zahodilo by dimenzi třídy, kterou používá i cache `ClassAnalysis` a Excel export.
+- B: Kompatibilní shim v backendu (při požadavku na cizí třídu tiše použít vlastní) — frontend beze změny, ale skrytá magie v API, která by v kódu zůstala natrvalo.
+- **C (zvoleno):** Frontend si ID své třídy vyžádá z backendu a použije ho všude.
+
+**Rozhodnutí:** `src/utils/api.ts::getClassId()` volá existující idempotentní endpoint `POST /evaluate/classes/ensure` (třídu vrátí, a pokud neexistuje, založí ji) a výsledek cachuje. Cache je klíčovaná tokenem, takže se sama zneplatní při přihlášení jiného lektora i po odhlášení — není potřeba ji nikde ručně invalidovat. Nahrazeno bylo všech devět výskytů v `App.tsx`, `TabEvaluation.tsx` a `TabAnalytics.tsx` (včetně Excel exportu a názvu staženého souboru). Třída zůstává reálnou entitou, takže případné budoucí rozšíření na víc tříd na lektora nevyžaduje návrat zpět.
+
+**Kompromis:** Jeden HTTP požadavek navíc při prvním načtení (dál z cache). Konstanta `DEFAULT_CLASS_NAME` v `src/utils/api.ts` musí odpovídat defaultu `class_name` ve fast-scan endpointu — jinak by frontend rezolvoval jinou třídu, než do které se zapisuje. Tuhle vazbu zamyká test `test_ensure_returns_class_used_by_fast_scan`.
+
+---
+
 ## 9. Historie vývoje (Changelog)
 
 ### v3.10.5 (6. 5. 2026) — Analytics prázdný stav UX
@@ -1065,4 +1103,4 @@ Dokončení 7-etapového refaktoru `llm_engine.py`. Cílem bylo zjednodušení k
 
 ---
 
-*Poslední aktualizace dokumentace: 10. srpna 2026*
+*Poslední aktualizace dokumentace: 12. srpna 2026*

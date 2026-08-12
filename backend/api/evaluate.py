@@ -25,6 +25,7 @@ from services.doc_parser import extract_text
 from services.llm_engine import evaluate_report, extract_identity, generate_feedback_for_record
 from services.security_scanner import scanner, SecurityException
 from utils.text import clean_filename_to_display
+from utils.tasks import spawn_background
 from models.evaluation import EvaluationResponse, CriterionResult, BatchEvaluationResponse
 from pydantic import BaseModel
 from services.evaluation_queue import eval_queue
@@ -505,12 +506,19 @@ async def evaluate_batch(
                 "scenario_id": scen_id
             }, lecturer_id=current_user_id)
 
-            asyncio.create_task(_run_feedback_task(
-                eval_record_id=_saved_eval_id,
-                lecturer_id=current_user_id,
-                student_name=student_name,
-                scen_id=scen_id,
-            ))
+            # spawn_background místo holého create_task: event loop drží na tasky jen
+            # slabou referenci, takže GC mohl zpětnou vazbu zlikvidovat uprostřed běhu —
+            # tiše, bez chyby v logu. U dávky se to projevilo tak, že se feedback uložil
+            # jen některým studentům.
+            spawn_background(
+                _run_feedback_task(
+                    eval_record_id=_saved_eval_id,
+                    lecturer_id=current_user_id,
+                    student_name=student_name,
+                    scen_id=scen_id,
+                ),
+                name=f"feedback:{student_name}",
+            )
 
         except SecurityException as se:
             logger.error(f"[QUEUE] Bezpečnostní chyba při vyhodnocování '{student_name}': {se}", exc_info=True)

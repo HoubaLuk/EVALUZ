@@ -15,7 +15,7 @@ import { TabEvaluation } from './components/TabEvaluation';
 import { TabAnalytics } from './components/TabAnalytics';
 import { TabMonitor } from './components/TabMonitor';
 
-import { API_BASE_URL } from './utils/api';
+import { API_BASE_URL, getClassId } from './utils/api';
 
 /**
  * Hlavní vstupní bod aplikace EVALUZ.
@@ -94,9 +94,10 @@ export default function EvaluzDashboard() {
   useEffect(() => {
     // Načíst stav evaluací pro stávající scénář - pro správné zezlátnutí stepper ikony
     if (activeScenarioId && token) {
-      fetch(`${API_BASE_URL}/analytics/class/1?scenario_id=${activeScenarioId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
+      getClassId()
+        .then(classId => fetch(`${API_BASE_URL}/analytics/class/${classId}?scenario_id=${activeScenarioId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }))
         .then(res => res.json())
         .then(data => {
           if (Array.isArray(data) && data.some((s: any) => s.vysledky && s.vysledky.length > 0)) {
@@ -110,10 +111,14 @@ export default function EvaluzDashboard() {
   }, [activeScenarioId, token]);
 
   useEffect(() => {
-    // Načíst z DB jaké scénáře už mají hotovou analýzu
-    fetch(`${API_BASE_URL}/analytics/class/1/status`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
-    })
+    // Načíst z DB jaké scénáře už mají hotovou analýzu.
+    // Závislost na `token`: dřív bylo `[]`, takže se po přihlášení už nikdy nenačetlo
+    // znovu — a před přihlášením volání stejně skončilo na 401.
+    if (!token) return;
+    getClassId()
+      .then(classId => fetch(`${API_BASE_URL}/analytics/class/${classId}/status`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }))
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -121,7 +126,7 @@ export default function EvaluzDashboard() {
         }
       })
       .catch(e => console.error(e));
-  }, []);
+  }, [token]);
 
   // Synchronizuje aktivní záložku a scénář do URL search params.
   // Díky tomu přežije browser refresh — SPA nemá URL router, ale state lze

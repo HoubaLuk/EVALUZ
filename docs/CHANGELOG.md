@@ -2,6 +2,30 @@
 
 ---
 
+## [v3.13.1] — 2026-08-12 — Chybějící zpětná vazba a neviditelné výsledky u části lektorů
+
+### Problém
+
+Dvě nezávislá hlášení z testovacího provozu po nasazení v3.13.0: (1) u dávky 3 ÚZ se individuální zpětná vazba vygenerovala jen jednomu studentovi, u dvou zůstalo pole prázdné — bez chyby v logu; (2) druhý lektor viděl své kompletně vyhodnocené ÚZ v UI jako „Nezpracováno", bez skóre a bez tlačítka pro schválení, přestože v DB byl záznam v pořádku (`pocet_vysledku=25`, `skore=17`) a backend log hlásil úspěch.
+
+### Zpětná vazba se tiše ztrácela (ADR-020)
+
+- **`backend/utils/tasks.py`** (nový) — `spawn_background()` drží na fire-and-forget tasky silnou referenci až do dokončení a loguje jejich nezachycené výjimky. `asyncio.create_task()` drží referenci pouze **slabou** (dokumentace asyncio to uvádí výslovně), takže garbage collector mohl task uprostřed běhu zlikvidovat — tiše, bez chyby, bez tracebacku. Odtud nedeterministické „jednomu se vygenerovala, dvěma ne".
+- **`backend/api/evaluate.py`, `backend/services/evaluation_queue.py`** — převedena všechna čtyři fire-and-forget spuštění: zpětná vazba, doručení WS zprávy, úklid fronty a spuštění samotné evaluace. To poslední bylo nejzávažnější — zahozený task uprostřed evaluace by porušil invariant terminální události z ADR-017. Riziko navíc vzrostlo právě opravou fronty v3.13.0: dokud běžela jedna evaluace naráz, vznikal jeden task; nyní jich vzniká N těsně po sobě.
+
+### Výsledky neviditelné pro část lektorů (ADR-021)
+
+- **`src/utils/api.ts`** (nová funkce `getClassId`) — frontend měl na devíti místech natvrdo `/analytics/class/1`, jenže `ClassRoom` se zakládá zvlášť pro každého lektora (auto-increment ID). Backend filtruje `class_id` **a zároveň** `lecturer_id` (ADR-014), takže data v UI viděl jedině lektor, jehož třída měla shodou okolností ID 1. Ostatním se korektně vrátilo prázdné pole → `finalStatus` nikdy nepřeskočil na `evaluated` → odznak „Nezpracováno" a nevykreslené schvalovací tlačítko. Nově se ID rezolvuje přes idempotentní `POST /evaluate/classes/ensure`, cache je klíčovaná tokenem (sama se zneplatní při přihlášení jiného lektora).
+- **`src/App.tsx`, `src/components/TabEvaluation.tsx`, `src/components/TabAnalytics.tsx`** — nahrazeno všech devět výskytů včetně Excel exportu, odkazu v historii exportů a názvu staženého souboru. `App.tsx` navíc načítá stav analýz při změně tokenu (dřív `[]`, takže se po přihlášení už nikdy nenačetlo znovu).
+- **Nejde o regresi z v3.13.0** — v nginx logu z 10. 8. je vidět, že týž lektor dostával na `/analytics/class/1?scenario_id=scen-2` odpověď o velikosti 2 bajtů (`[]`) i po dokončení svých evaluací, zatímco druhý lektor desítky kilobajtů. Chyba existovala od zavedení izolace dat.
+
+### Testy
+
+- **`backend/tests/test_class_scoping.py`** (nový, 6 testů) — zamyká kontrakt, na kterém oprava stojí: `classes/ensure` vrací per lektora vlastní třídu, je idempotentní, vrátí **tutéž** třídu, do které zapisuje fast-scan, a nevrátí cizí. Reprodukce nahlášené chyby (`class/1` prázdné vs. rezolvované ID s daty) i kontrola, že se izolace dat opravou neprolomila.
+- Fixture používá `StaticPool` — `sqlite:///:memory:` dává každému spojení vlastní prázdnou databázi a TestClient obsluhuje requesty v jiném vlákně, takže bez něj aplikace spadne na „no such table". Ověřeno empiricky.
+
+---
+
 ## [v3.13.0] — 2026-08-10 — Provozní robustnost dávkového vyhodnocování
 
 ### Problém

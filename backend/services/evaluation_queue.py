@@ -20,6 +20,8 @@ from fastapi import WebSocket
 
 import asyncpg
 
+from utils.tasks import spawn_background
+
 logger = logging.getLogger("evaluz.queue")
 
 NOTIFY_CHANNEL = "evaluz_eval_events"
@@ -116,12 +118,20 @@ class EvaluationQueue:
         control = data.get(CONTROL_KEY)
         if control is not None:
             if control == "clear_queue":
-                asyncio.create_task(self._clear_queue_local(lecturer_id))
+                spawn_background(
+                    self._clear_queue_local(lecturer_id),
+                    name=f"clear_queue:{lecturer_id}",
+                )
             else:
                 logger.warning(f"[QUEUE] Neznámá řídicí zpráva: {control!r}")
             return
 
-        asyncio.create_task(self._deliver_local(data, lecturer_id))
+        # spawn_background, ne holé create_task — jinak může GC doručení zprávy
+        # zlikvidovat dřív, než se stihne odeslat (viz utils/tasks.py).
+        spawn_background(
+            self._deliver_local(data, lecturer_id),
+            name=f"ws_deliver:{lecturer_id}",
+        )
 
     async def _deliver_local(self, message: dict, lecturer_id: int):
         """Doručí zprávu jen socketům registrovaným v TOMTO procesu (kopie listu — bezpečné vůči souběžnému disconnect())."""
@@ -263,8 +273,12 @@ class EvaluationQueue:
             try:
                 # Čekáme na úkol (pokud je fronta prázdná, worker zde prostě spí).
                 task_data = await self.queue.get()
-                # Spustíme úkol asynchronně (neblokujeme smyčku).
-                asyncio.create_task(_run_task(task_data))
+                # Spustíme úkol asynchronně (neblokujeme smyčku). spawn_background drží
+                # silnou referenci — bez ní by GC mohl celou evaluaci zahodit v půlce.
+                spawn_background(
+                    _run_task(task_data),
+                    name=f"eval:{(task_data.get('file_data') or {}).get('filename', '?')}",
+                )
             except asyncio.CancelledError:
                 break
             except Exception as e:

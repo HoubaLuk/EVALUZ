@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { API_BASE_URL } from '../utils/api';
+import { API_BASE_URL, getClassId } from '../utils/api';
 
 import {
   faCloudArrowUp, faWandMagicSparkles, faCircleCheck, faCircleExclamation,
@@ -194,9 +194,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
     const fetchEvaluations = async () => {
         try {
+            const classId = await getClassId();
             const url = scenarioId
-                ? `${API_BASE_URL}/analytics/class/1?scenario_id=${scenarioId}`
-                : `${API_BASE_URL}/analytics/class/1`;
+                ? `${API_BASE_URL}/analytics/class/${classId}?scenario_id=${scenarioId}`
+                : `${API_BASE_URL}/analytics/class/${classId}`;
 
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('upvsp_token')}` }
