@@ -173,6 +173,23 @@ class EvaluationQueue:
             return False
         self._active_keys.add(key)
         await self.queue.put(task_data)
+
+        # Oznámení o ZAŘAZENÍ do fronty. Při dávce větší než `concurrency` se část ÚZ
+        # rozeběhne až po uvolnění slotu (u dávky 5 při limitu 4 to byly ~2 minuty).
+        # Bez tohohle oznámení vypadal čekající ÚZ v UI úplně stejně jako nezahájený,
+        # takže lektor dávku zbytečně spouštěl znovu.
+        try:
+            await self.broadcast({
+                "type": "EVAL_QUEUED",
+                "student_name": unicodedata.normalize(
+                    'NFC', (task_data.get('file_data') or {}).get('filename', '') or ''
+                ),
+                "scenario_id": task_data.get('scenario_id'),
+            }, lecturer_id=task_data.get('lecturer_id'))
+        except Exception as e:
+            # Oznámení je informativní — jeho selhání nesmí zabránit zařazení úkolu.
+            logger.warning(f"[QUEUE] Nepodařilo se odeslat EVAL_QUEUED pro {key}: {e}")
+
         return True
 
     async def clear_queue(self, lecturer_id: Optional[int] = None):
@@ -236,7 +253,9 @@ class EvaluationQueue:
         semaphore = asyncio.Semaphore(concurrency)
 
         async def _run_task(task_data):
-            async with semaphore:
+            # Slot v semaforu si REZERVOVALA smyčka níž a předala ho tomuhle tasku —
+            # uvolní se ve `finally`. Viz komentář u `semaphore.acquire()`.
+            try:
                 try:
                     handler = task_data.get('handler')
                     if handler:
@@ -268,17 +287,36 @@ class EvaluationQueue:
                 finally:
                     self._active_keys.discard(self._task_key(task_data))
                     self.queue.task_done()
+            finally:
+                semaphore.release()
 
         while True:
             try:
-                # Čekáme na úkol (pokud je fronta prázdná, worker zde prostě spí).
-                task_data = await self.queue.get()
-                # Spustíme úkol asynchronně (neblokujeme smyčku). spawn_background drží
-                # silnou referenci — bez ní by GC mohl celou evaluaci zahodit v půlce.
-                spawn_background(
-                    _run_task(task_data),
-                    name=f"eval:{(task_data.get('file_data') or {}).get('filename', '?')}",
-                )
+                # Slot se rezervuje PŘED vyzvednutím úkolu z fronty.
+                #
+                # Dřív se čekalo na semafor až uvnitř tasku, takže smyčka vytáhla VŠECHNY
+                # úkoly hned a fronta zůstala prázdná. Dva důsledky, oba pozorované
+                # v provozu u dávky 5 ÚZ (concurrency=4/proces):
+                #   1. Pátý ÚZ nikde nefiguroval jako čekající — vypadal nezahájeně,
+                #      i když se rozeběhl sám asi za dvě minuty, jakmile se slot uvolnil.
+                #   2. „Zastavit" (clear_queue) neměl co rušit, protože fronta už byla
+                #      prázdná — čekající úkol tak zrušit nešlo.
+                # S rezervací napřed zůstávají čekající úkoly ve frontě: jsou vidět
+                # (qsize) i zrušitelné.
+                await semaphore.acquire()
+                try:
+                    task_data = await self.queue.get()
+                    # spawn_background drží silnou referenci — bez ní by GC mohl celou
+                    # evaluaci zahodit v půlce (ADR-020). Slot přebírá vytvořený task
+                    # a uvolní ho ve svém `finally`.
+                    spawn_background(
+                        _run_task(task_data),
+                        name=f"eval:{(task_data.get('file_data') or {}).get('filename', '?')}",
+                    )
+                except BaseException:
+                    # Slot se nepodařilo předat žádnému tasku → vrátit, ať se fronta nezatuhne.
+                    semaphore.release()
+                    raise
             except asyncio.CancelledError:
                 break
             except Exception as e:

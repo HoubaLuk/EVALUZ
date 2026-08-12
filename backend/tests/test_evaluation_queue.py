@@ -285,10 +285,83 @@ class TestConcurrentBroadcast:
             except asyncio.CancelledError:
                 pass
 
-        assert [m["type"] for m in ws.sent] == ["EVAL_ERROR"]
-        assert ws.sent[0]["student_name"] == "Novák ÚZ.pdf"
+        # Zařazení do fronty + terminální událost. Klíčové je, že poslední zpráva
+        # je terminální — bez ní by UI čekalo napořád.
+        assert [m["type"] for m in ws.sent] == ["EVAL_QUEUED", "EVAL_ERROR"]
+        assert ws.sent[-1]["student_name"] == "Novák ÚZ.pdf"
         # Klíč se uvolnil → lektor může ÚZ poslat znovu bez restartu backendu.
         assert q._active_keys == set()
+
+
+# ---------------------------------------------------------------------------
+# Kapacita fronty — čekající úkoly zůstávají ve frontě (ADR-022)
+# ---------------------------------------------------------------------------
+
+class TestQueueCapacity:
+    async def test_queued_task_announces_itself(self):
+        """Zařazení do fronty musí být vidět hned, ne až při startu zpracování.
+
+        U dávky větší než `concurrency` se část ÚZ rozeběhne se zpožděním — bez
+        EVAL_QUEUED vypadal čekající ÚZ v UI stejně jako nezahájený.
+        """
+        q = EvaluationQueue()
+        ws = FakeWebSocket()
+        await q.connect(ws, lecturer_id=3)
+
+        await q.add_task({
+            "lecturer_id": 3,
+            "scenario_id": "scen-2",
+            "file_data": {"filename": "Čekající ÚZ.pdf"},
+        })
+
+        assert [m["type"] for m in ws.sent] == ["EVAL_QUEUED"]
+        assert ws.sent[0]["student_name"] == "Čekající ÚZ.pdf"
+        assert ws.sent[0]["scenario_id"] == "scen-2"
+
+    async def test_task_over_capacity_stays_in_queue_and_is_cancellable(self):
+        """Úkol nad limit souběžnosti musí ZŮSTAT ve frontě, aby šel zrušit.
+
+        Dřív si smyčka vytáhla všechny úkoly naráz a na semafor čekala až uvnitř tasku.
+        Fronta tím byla prázdná, takže „Zastavit" neměl co rušit — a lektor, který
+        čekající ÚZ nechtěl, ho nedokázal zastavit.
+        """
+        q = EvaluationQueue()
+        started = []
+        release = asyncio.Event()
+
+        async def blocking_handler(task_data):
+            started.append(task_data["file_data"]["filename"])
+            await release.wait()
+
+        worker_task = asyncio.create_task(q.worker(concurrency=1))
+        try:
+            for name in ("prvni.pdf", "druhy.pdf"):
+                await q.add_task({
+                    "handler": blocking_handler,
+                    "lecturer_id": 4,
+                    "scenario_id": "scen-2",
+                    "file_data": {"filename": name},
+                })
+            await _drain_pending_tasks()
+            await asyncio.sleep(0)
+
+            # Běží jen první; druhý čeká VE FRONTĚ, ne uvnitř tasku na semaforu.
+            assert started == ["prvni.pdf"]
+            assert q.queue.qsize() == 1
+
+            # A proto ho jde zrušit.
+            await q.clear_queue(lecturer_id=4)
+            assert q.queue.empty()
+        finally:
+            release.set()
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+
+        # Druhý ÚZ se nikdy nespustil — zrušení bylo účinné.
+        assert started == ["prvni.pdf"]
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +399,8 @@ class TestClearQueueScoping:
 
         # Lokálně zatím nic — úklid proběhne teprve přes _on_notify (i v tomto procesu).
         assert q.queue.qsize() == 1
-        assert len(conn.notified) == 1
-        payload = json.loads(conn.notified[0][1][1])
+        # První NOTIFY je EVAL_QUEUED z add_task, druhý je řídicí zpráva.
+        payload = json.loads(conn.notified[-1][1][1])
         assert payload[CONTROL_KEY] == "clear_queue"
         assert payload["lecturer_id"] == 1
 
@@ -338,6 +411,8 @@ class TestClearQueueScoping:
         await q.connect(ws, lecturer_id=1)
         await q.add_task({"lecturer_id": 1, "scenario_id": "scen-2", "file_data": {"filename": "a.pdf"}})
 
+        delivered_before = len(ws.sent)
+
         q._on_notify(
             connection=None,
             pid=123,
@@ -346,7 +421,11 @@ class TestClearQueueScoping:
         )
         await _drain_pending_tasks()
 
-        assert ws.sent == []
+        # Do prohlížeče nepřibyla ŽÁDNÁ zpráva (add_task poslal EVAL_QUEUED ještě předtím),
+        # a řídicí klíč se do socketu nesmí dostat vůbec.
+        assert len(ws.sent) == delivered_before
+        assert all(CONTROL_KEY not in message for message in ws.sent)
+        # Úklid ale proběhl.
         assert q.queue.empty()
 
     async def test_unknown_control_message_is_ignored(self):

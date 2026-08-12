@@ -55,7 +55,10 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [pendingApprovals, setPendingApprovals] = useState<{ count: number; total: number } | null>(null);
+    // `unevaluated` = záznamy pod scénářem, které ještě nemají výsledek (čekají ve frontě
+    // nebo se vůbec nespustily). Analytika musí počkat i na ně — jinak by popisovala
+    // jen část skupiny, aniž by to bylo poznat.
+    const [pendingApprovals, setPendingApprovals] = useState<{ count: number; total: number; unevaluated: number; totalRecords: number } | null>(null);
     const [selectedCriterion, setSelectedCriterion] = useState<string | null>(null);
     const [previewStudentId, setPreviewStudentId] = useState<number | null>(null);
     const [previewStudentData, setPreviewStudentData] = useState<any>(null);
@@ -88,7 +91,12 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
             // Man-in-the-Loop: backend vrací chybu pokud existují neschválené záznamy
             if (json.error === 'pending_approvals') {
                 setData(null);
-                setPendingApprovals({ count: json.pending_count, total: json.total_evaluated });
+                setPendingApprovals({
+                    count: json.pending_count,
+                    total: json.total_evaluated,
+                    unevaluated: json.unevaluated_count ?? 0,
+                    totalRecords: json.total_records ?? json.total_evaluated,
+                });
             } else if (json.status === 'no_analysis') {
                 // Žádná analýza zatím neexistuje — zobraz tlačítko "Generovat", nespouštěj LLM znovu.
                 setData(null);
@@ -325,12 +333,22 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
                 <div className="alert alert--warning" style={{ flexDirection: 'column', alignItems: 'center', padding: 40, textAlign: 'center', gap: 12, minHeight: 300, justifyContent: 'center' }}>
                     <Icon icon={faTriangleExclamation} size="3x" />
                     <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Analytika není dostupná</h2>
-                    <p style={{ margin: 0, maxWidth: 480 }}>Analytika a exporty budou dostupné až po schválení všech záznamů ve studijní skupině.</p>
-                    <div style={{ padding: '8px 24px', background: 'rgba(226,132,19,0.15)', border: '1px solid var(--color-warning)', borderRadius: 8, fontWeight: 700 }}>
-                        <span style={{ fontSize: '1.5rem' }}>{pendingApprovals.count}</span> {pendingApprovals.count === 1 ? 'záznam čeká' : pendingApprovals.count < 5 ? 'záznamy čekají' : 'záznamů čeká'} na schválení
-                        <span style={{ marginLeft: 4, opacity: 0.7 }}>(z {pendingApprovals.total} vyhodnocených)</span>
+                    <p style={{ margin: 0, maxWidth: 480 }}>Analytika a exporty budou dostupné až poté, co budou všechny úřední záznamy v této modelové situaci vyhodnocené a schválené.</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {pendingApprovals.unevaluated > 0 && (
+                            <div style={{ padding: '8px 24px', background: 'rgba(226,132,19,0.15)', border: '1px solid var(--color-warning)', borderRadius: 8, fontWeight: 700 }}>
+                                <span style={{ fontSize: '1.5rem' }}>{pendingApprovals.unevaluated}</span> {pendingApprovals.unevaluated === 1 ? 'záznam ještě není' : pendingApprovals.unevaluated < 5 ? 'záznamy ještě nejsou' : 'záznamů ještě není'} vyhodnocen{pendingApprovals.unevaluated === 1 ? '' : 'y'}
+                                <span style={{ marginLeft: 4, opacity: 0.7 }}>(z celkem {pendingApprovals.totalRecords})</span>
+                            </div>
+                        )}
+                        {pendingApprovals.count > 0 && (
+                            <div style={{ padding: '8px 24px', background: 'rgba(226,132,19,0.15)', border: '1px solid var(--color-warning)', borderRadius: 8, fontWeight: 700 }}>
+                                <span style={{ fontSize: '1.5rem' }}>{pendingApprovals.count}</span> {pendingApprovals.count === 1 ? 'záznam čeká' : pendingApprovals.count < 5 ? 'záznamy čekají' : 'záznamů čeká'} na schválení
+                                <span style={{ marginLeft: 4, opacity: 0.7 }}>(z {pendingApprovals.total} vyhodnocených)</span>
+                            </div>
+                        )}
                     </div>
-                    <p style={{ margin: 0, fontSize: '0.85rem' }}>Přejděte na kartu <strong>Vyhodnocení ÚZ</strong> a schvalte jednotlivá hodnocení.</p>
+                    <p style={{ margin: 0, fontSize: '0.85rem' }}>Přejděte na kartu <strong>Vyhodnocení ÚZ</strong>, dokončete vyhodnocení a schvalte jednotlivá hodnocení.</p>
                 </div>
             ) : (<>
             {/* Hlavička a exportní tlačítka */}

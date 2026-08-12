@@ -41,7 +41,10 @@ export interface CriterionResult {
 export interface Student {
   id: number;
   name: string;
-  status: 'evaluated' | 'pending' | 'evaluating';
+  // 'queued' = zařazeno do fronty, čeká na volný slot souběžnosti (EVAL_QUEUED).
+  // Bez tohoto stavu vypadal čekající ÚZ stejně jako nezahájený a lektor dávku
+  // zbytečně spouštěl znovu.
+  status: 'evaluated' | 'pending' | 'evaluating' | 'queued';
   score: number;
   maxScore: number;
   evaluationDetails?: CriterionResult[]; // Added to store individual results

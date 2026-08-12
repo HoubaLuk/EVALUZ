@@ -1,15 +1,16 @@
 # Projektový Kontext — EVALUZ
-**Verze: 3.13.1 | Poslední aktualizace: 2026-08-12**
+**Verze: 3.14.0 | Poslední aktualizace: 2026-08-12**
 
 ## Aktuální Stav
 
-Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 91 testů pass.
+Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 97 testů pass.
 
 Poslední vývojová linie řešila **provozní robustnost dávkového vyhodnocování** odhalenou pilotem:
 - **v3.11.0** — náprava RBAC izolace dat (`DataScope`, fail-closed `PERSONAL`, ADR-014).
 - **v3.12.0** — doručování WS zpráv přes Postgres LISTEN/NOTIFY napříč uvicorn procesy (ADR-015), LLM concurrency dělená počtem workerů (ADR-016).
 - **v3.13.0** — z dávky N ÚZ se vyhodnocoval jen první: `broadcast()` sahal na jedno sdílené asyncpg spojení ze všech úloh naráz (ADR-017). Doplněn strop kontextového okna čtený ze serveru (ADR-018) a deterministické přiřazení kritérií (ADR-019).
 - **v3.13.1** — zpětná vazba se tiše ztrácela vlivem slabých referencí u `asyncio.create_task()` (ADR-020); část lektorů neviděla v UI vlastní výsledky, protože frontend měl natvrdo `class/1` (ADR-021).
+- **v3.14.0** — ÚZ čekající na volný slot souběžnosti je nově vidět (`EVAL_QUEUED`, stav „Ve frontě") a jde zrušit (ADR-022); třídní analytika se nespustí, dokud není celá sada vyhodnocená a schválená (ADR-023).
 
 ## 1. Vize a Cíl
 
@@ -24,7 +25,7 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 - **Databáze:** SQLite (dev/test) / PostgreSQL 17 (produkce) — Alembic migrace + `run_migrations()` kobercový nálet.
 - **LLM:** vLLM (primární), OpenRouter, Ollama, LM Studio — OpenAI-compatible API. Skutečné kontextové okno se čte ze serveru (`GET /v1/models` → `max_model_len`) a slouží jako strop nad nastavením v Administraci (ADR-018).
 - **Exporty:** Excel (openpyxl) a PDF (fpdf2).
-- **Testy:** pytest + pytest-asyncio + respx. 91 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
+- **Testy:** pytest + pytest-asyncio + respx. 97 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
 - **Produkce:** Docker Compose (nginx + backend + PostgreSQL), non-root user `evaluz`, nginx reverse proxy s CSP hlavičkami, `SecurityHeadersMiddleware`, slowapi rate limiting.
 
 ## 3. Implementované Moduly
@@ -38,7 +39,7 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 - **ProfileModal:** Osobní údaje, doložka, změna hesla. Samostatná komponenta oddělená od AdminModal.
 - **AdminModal:** Správa systému (prompty, LLM konfigurace, uživatelé). Viditelné pouze správcům.
 
-## 4. LLM Pipeline — Klíčové Principy (v3.13.1)
+## 4. LLM Pipeline — Klíčové Principy (v3.14.0)
 
 - **Adaptivní chunking**: `_estimate_tokens()` odhadne objem (2,5 znaku/token — konzervativně kvůli české diakritice); pokud se vše vejde do 70 % kontextového okna → přímé volání; jinak chunky po `CHUNK_SIZE` kritériích + `asyncio.gather` parallelismus.
 - **Strop kontextu ze serveru (ADR-018)**: `fetch_server_max_model_len()` čte `max_model_len` z `GET /v1/models`; `ctx = min(nastavení v Administraci, limit serveru)`. Nastavení smí limit jen snížit — do vLLM se totiž vůbec neposílá (per-request kontext přijímá jen Ollama přes `num_ctx`).
@@ -55,6 +56,8 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 ## 4a. Fronta vyhodnocování — invariant (v3.13.0+)
 
 - **Každý zařazený úkol vyprodukuje právě jednu terminální událost** (`EVAL_SUCCESS`, nebo `EVAL_ERROR`). Na tomhle invariantu stojí celé UI — bez něj `evaluatedCount` nikdy nedoběhne na `totalToEvaluate`, kolečko zůstane viset a polling běží donekonečna.
+- **Rezervace slotu před `queue.get()` (ADR-022)**: `worker()` čeká na semafor ještě před vyzvednutím úkolu, takže úkoly nad limit souběžnosti zůstávají ve frontě — jsou spočitatelné (`qsize`) i zrušitelné přes `clear_queue`. Dřív si smyčka vytáhla vše naráz a čekala na slot až uvnitř tasku; fronta byla prázdná, „Zastavit" neměl co rušit a čekající ÚZ vypadal v UI jako nezahájený.
+- **`EVAL_QUEUED`**: `add_task()` oznámí zařazení do fronty; frontend to zobrazí stavem `'queued'` („Ve frontě"). U dávky 5 ÚZ při limitu 4 čekal pátý ~2 minuty a bez tohoto oznámení ho lektor spouštěl znovu.
 - **`_notify_lock` (ADR-017)**: jedno sdílené asyncpg spojení nesmí obsluhovat dvě korutiny naráz. Bez zámku první úloha spojení zabrala a zbylé padaly na `cannot perform operation: another operation is in progress` — z dávky 3 ÚZ se vyhodnotil jen první.
 - **`clear_queue(lecturer_id)`**: filtruje podle lektora (cizí úkoly vrací do fronty) a úklid rozesílá kanálem `evaluz_eval_events` jako řídicí zprávu s vyhrazeným klíčem `__control`, kterou `_on_notify` odchytí před doručením do prohlížeče a vykoná lokálně v každém procesu.
 
@@ -87,12 +90,13 @@ backend/tests/
 │                                    terminální událost při pádu, clear_queue per lektor
 ├── test_criteria_matching.py    14  parser kritérií + přiřazení výsledků (ADR-019)
 ├── test_class_scoping.py         6  rozsah třídy, kontrakt classes/ensure (ADR-021)
+├── test_analytics_gate.py        4  brána analytiky — úplnost a schválení (ADR-023)
 ├── test_data_isolation.py        3  RBAC izolace dat (ADR-014)
 └── integration/
     └── test_evaluate_endpoint.py 9  integrační (in-memory SQLite + respx)
 
 Spuštění: cd backend && pytest tests/ -v
-Výsledek: 91/91 passed
+Výsledek: 97/97 passed
 ```
 
 ## 8. Dokumentace

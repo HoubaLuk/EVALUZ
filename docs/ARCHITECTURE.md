@@ -49,6 +49,13 @@
 - **Každý zařazený úkol vyprodukuje právě jednu terminální událost** — `EVAL_SUCCESS`, nebo `EVAL_ERROR`. `_run_task` má `except` větev, která `EVAL_ERROR` odešle i tehdy, když handler spadne dřív, než se dostane ke svému vlastnímu `try`.
 - **Proč na tom záleží:** frontend počítá `evaluatedCount` proti `totalToEvaluate`. Chybějící terminální událost znamená navždy běžící kolečko, zablokovaný self-healing a nekonečný 8s polling. `TabEvaluation.tsx` má navíc watchdog na 10 minut ticha jako poslední pojistku pro ztracenou WS zprávu.
 - **Background tasky [ADR-020]:** `asyncio.create_task()` drží referenci jen slabě — GC může task zlikvidovat uprostřed běhu, tiše a bez tracebacku. Všechna fire-and-forget spuštění proto jdou přes `utils/tasks.py::spawn_background()`, které drží silnou referenci a loguje nezachycené výjimky.
+- **Kapacita fronty [od v3.14.0, ADR-022]:** `worker()` rezervuje slot semaforu PŘED `queue.get()`. Úkoly nad limit souběžnosti tak zůstávají ve frontě — jsou spočitatelné i zrušitelné přes `clear_queue`. Dřív si smyčka vytáhla vše naráz a na slot čekala až uvnitř tasku: fronta byla prázdná, „Zastavit" neměl co rušit a čekající ÚZ vypadal v UI jako nezahájený. `add_task()` navíc odesílá `EVAL_QUEUED` → frontend stav `'queued'` („Ve frontě").
+
+## Man-in-the-Loop — brána analytiky [od v3.5.0, zpřísněno v3.14.0 ADR-023]
+- Třídní analytika a exporty jsou dostupné až tehdy, když je **každý** záznam pod danou modelovou situací vyhodnocený **a** schválený lektorem.
+- Dřív se kontrolovaly jen neschválené mezi **vyhodnocenými**; záznamy bez výsledku (po fast-scanu nebo čekající ve frontě) se tiše přeskočily a analýza popsala jen část skupiny, aniž by to lektor poznal.
+- Odpověď při blokaci: `error: "pending_approvals"` + `pending_count` (čeká na schválení), `unevaluated_count` (bez výsledku), `total_evaluated`, `total_records`. Frontend obě čísla rozlišuje.
+- `json_result` může být u starších záznamů JSON string — brána to ošetřuje a takový záznam počítá jako nevyhodnocený místo pádu na `AttributeError`.
 
 ## Klientská Synchronizace
 - **HDD Sync:** Využívá `File System Access API`. 

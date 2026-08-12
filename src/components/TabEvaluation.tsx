@@ -116,7 +116,18 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             ws.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
                 // Backend posílá zprávy o startu (EVAL_START), úspěchu (EVAL_SUCCESS) nebo chybě (EVAL_ERROR).
-                if (data.type === 'EVAL_START') {
+                if (data.type === 'EVAL_QUEUED') {
+                    // Zařazeno do fronty, ale ještě neběží — u dávky větší než limit
+                    // souběžnosti se na slot čeká i minuty. Bez tohoto stavu vypadal
+                    // takový ÚZ jako nezahájený.
+                    setStudents(prev => prev.map(s => {
+                        const sName = (s.name || "").normalize('NFC');
+                        const dataName = (data.student_name || "").normalize('NFC');
+                        return sName === dataName && s.status !== 'evaluating'
+                            ? { ...s, status: 'queued' }
+                            : s;
+                    }));
+                } else if (data.type === 'EVAL_START') {
                     setStudents(prev => prev.map(s => {
                         const sName = (s.name || "").normalize('NFC');
                         const dataName = (data.student_name || "").normalize('NFC');
@@ -211,11 +222,13 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                             s.id === evalRecord.id || 
                             (s.name && evalRecord.jmeno_studenta && s.name.normalize('NFC') === evalRecord.jmeno_studenta.normalize('NFC'))
                         );
-                        let finalStatus: 'evaluated' | 'pending' | 'evaluating' = (evalRecord.vysledky && evalRecord.vysledky.length > 0) ? 'evaluated' : 'pending';
+                        let finalStatus: 'evaluated' | 'pending' | 'evaluating' | 'queued' = (evalRecord.vysledky && evalRecord.vysledky.length > 0) ? 'evaluated' : 'pending';
 
-                        // Zachovat lokálně běžící status vyhodnocování, i když server ještě hlásí 'pending'
-                        if (existing?.status === 'evaluating' && finalStatus === 'pending') {
-                            finalStatus = 'evaluating';
+                        // Zachovat lokálně běžící status vyhodnocování, i když server ještě hlásí 'pending'.
+                        // Platí i pro 'queued' — ÚZ čekající na volný slot by jinak polling
+                        // přepsal na 'pending' a znovu by vypadal jako nezahájený.
+                        if ((existing?.status === 'evaluating' || existing?.status === 'queued') && finalStatus === 'pending') {
+                            finalStatus = existing.status;
                         }
 
                         return {
@@ -319,7 +332,8 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     // se preservation logic v fetchEvaluations() postará o správný stav i po reconnectu.
     useEffect(() => {
         if (!isEvaluating || students.length === 0) return;
-        const anyStillRunning = students.some(s => s.status === 'evaluating');
+        // 'queued' se počítá jako běžící — dávka není hotová, dokud čeká ÚZ na volný slot.
+        const anyStillRunning = students.some(s => s.status === 'evaluating' || s.status === 'queued');
         if (!anyStillRunning) {
             setIsEvaluating(false);
             setEvaluationProgress(0);
@@ -339,7 +353,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
         const watchdogId = setTimeout(() => {
             setIsEvaluating(false);
             setEvaluationProgress(0);
-            setStudents(prev => prev.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
+            setStudents(prev => prev.map(s => (s.status === 'evaluating' || s.status === 'queued') ? { ...s, status: 'pending' } : s));
             fetchEvaluations();
             setToastMessage({
                 text: 'Vyhodnocování bylo ukončeno kvůli nečinnosti. Zkontrolujte seznam a nevyhodnocené ÚZ případně spusťte znovu.',
@@ -586,7 +600,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                     setIsEvaluating(false);
                     setEvaluationProgress(0);
                     // Resetujeme všechny studenty kteří mohli zůstat zaseknutí ve stavu 'evaluating'
-                    setStudents(prev => prev.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
+                    setStudents(prev => prev.map(s => (s.status === 'evaluating' || s.status === 'queued') ? { ...s, status: 'pending' } : s));
                     fetchEvaluations();
 
                     if (errorCount > 0) {
@@ -624,7 +638,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 setTotalToEvaluate(0);
                 setEvaluatedCount(0);
                 // Reset all 'evaluating' students to 'pending' before reloading from DB
-                setStudents(current => current.map(s => s.status === 'evaluating' ? { ...s, status: 'pending' } : s));
+                setStudents(current => current.map(s => (s.status === 'evaluating' || s.status === 'queued') ? { ...s, status: 'pending' } : s));
                 setTimeout(() => setToastMessage(null), 4000);
                 await fetchEvaluations(); // reload actual statuses
             } else {
@@ -875,7 +889,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
     const canEvaluate = selectedIds.length > 0 && selectedIds.some(id => {
         const student = students.find(s => s.id === id);
         if (!student) return false;
-        if (student.status === 'evaluating') return false;
+        if (student.status === 'evaluating' || student.status === 'queued') return false;
         if (student.status === 'evaluated' && student.is_approved) return false;
         return true;
     });
@@ -1023,6 +1037,10 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                             <span className="badge badge--light" style={{ fontSize: '0.7rem' }}>
                                                 <span className="spinner spinner--sm" /> Zpracovává se
                                             </span>
+                                        ) : student.status === 'queued' ? (
+                                            <span className="badge badge--light" style={{ fontSize: '0.7rem' }}>
+                                                <Icon icon={faClock} size="xs" /> Ve frontě
+                                            </span>
                                         ) : (
                                             <span className="badge badge--negative" style={{ fontSize: '0.7rem' }}>
                                                 <Icon icon={faCircleExclamation} size="xs" /> Nezpracováno
@@ -1030,7 +1048,7 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                         )}
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger asChild>
-                                                <button className="btn btn--sm btn--icon-only btn--outline" onClick={(e) => e.stopPropagation()} style={{ opacity: student.status === 'evaluating' ? 0.4 : 1 }}>
+                                                <button className="btn btn--sm btn--icon-only btn--outline" onClick={(e) => e.stopPropagation()} style={{ opacity: (student.status === 'evaluating' || student.status === 'queued') ? 0.4 : 1 }}>
                                                     <Icon icon={faEllipsisVertical} />
                                                 </button>
                                             </DropdownMenu.Trigger>

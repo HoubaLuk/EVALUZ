@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.13.1  
+**Verze:** 3.14.0  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -524,10 +524,11 @@ backend/tests/
 ├── conftest.py                  # sys.path, sdílené fixtures pro unit testy
 ├── test_llm_pipeline.py         # unit testy (43 testů)
 ├── test_evaluation_queue.py     # EvaluationQueue: dedup, broadcast/NOTIFY, souběžný přístup
-│                                #   ke spojení, terminální událost, clear_queue (16 testů,
-│                                #   viz ADR-011, ADR-015, ADR-017)
+│                                #   ke spojení, terminální událost, clear_queue, kapacita
+│                                #   fronty (18 testů, viz ADR-011, ADR-015, ADR-017, ADR-022)
 ├── test_criteria_matching.py    # parser kritérií + přiřazení výsledků LLM (14 testů, ADR-019)
 ├── test_class_scoping.py        # rozsah třídy, kontrakt classes/ensure (6 testů, ADR-021)
+├── test_analytics_gate.py       # brána analytiky — úplnost a schválení (4 testy, ADR-023)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
@@ -536,7 +537,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **91 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **97 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -924,6 +925,43 @@ Nešlo o regresi z v3.13.0 — v nginx logu z 10. 8. je vidět, že týž lektor
 **Rozhodnutí:** `src/utils/api.ts::getClassId()` volá existující idempotentní endpoint `POST /evaluate/classes/ensure` (třídu vrátí, a pokud neexistuje, založí ji) a výsledek cachuje. Cache je klíčovaná tokenem, takže se sama zneplatní při přihlášení jiného lektora i po odhlášení — není potřeba ji nikde ručně invalidovat. Nahrazeno bylo všech devět výskytů v `App.tsx`, `TabEvaluation.tsx` a `TabAnalytics.tsx` (včetně Excel exportu a názvu staženého souboru). Třída zůstává reálnou entitou, takže případné budoucí rozšíření na víc tříd na lektora nevyžaduje návrat zpět.
 
 **Kompromis:** Jeden HTTP požadavek navíc při prvním načtení (dál z cache). Konstanta `DEFAULT_CLASS_NAME` v `src/utils/api.ts` musí odpovídat defaultu `class_name` ve fast-scan endpointu — jinak by frontend rezolvoval jinou třídu, než do které se zapisuje. Tuhle vazbu zamyká test `test_ensure_returns_class_used_by_fast_scan`.
+
+---
+
+### ADR-022: Rezervace slotu před vyzvednutím z fronty + viditelnost čekajících úkolů (v3.14.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Po opravě fronty (ADR-017) dávky doběhly, ale lektor nahlásil, že z dávky 5 ÚZ zůstal pátý „nevyhodnocený" a musel dávku spustit znovu. Z logu ale plyne, že ztracený nebyl: `concurrency=8 / 2 workery = 4/proces`, takže se rozeběhly 4 úkoly a pátý čekal na volný slot. Jakmile první doběhl (`ADÁMEK` v 08:01:21), pátý (`Jančařík`) se ve stejné vteřině rozeběhl sám. Čekal tedy ~112 s, což lektor pochopitelně nepoznal — v UI vypadal stejně jako nezahájený.
+
+Zhoršovalo to i druhé chování: `worker()` si vytáhl z `asyncio.Queue` **všechny** úkoly hned a na semafor čekal až uvnitř tasku. Fronta tak byla prázdná, takže „Zastavit" (`clear_queue`) neměl co zrušit — čekající ÚZ zrušit nešel. Lektor navíc mezitím dávku odeslal znovu, takže se všech pět ÚZ vyhodnotilo dvakrát.
+
+**Možnosti:**
+- A: Zvýšit concurrency — neřeší příčinu, jen posouvá hranici, a naráží na kapacitu GPU (`Maximum concurrency` ve vLLM).
+- B: Nechat mechaniku být a jen doplnit oznámení o zařazení — vyřeší viditelnost, ale čekající úkol zůstane nezrušitelný.
+- **C (zvoleno):** Rezervovat slot semaforu **před** `queue.get()` a doplnit událost `EVAL_QUEUED`.
+
+**Rozhodnutí:** `worker()` volá `await semaphore.acquire()` před vyzvednutím úkolu; slot přebírá vytvořený task a uvolní ho ve svém `finally`. Čekající úkoly tím zůstávají ve frontě — jsou spočitatelné (`qsize`) i zrušitelné přes `clear_queue`. `add_task()` navíc odesílá `EVAL_QUEUED`, na které frontend reaguje novým stavem `'queued'` a odznakem „Ve frontě". Selhání tohoto oznámení je jen zalogováno — nesmí zabránit zařazení úkolu.
+
+**Kompromis:** Když je fronta prázdná, worker drží rezervovaný slot, dokud nějaký úkol nepřijde. To nikomu nevadí (není co pouštět) a zjednodušuje to účetnictví oproti variantě „zjisti volnou kapacitu bez rezervace", kterou `asyncio.Semaphore` neumí. Pokud se slot nepodaří předat žádnému tasku (výjimka mezi `acquire()` a `spawn_background`), vrací se explicitně v `except BaseException`.
+
+---
+
+### ADR-023: Třídní analytika jen z úplné a schválené sady (v3.14.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Brána Man-in-the-Loop kontrolovala jen to, zda nejsou **vyhodnocené** záznamy neschválené. Záznamy, které pod scénářem existují, ale výsledek ještě nemají (typicky po fast-scanu, nebo když ÚZ čeká ve frontě na volný slot — viz ADR-022), se z kontroly tiše vypadly: `evaluated_check` je filtroval a `unapproved` se počítalo až z nich. Analytika se pak spočítala jen z části skupiny, přestože se tváří, že popisuje celou modelovou situaci. Lektor to nemohl poznat — žádné varování, žádný rozdíl v UI.
+
+Vedle toho `e.json_result.get("vysledky")` předpokládá `dict`; u staršího záznamu s `json_result` jako JSON string (TEXT před migrací na JSONB) by vyhodilo `AttributeError` a shodilo celou analytiku na HTTP 500.
+
+**Možnosti:**
+- A: Nechat brány být a jen doplnit varování „analytika je z N z M záznamů" — statistika by pořád mohla být použita jako podklad hodnocení skupiny.
+- **B (zvoleno):** Blokovat analytiku, dokud není každý záznam pod scénářem vyhodnocený **a** schválený.
+
+**Rozhodnutí:** `generate_class_summary()` rozděluje záznamy na `evaluated_check` a `unevaluated` a blokuje při `unapproved or unevaluated`. Odpověď si ponechává klíč `error: "pending_approvals"` (zpětná kompatibilita s frontendem) a přidává `unevaluated_count` a `total_records`. `TabAnalytics.tsx` obě čísla zobrazuje odděleně, aby lektor věděl, jestli má dokončit vyhodnocení, nebo schvalovat. Deserializace je odolná vůči `json_result` jako stringu — takový záznam se počítá jako nevyhodnocený, což bránu korektně zablokuje místo pádu.
+
+**Kompromis:** Lektor nemůže vidět průběžnou analytiku nad rozpracovanou skupinou. To je záměr — jde o podklad pro hodnocení skupiny, kde by částečná data byla zavádějící. Kdo chce vidět dílčí výsledky, má je na kartě Vyhodnocení ÚZ.
 
 ---
 

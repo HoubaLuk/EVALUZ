@@ -18,19 +18,42 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
     
     from api.auth import apply_data_isolation
 
-    # 0. Man-in-the-Loop: blokace analytiky pokud existují neschválené záznamy
+    # 0. Man-in-the-Loop: analytika smí vzniknout jedině z ÚPLNÉ a schválené sady.
+    #
+    # Blokuje se ze DVOU důvodů:
+    #   a) existují vyhodnocené, ale ještě neschválené záznamy,
+    #   b) pod scénářem leží záznam, který ještě NENÍ vyhodnocený (typicky po fast-scanu,
+    #      nebo když jeden ÚZ z dávky čeká ve frontě na volný slot).
+    #
+    # Bod (b) dřív chyběl: nevyhodnocené záznamy se tiše přeskočily a třídní analýza
+    # se spočítala jen z části skupiny, aniž by to lektor poznal. Statistika by přitom
+    # tvrdila, že popisuje celou modelovou situaci.
     q0 = db.query(StudentEvaluation).filter(
         StudentEvaluation.class_id == class_id,
         StudentEvaluation.scenario_name == scenario_id
     )
     raw_check = apply_data_isolation(q0, StudentEvaluation, current_user, db).all()
-    evaluated_check = [e for e in raw_check if e.json_result and e.json_result.get("vysledky")]
+
+    evaluated_check = []
+    unevaluated = []
+    for e in raw_check:
+        # Starší záznamy mohou mít json_result jako JSON string (TEXT před migrací na
+        # JSONB) — .get() by na stringu spadl na AttributeError a shodil celou analytiku.
+        result = e.json_result if isinstance(e.json_result, dict) else {}
+        if result.get("vysledky"):
+            evaluated_check.append(e)
+        else:
+            unevaluated.append(e)
+
     unapproved = [e for e in evaluated_check if not e.is_approved]
-    if unapproved:
+
+    if unapproved or unevaluated:
         return {
             "error": "pending_approvals",
             "pending_count": len(unapproved),
-            "total_evaluated": len(evaluated_check)
+            "unevaluated_count": len(unevaluated),
+            "total_evaluated": len(evaluated_check),
+            "total_records": len(raw_check),
         }
 
     # 1. CACHE: Pokud už analýza existuje a uživatel si nevynutil novou (force=True), vrátíme tu uloženou.

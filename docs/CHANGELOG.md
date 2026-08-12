@@ -2,6 +2,32 @@
 
 ---
 
+## [v3.14.0] — 2026-08-12 — Viditelnost fronty a úplnost sady pro analytiku
+
+### Problém
+
+Po v3.13.1 dávky doběhly oběma lektorům, ale u dávky 5 ÚZ zůstal pátý zdánlivě nevyhodnocený a musel se spouštět znovu. Z logu plyne, že ztracený nebyl: při `concurrency=4/proces` se rozeběhly 4 úkoly a pátý čekal na volný slot — jakmile první doběhl (08:01:21), pátý se ve stejnou vteřinu rozeběhl sám. Čekal ~112 s, ale v UI vypadal stejně jako nezahájený. Souběžně vznikl požadavek, aby se globální analýza třídy nedala vygenerovat dřív, než jsou všechny ÚZ pod modelovou situací vyhodnocené a schválené.
+
+### Fronta — čekající úkoly jsou vidět a jdou zrušit (ADR-022)
+
+- **`backend/services/evaluation_queue.py`** — `worker()` rezervuje slot semaforu **před** `queue.get()`; slot přebírá vytvořený task a uvolní ho ve `finally`. Dřív si smyčka vytáhla všechny úkoly naráz a na semafor čekala až uvnitř tasku, takže fronta byla prázdná: čekající ÚZ nešel spočítat ani zrušit. „Zastavit" (`clear_queue`) proto neměl co rušit — a lektor, který mezitím dávku odeslal znovu, ji nechtěně vyhodnotil dvakrát.
+- **`backend/services/evaluation_queue.py`** — `add_task()` odesílá novou WS událost `EVAL_QUEUED`. Její selhání je jen zalogováno, aby nikdy nezabránilo zařazení úkolu.
+- **`src/types.ts`, `src/components/TabEvaluation.tsx`** — nový stav `'queued'` s odznakem „Ve frontě". Počítá se jako běžící (self-healing, preservation logic při pollingu, filtr výběru), takže polling už čekající ÚZ nepřepíše zpět na „Nezpracováno".
+
+### Analytika jen z úplné a schválené sady (ADR-023)
+
+- **`backend/services/analytics.py`** — brána dosud kontrolovala jen to, zda nejsou **vyhodnocené** záznamy neschválené; záznamy bez výsledku se z kontroly tiše vypadly a analýza se spočítala jen z části skupiny, aniž by to lektor poznal. Nově blokuje i na nevyhodnocené záznamy a vrací `unevaluated_count` a `total_records` vedle stávajícího `pending_count`. Klíč `error: "pending_approvals"` zůstal kvůli zpětné kompatibilitě.
+- **`backend/services/analytics.py`** — deserializace odolná vůči `json_result` jako JSON stringu (starší TEXT záznamy). `.get()` na stringu dosud vyhodilo `AttributeError` a shodilo celou analytiku na HTTP 500.
+- **`src/components/TabAnalytics.tsx`** — hláška rozlišuje „ještě není vyhodnoceno" od „čeká na schválení", ať lektor ví, co má udělat.
+
+### Testy
+
+- **`backend/tests/test_analytics_gate.py`** (nový, 4 testy) — nevyhodnocený záznam blokuje, neschválený blokuje dál, úplná a schválená sada projde, legacy string v `json_result` bránu neshodí.
+- **`backend/tests/test_evaluation_queue.py`** — 2 nové testy: `EVAL_QUEUED` se odešle při zařazení, a úkol nad limit souběžnosti zůstane ve frontě a jde zrušit. Ověřeno, že se starým chováním zbývá ve frontě 0 položek.
+- Celkem 97 testů.
+
+---
+
 ## [v3.13.1] — 2026-08-12 — Chybějící zpětná vazba a neviditelné výsledky u části lektorů
 
 ### Problém
