@@ -221,6 +221,18 @@ CORS_ORIGINS=https://your-domain.com
 
 Vzorový soubor se všemi možnostmi: [`.env.example`](.env.example)
 
+### Kontextové okno vLLM
+
+Nastavení `VLLM_CONTEXT_WINDOW` v Administraci **nenastavuje** okno modelu — do vLLM se vůbec neposílá. Je to jen interní odhad aplikace pro rozhodnutí, zda ÚZ poslat jedním voláním, nebo ho rozdělit na chunky. Skutečný limit je fixovaný při startu vLLM přes `--max-model-len` a aplikace si ho od v3.13.0 přečte z `GET /v1/models` a použije jako strop (ADR-018). Nastavení tedy smí limit jen **snížit**, nikdy překročit.
+
+Při zvyšování `--max-model-len` je nutné současně zvednout `--gpu-memory-utilization` — jinak se zmenší počet požadavků, které vLLM zvládne obsloužit současně, a dávkové vyhodnocování se rozpadne na sériové. Po startu ověřte v logu:
+
+```bash
+docker logs vllm-server 2>&1 | grep "Maximum concurrency"
+```
+
+Hodnota by neměla klesnout pod ~2×. Aktuální produkční nastavení: `--max-model-len 65536`, `--gpu-memory-utilization 0.85` (96GB karta, model 31B ve FP8 → ~2,3×).
+
 ---
 
 ## Databáze a migrace
@@ -415,8 +427,16 @@ EVALUZ/
 │   ├── services/
 │   │   ├── llm_engine.py      # vLLM integrace, prompt engineering
 │   │   ├── analytics.py       # Deterministická třídní analytika
+│   │   ├── criteria_service.py # Parser hodnotících kritérií z markdownu
+│   │   ├── doc_parser.py      # Extrakce textu z PDF / DOCX / RTF
+│   │   ├── security_scanner.py # Kontrola vstupního textu
 │   │   ├── pdf_generator.py   # PDF generátor (fpdf2)
 │   │   └── evaluation_queue.py # Asynchronní fronta evaluací
+│   ├── utils/
+│   │   ├── tasks.py           # spawn_background() — silné reference na background tasky
+│   │   ├── text.py            # Normalizace názvů souborů a jmen
+│   │   └── sorting.py         # Řazení vyhodnocení podle příjmení
+│   ├── tests/                 # pytest suite (91 testů)
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── main.py                # Vstupní bod, CORS, router registrace

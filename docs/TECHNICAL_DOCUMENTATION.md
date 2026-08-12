@@ -150,7 +150,9 @@ Platforma se detekuje automaticky z `VLLM_API_URL` (OpenRouter URL má přednost
 #### Phase 2b — Individuální zpětná vazba (async)
 `_generate_individual_feedback()` — samostatné LLM volání po sloučení chunk výsledků. Model vidí kompletní výsledek (seznam splněných/nesplněných kritérií), generuje personalizovanou zpětnou vazbu (3–5 vět). Prompt editovatelný v Admin UI (`prompt_feedback`).
 
-**Od v3.10.1 běží mimo critical path (ADR-010):** `evaluate_report()` vrátí `zpetna_vazba=""`. Po odeslání `EVAL_SUCCESS` je spuštěn `asyncio.create_task(_run_feedback_task(...))` — ten volá `generate_feedback_for_record()` (public wrapper čtoucí nastavení z DB), provede partial update `json_result.zpetna_vazba` v DB, a odešle `FEEDBACK_DONE` WebSocket notifikaci.
+**Od v3.10.1 běží mimo critical path (ADR-010):** `evaluate_report()` vrátí `zpetna_vazba=""`. Po odeslání `EVAL_SUCCESS` je spuštěn `spawn_background(_run_feedback_task(...))` — ten volá `generate_feedback_for_record()` (public wrapper čtoucí nastavení z DB), provede partial update `json_result.zpetna_vazba` v DB, a odešle `FEEDBACK_DONE` WebSocket notifikaci.
+
+> **Od v3.13.1 (ADR-020) přes `utils/tasks.py::spawn_background()`, ne přes holé `asyncio.create_task()`.** Event loop drží na tasky jen slabé reference, takže GC mohl zpětnou vazbu zlikvidovat uprostřed běhu — tiše, bez chyby v logu. Projevovalo se to tím, že se u dávky feedback uložil jen některým studentům.
 
 `FEEDBACK_MAX_TOKENS` konfigurovatelný v DB (výchozí 250 — 3–5 vět v češtině ≈ 150–180 tokenů). Chyba zpětné vazby neblokuje uložení výsledků evaluace.
 
@@ -246,7 +248,7 @@ _validate_and_fix_vysledky()   ← FIX A
        ▼
     return parsed  ← zpetna_vazba="" (feedback není v critical path)
        │
-       ▼ (po EVAL_SUCCESS broadcast — asyncio.create_task)
+       ▼ (po EVAL_SUCCESS broadcast — spawn_background, viz ADR-020)
 _run_feedback_task()           ← Phase 2b (ADR-010)
   generate_feedback_for_record()
   → partial DB update json_result.zpetna_vazba
@@ -521,8 +523,12 @@ Při každém startu backend:
 backend/tests/
 ├── conftest.py                  # sys.path, sdílené fixtures pro unit testy
 ├── test_llm_pipeline.py         # unit testy (43 testů)
+├── test_evaluation_queue.py     # EvaluationQueue: dedup, broadcast/NOTIFY, souběžný přístup
+│                                #   ke spojení, terminální událost, clear_queue (16 testů,
+│                                #   viz ADR-011, ADR-015, ADR-017)
+├── test_criteria_matching.py    # parser kritérií + přiřazení výsledků LLM (14 testů, ADR-019)
+├── test_class_scoping.py        # rozsah třídy, kontrakt classes/ensure (6 testů, ADR-021)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
-├── test_evaluation_queue.py     # EvaluationQueue: dedup, broadcast/NOTIFY, doručení (10 testů, viz ADR-015)
 └── integration/
     ├── __init__.py
     ├── conftest.py              # in-memory SQLite, MockLLMRouter, FastAPI client
@@ -530,7 +536,12 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **65 testů** (spuštění: `cd backend && pytest tests/ -v`). Testy je nutné spouštět přes venv/interpreter, který má nainstalované `requirements.txt` + `requirements-dev.txt` (např. `backend/venv/bin/pytest`) — systémový/globální `pytest` bez těchto závislostí selže na `ModuleNotFoundError`.
+Celkem: **91 testů** (spuštění: `cd backend && pytest tests/ -v`).
+
+> **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
+> vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
+> Fixture, přes kterou aplikace zapisuje, proto musí použít `poolclass=StaticPool`
+> (viz `test_class_scoping.py`) — jinak request spadne na `no such table`. Testy je nutné spouštět přes venv/interpreter, který má nainstalované `requirements.txt` + `requirements-dev.txt` (např. `backend/venv/bin/pytest`) — systémový/globální `pytest` bez těchto závislostí selže na `ModuleNotFoundError`.
 
 ### 7.2 Unit testy (`test_llm_pipeline.py` — 43 testů)
 
@@ -708,7 +719,7 @@ Pokud selže i úroveň 2 → `ValueError` (fail-fast, viz ADR-009). Level 3 (`_
 1. `evaluate_report()` vrací `zpetna_vazba=""` (obě cesty — chunking i single-call).
 2. Nová funkce `generate_feedback_for_record(merged, db, student_log_prefix)` v `llm_engine.py` — public wrapper čtoucí LLM nastavení z DB a volající `_generate_individual_feedback()`.
 3. Nová funkce `_run_feedback_task(eval_record_id, lecturer_id, student_name, scen_id)` v `api/evaluate.py` — vlastní DB session, partial update `json_result.zpetna_vazba`, broadcast `FEEDBACK_DONE`.
-4. `asyncio.create_task(_run_feedback_task(...))` spuštěno v `process_single_file_bg` ihned po `EVAL_SUCCESS` broadcastu.
+4. `asyncio.create_task(_run_feedback_task(...))` spuštěno v `process_single_file_bg` ihned po `EVAL_SUCCESS` broadcastu. *(Aktualizace v3.13.1: nahrazeno `spawn_background()` — holé `create_task()` nechávalo task napospas GC, viz ADR-020.)*
 5. Frontend: handler `FEEDBACK_DONE` → `fetchEvaluations()`.
 6. `FEEDBACK_MAX_TOKENS` snížen z 600 na 250 (výchozí), konfigurovatelný v DB.
 
