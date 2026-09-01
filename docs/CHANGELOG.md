@@ -2,6 +2,30 @@
 
 ---
 
+## [v3.14.1] — 2026-09-01 — Viditelný pád nahrávání místo tiché ztráty
+
+### Problém
+
+Lektorka Ivona Palová nahlásila, že jí vyhodnocování nešlo spustit — EVALUZ hlásil holé „Failed to fetch" bez jakéhokoli vodítka. U Lukáše Hřibňáka a Lukáše Zvěřiny dávky ve stejnou dobu proběhly bez potíží. Z backend logu vyplynulo, že její požadavek na server vůbec nedorazil — ani řádek, ani chyba — což ukazuje na něco mezi jejím prohlížečem a backendem (velikost nahrávaného balíku vs. `client_max_body_size 15M` v nginxu, nebo síťová politika na jejím segmentu — je na jiné podsíti než oba fungující lektoři). Kořenová příčina na síťové/infrastrukturní úrovni tímto nasazením není prokázaná; oprava níže cílí na dvě samostatná zjištění z auditu kódu, která k nesrozumitelnosti chyby přispívala.
+
+### Nahrávání souboru nad limit už nemizí beze stopy (ADR-024)
+
+- **`backend/api/evaluate.py`** — `fast_scan_batch` soubor nad `MAX_UPLOAD_SIZE` (10 MB) dosud jen vypsal `print()` na stdout a vrátil `None` — student z odpovědi zmizel bez jakékoli zmínky, ať uplynul limit z jakéhokoli důvodu. Endpoint nově vrací i pole `skipped` se jmény nezpracovaných souborů; totéž platí pro soubor, u kterého scan spadne na výjimku (dřív `print`, nyní `logger.error(..., exc_info=True)`).
+- **`src/components/TabEvaluation.tsx`** — když `skipped` není prázdné, optimisticky vykreslené řádky těchto studentů se odstraní a lektor dostane jmenovitý seznam, co se nenahrálo a proč to bývá (poškozený/naskenovaný PDF bez textové vrstvy).
+- **`src/utils/api.ts`** — nové `MAX_FILE_BYTES` (10 MB, zrcadlí `MAX_UPLOAD_SIZE`) a `MAX_UPLOAD_BATCH_BYTES` (14 MB, pod nginx limitem) kontrolují velikost **před** odesláním, takže běžný případ nikdy nedorazí až k nginx limitu. `describeFetchError()` převádí `TypeError: Failed to fetch` (a příbuzné síťové chyby) na srozumitelnou českou větu místo prázdné anglické hlášky.
+- **`src/components/TabEvaluation.tsx`** — fast-scan i dávkové vyhodnocení nově používají `describeFetchError()` v catch větvi; fast-scan navíc při `!res.ok` vyhodí chybu (dřív selhal potichu do `console.error`) a rollbackne optimistické řádky.
+
+### Testy
+
+- **`backend/tests/test_fast_scan_limits.py`** (nový, 3 testy) — soubor nad limit se objeví v `skipped`, klíč je v odpovědi vždy přítomný, `MAX_UPLOAD_SIZE` je synchronizováno s frontendovou konstantou `MAX_FILE_BYTES`.
+- Celkem 100 testů.
+
+### Otevřeno
+
+Skutečná příčina „Failed to fetch" u Ivony Palové zůstává neprokázaná — vyžaduje z jejího prohlížeče (DevTools → Network) přesný `net::ERR_*` kód a velikost/počet nahrávaných souborů. Tahle oprava dělá selhání viditelným a odstraňuje jeden konkrétní tichý propad v kódu; neopravuje síťovou vrstvu, kterou EVALUZ sám neřídí.
+
+---
+
 ## [v3.14.0] — 2026-08-12 — Viditelnost fronty a úplnost sady pro analytiku
 
 ### Problém

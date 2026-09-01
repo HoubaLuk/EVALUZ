@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.14.0  
+**Verze:** 3.14.1  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -537,7 +537,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **97 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **100 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -962,6 +962,22 @@ Vedle toho `e.json_result.get("vysledky")` předpokládá `dict`; u staršího z
 **Rozhodnutí:** `generate_class_summary()` rozděluje záznamy na `evaluated_check` a `unevaluated` a blokuje při `unapproved or unevaluated`. Odpověď si ponechává klíč `error: "pending_approvals"` (zpětná kompatibilita s frontendem) a přidává `unevaluated_count` a `total_records`. `TabAnalytics.tsx` obě čísla zobrazuje odděleně, aby lektor věděl, jestli má dokončit vyhodnocení, nebo schvalovat. Deserializace je odolná vůči `json_result` jako stringu — takový záznam se počítá jako nevyhodnocený, což bránu korektně zablokuje místo pádu.
 
 **Kompromis:** Lektor nemůže vidět průběžnou analytiku nad rozpracovanou skupinou. To je záměr — jde o podklad pro hodnocení skupiny, kde by částečná data byla zavádějící. Kdo chce vidět dílčí výsledky, má je na kartě Vyhodnocení ÚZ.
+
+---
+
+### ADR-024: Viditelný pád nahrávání místo tiché ztráty (v3.14.1)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Lektorka nahlásila „Failed to fetch" bez dalšího vodítka; požadavek na server vůbec nedorazil (chybí v backend logu úplně), zatímco dvěma dalším lektorům ve stejnou dobu dávky prošly. Kandidáti na příčinu — velikost nahrávaného balíku proti `client_max_body_size 15M` v nginxu, nebo síťová politika na jejím segmentu (jiná podsíť než u fungujících lektorů) — leží mimo aplikaci a tímto nasazením nejsou prokázané ani vyloučené. Audit ale odhalil nezávislý, prokazatelný problém v kódu: `fast_scan_batch` soubor nad `MAX_UPLOAD_SIZE` (10 MB) tiše zahodil (`print()` + `return None`) — student z odpovědi zmizel beze zmínky, ať k limitu došlo z jakéhokoli důvodu, a to i mimo scénář hlášení.
+
+**Možnosti:**
+- A: Čekat na síťovou diagnostiku od lektorky a neměnit kód, dokud není příčina jistá — nechává jistou tichou ztrátu dat nedotčenou i po vyřešení sítě.
+- **B (zvoleno):** Opravit prokázaný tichý propad v kódu hned (viditelnost + testy) a síťovou/infrastrukturní hypotézu řešit odděleně na základě další diagnostiky.
+
+**Rozhodnutí:** `fast_scan_batch` nově sbírá jména nezpracovaných souborů (limit velikosti i výjimka při čtení) do pole `skipped` v odpovědi; `print()` nahrazen `logger.warning`/`logger.error(exc_info=True)`. Frontend při neprázdném `skipped` odstraní optimisticky vykreslené řádky těch studentů a vypíše jmenovitý seznam s vysvětlením. Kontrola velikosti (`MAX_FILE_BYTES`, `MAX_UPLOAD_BATCH_BYTES` v `src/utils/api.ts`) navíc běží **před** odesláním, takže běžný případ (jeden velký soubor) nikdy nedorazí až k nginx limitu; `describeFetchError()` převádí syrové `TypeError: Failed to fetch` na akční českou větu pro případy, kdy request přesto padne mimo aplikaci.
+
+**Kompromis:** Toto vědomě neopravuje síťovou vrstvu — pokud je příčina u Ivony Palové skutečně mimo aplikaci (firewall, proxy), tahle změna to sama neodstraní, jen z toho udělá čitelnou chybovou hlášku místo tiché nebo prázdné. Rozlišení mezi „aplikace zahodila soubor" a „request se nikam nedostal" je teď v UI viditelné a jde podle něj postupovat dál.
 
 ---
 

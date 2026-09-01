@@ -92,6 +92,10 @@ class FastScanResponseItem(BaseModel):
 
 class FastScanResponse(BaseModel):
     results: List[FastScanResponseItem]
+    # Soubory, které se nepodařilo zpracovat (přes limit velikosti, nečitelný obsah…).
+    # Dřív z odpovědi beze stopy zmizely a lektor si toho všiml, až když student
+    # v seznamu chyběl — nebo si toho nevšiml vůbec.
+    skipped: List[str] = []
 
 class EnsureClassRequest(BaseModel):
     name: str
@@ -157,7 +161,10 @@ async def fast_scan_batch(
     # Striktní omezení na 1 souběžný request k AI, abychom nepřetížili model (Rate Limit).
     semaphore = asyncio.Semaphore(1)
     results = []
-    
+    # Sdílený seznam přeskočených souborů — event loop je jednovláknový, takže
+    # append z paralelních korutin je bezpečný.
+    skipped: List[str] = []
+
     async def process_scan(file: UploadFile):
         """
         Pomocná funkce pro zpracování jednoho souboru v rámci Fast-Scanu.
@@ -166,7 +173,11 @@ async def fast_scan_batch(
         try:
             content_bytes = await file.read()
             if len(content_bytes) > MAX_UPLOAD_SIZE:
-                print(f"[FAST-SCAN] Soubor {file.filename} překračuje limit {MAX_UPLOAD_SIZE // 1024 // 1024} MB, přeskakuji.")
+                logger.warning(
+                    f"[FAST-SCAN] Soubor '{file.filename}' má {len(content_bytes) / 1024 / 1024:.1f} MB "
+                    f"a překračuje limit {MAX_UPLOAD_SIZE // 1024 // 1024} MB — přeskakuji."
+                )
+                skipped.append(file.filename)
                 return None
             # 1. Vytěžení textu
             extracted_text = await extract_text(content_bytes, file.filename)
@@ -258,16 +269,19 @@ async def fast_scan_batch(
                 "identita": identita
             }
         except Exception as e:
-            print(f"Chyba při zpracování souboru {student_name}: {e}")
+            logger.error(f"[FAST-SCAN] Chyba při zpracování souboru '{student_name}': {e}", exc_info=True)
+            skipped.append(file.filename)
             return None
 
     # Paralelní spuštění všech skenů
     tasks = [process_scan(f) for f in files]
     scan_results = await asyncio.gather(*tasks)
-    
+
     # Odfiltrování případných neúspěšných pokusů a vrácení výsledku
     results = [r for r in scan_results if r]
-    return FastScanResponse(results=results)
+    if skipped:
+        logger.warning(f"[FAST-SCAN] Nezpracováno {len(skipped)} z {len(files)} souborů: {skipped}")
+    return FastScanResponse(results=results, skipped=skipped)
 
 @router.post("/batch")
 async def evaluate_batch(

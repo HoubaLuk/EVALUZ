@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { API_BASE_URL, getClassId } from '../utils/api';
+import { API_BASE_URL, getClassId, MAX_FILE_BYTES, MAX_UPLOAD_BATCH_BYTES, formatBytes, describeFetchError } from '../utils/api';
 
 import {
   faCloudArrowUp, faWandMagicSparkles, faCircleCheck, faCircleExclamation,
@@ -400,6 +400,30 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
 
         if (validFiles.length === 0) return;
 
+        // Kontrola velikosti PŘED odesláním. Bez ní se limity projeví až na serveru:
+        // příliš velký jednotlivý soubor backend při fast-scanu tiše přeskočí a student
+        // z výsledků beze stopy zmizí; překročení celkové velikosti zase nginx odbaví
+        // uzavřením spojení, což prohlížeč ohlásí jen jako „Failed to fetch".
+        const oversized = validFiles.filter(f => f.size > MAX_FILE_BYTES);
+        if (oversized.length > 0) {
+            showAlert(
+                `Tyto soubory přesahují limit ${formatBytes(MAX_FILE_BYTES)} na jeden ÚZ a nelze je nahrát:\n`
+                + oversized.map(f => `• ${f.name} (${formatBytes(f.size)})`).join('\n')
+            );
+            return;
+        }
+
+        const totalBytes = validFiles.reduce((sum, f) => sum + f.size, 0);
+        if (totalBytes > MAX_UPLOAD_BATCH_BYTES) {
+            showAlert(
+                `Vybrané soubory mají dohromady ${formatBytes(totalBytes)}, což je nad limitem `
+                + `${formatBytes(MAX_UPLOAD_BATCH_BYTES)} pro jedno nahrání. `
+                + `Nahrajte je prosím po menších skupinách — vyhodnocení se tím nijak nerozbije, `
+                + `ÚZ se do seznamu přidávají postupně.`
+            );
+            return;
+        }
+
         setFiles(prev => {
             const map = new Map();
             for (const f of [...prev, ...validFiles]) {
@@ -436,14 +460,50 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                 body: formData
             });
 
-            if (res.ok) {
-                // Refetch k syncu ID + jmen
-                await fetchEvaluations();
-                setToastMessage({ text: "Data o studentech nahrána.", type: 'success' });
-                setTimeout(() => setToastMessage(null), 3000);
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try {
+                    const errData = await res.json();
+                    if (errData?.detail) detail = errData.detail;
+                } catch {
+                    // Odpověď nemusí být JSON (např. 413 z nginx) — zůstane holý status.
+                }
+                throw new Error(detail);
             }
+
+            const scanData = await res.json();
+
+            // Refetch k syncu ID + jmen
+            await fetchEvaluations();
+
+            // Soubory, které backend nedokázal zpracovat. Dřív z odpovědi beze stopy
+            // zmizely — lektor je viděl v seznamu jen díky optimistickému vykreslení.
+            const skippedNames: string[] = Array.isArray(scanData?.skipped) ? scanData.skipped : [];
+            if (skippedNames.length > 0) {
+                const skippedSet = new Set(skippedNames);
+                setStudents(prev => prev.filter(s => !skippedSet.has(s.name)));
+                setFiles(prev => prev.filter(f => !skippedSet.has(f.name)));
+                setToastMessage(null);
+                showAlert(
+                    `Tyto úřední záznamy se nepodařilo načíst a nebyly přidány:\n`
+                    + skippedNames.map(n => `• ${n}`).join('\n')
+                    + `\n\nBývá to poškozený nebo naskenovaný PDF bez textové vrstvy.`
+                );
+                return;
+            }
+
+            setToastMessage({ text: "Data o studentech nahrána.", type: 'success' });
+            setTimeout(() => setToastMessage(null), 3000);
         } catch (err) {
-            console.error("Fast scan neprosel", err);
+            // Fast-scan dřív selhával POTICHU — chyba šla jen do konzole. Lektorovi
+            // zůstaly v seznamu optimisticky vykreslené řádky, takže to vypadalo,
+            // že se soubory nahrály, a teprve vyhodnocení pak zhavarovalo.
+            console.error("Fast scan neprošel", err);
+            const optimisticNames = new Set(optimisticStudents.map(s => s.name));
+            setStudents(prev => prev.filter(s => !optimisticNames.has(s.name)));
+            setFiles(prev => prev.filter(f => !optimisticNames.has(f.name)));
+            setToastMessage(null);
+            showAlert("Nahrání úředních záznamů selhalo: " + describeFetchError(err));
         }
     };
 
@@ -582,7 +642,9 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
             }
         } catch (error: any) {
             console.error('Batch evaluation error:', error);
-            showAlert(error.message || "Došlo k chybě při odesílání dávky na server.");
+            // describeFetchError: holé „Failed to fetch" lektorovi nic neřekne a v logu
+            // serveru po takovém požadavku nezůstane ani stopa (nikdy tam nedorazil).
+            showAlert(describeFetchError(error) || "Došlo k chybě při odesílání dávky na server.");
             // On hard error during queueing, rollback the state immediately
             setStudents(current => current.map(s => studentIdsBeingProcessed.includes(s.id) && s.status !== 'evaluated' ? { ...s, status: 'pending' } : s));
             setIsEvaluating(false);

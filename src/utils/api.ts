@@ -1,6 +1,41 @@
 export const API_BASE_URL = `/api/v1`;
 
 /**
+ * Limit na JEDEN soubor. Musí odpovídat `MAX_UPLOAD_SIZE` v backend/api/evaluate.py —
+ * backend větší soubor při fast-scanu přeskočí, takže bez této kontroly by student
+ * z výsledků beze stopy zmizel.
+ */
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Limit na CELÝ upload. nginx má `client_max_body_size 15M` (nginx/evaluz.conf);
+ * při překročení spojení uzavře a prohlížeč to ohlásí jako „Failed to fetch",
+ * tedy bez čitelné příčiny. Držíme se pod limitem kvůli režii multipart hlaviček.
+ */
+export const MAX_UPLOAD_BATCH_BYTES = 14 * 1024 * 1024;
+
+export function formatBytes(bytes: number): string {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Přeloží chybu z `fetch()` do věty, které rozumí lektor.
+ *
+ * `TypeError: Failed to fetch` znamená, že požadavek vůbec nedostal odpověď — spojení
+ * se nenavázalo nebo bylo přerušeno. V logu serveru po něm nezůstane ani stopa, takže
+ * holá hláška „Failed to fetch" uživatele ani administrátora nikam neposune.
+ */
+export function describeFetchError(err: unknown): string {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/failed to fetch|networkerror|load failed/i.test(message)) {
+        return 'Spojení se serverem se nepodařilo navázat — požadavek vůbec nedorazil. '
+            + 'Bývá to velikostí nahrávaných souborů nebo blokací v síti. '
+            + 'Zkuste nahrát méně souborů najednou; pokud potíž trvá, kontaktujte správce.';
+    }
+    return message;
+}
+
+/**
  * Výchozí název třídy. MUSÍ odpovídat defaultu parametru `class_name` ve fast-scan
  * endpointu (`backend/api/evaluate.py`) — jinak by se lektorovi vrátila jiná třída,
  * než do které se mu ukládají vyhodnocení.
