@@ -24,6 +24,16 @@ interface AnalyticsData {
     needs_help: string[];
     criterion_failures: Record<string, { id: number, name: string, oduvodneni: string }[]>;
     scenario_id?: string;
+    /**
+     * Rozpor mezi uloženými výsledky a aktuální sadou kritérií (ADR-026).
+     * Statistika se počítá proti AKTUÁLNÍM kritériím, ale výsledky studentů jsou zamrzlé
+     * z doby vyhodnocení. Po přejmenování kritéria párování selže a kritérium se tváří
+     * jako 0% úspěšnost — dřív k nerozeznání od legitimní nuly.
+     */
+    criteria_mismatch?: {
+        unmatched_criteria: string[];
+        orphan_results: string[];
+    } | null;
 }
 
 // NCIKT semaforová paleta pro grafy
@@ -308,7 +318,9 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
                 callbacks: {
                     title: (items: any) => {
                         const idx = items[0].dataIndex;
-                        return `K${idx + 1}: ${data?.stats[idx]?.name || ''}`;
+                        // full_name, ne name: `name` je useknuté na 20 znaků, takže dvojice
+                        // kritérií lišících se jen jménem osoby vykreslila identický popisek.
+                        return `K${idx + 1}: ${data?.stats[idx]?.full_name || ''}`;
                     },
                     label: (item: any) => `Splnilo: ${item.raw} %`
                 }
@@ -369,6 +381,32 @@ export function TabAnalytics({ scenarioId, className, scenarioName, cachedData, 
                     </button>
                 </div>
             </div>
+
+            {/* Rozpor mezi uloženými výsledky a aktuálními kritérii (ADR-026).
+                Dřív se takové kritérium tiše zobrazilo jako 0% úspěšnost. */}
+            {data?.criteria_mismatch && (
+                <div className="alert alert--warning" style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    <Icon icon={faTriangleExclamation} />
+                    <div>
+                        <strong>Kritéria byla po vyhodnocení upravena — statistika nemusí sedět.</strong>
+                        {data.criteria_mismatch.unmatched_criteria.length > 0 && (
+                            <p style={{ margin: '6px 0 0', fontSize: '0.85rem' }}>
+                                Tato kritéria nemají u žádného studenta výsledek, takže se zobrazují jako 0 %:{' '}
+                                <strong>{data.criteria_mismatch.unmatched_criteria.join(', ')}</strong>
+                            </p>
+                        )}
+                        {data.criteria_mismatch.orphan_results.length > 0 && (
+                            <p style={{ margin: '6px 0 0', fontSize: '0.85rem' }}>
+                                Naopak tyto výsledky neodpovídají žádnému aktuálnímu kritériu a do statistiky se nezapočítaly:{' '}
+                                <strong>{data.criteria_mismatch.orphan_results.join(', ')}</strong>
+                            </p>
+                        )}
+                        <p style={{ margin: '6px 0 0', fontSize: '0.85rem', opacity: 0.85 }}>
+                            Pro věrnou statistiku vraťte původní znění kritérií, nebo úřední záznamy vyhodnoťte znovu.
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {loading ? (
                 <div className="card" style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--color-primary)' }}>

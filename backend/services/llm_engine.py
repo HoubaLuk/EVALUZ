@@ -568,7 +568,8 @@ async def _evaluate_chunk(
     system_prompt: str, platform: str, enable_thinking: bool,
     context_window: int, max_tokens: int, top_p: float,
     presence_penalty: float, frequency_penalty: float,
-    model_name: str, prefix: str, chunk_idx: int
+    model_name: str, prefix: str, chunk_idx: int,
+    temperature: float = 0.1
 ) -> dict:
     """Evaluates one chunk of criteria. Returns partial dict with 'identita' and 'vysledky'."""
     # Adaptivní max_tokens: 500 tokenů/kritérium + 300 overhead (identita + JSON struktura).
@@ -624,7 +625,7 @@ Požadovaná struktura JSON odpovědi:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.1,
+        "temperature": temperature,
         "top_p": top_p,
         "presence_penalty": presence_penalty,
         "frequency_penalty": frequency_penalty,
@@ -825,10 +826,15 @@ def _merge_chunk_results(chunk_results: list[dict]) -> dict:
     return merged
 
 
-async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None, expected_criteria_names: list[str] = None, expected_criteria_bodies: dict[str, int] | None = None) -> dict:
+async def evaluate_report(report_text: str, criteria_markdown: str, system_prompt: str, db: Session, scenario_id: str = None, student_log_prefix: str = "", lecturer_id: int = None, expected_criteria_names: list[str] = None, expected_criteria_bodies: dict[str, int] | None = None, temperature: float = 0.1) -> dict:
     """
     HLAVNÍ FUNKCE PRO EVALUACI (Fáze 2).
     Bere text studenta a zadaná kritéria, posílá je modelu a vrací vyčištěný JSON výsledek.
+
+    `temperature` pochází z Administrace (SystemPrompt „prompt2"), viz ADR-027. Dřív byla
+    natvrdo 0.1 na obou volacích místech, takže se nastavení z UI uložilo, zobrazilo zpět
+    — a při vyhodnocování ignorovalo. Výchozí hodnota odpovídá té dřívější konstantě,
+    takže při chybějícím promptu v DB zůstává chování beze změny.
     """
     
     # 1. NAČTENÍ NASTAVENÍ: Vše se bere z databáze (z Administrace), aby uživatel mohl měnit modely za běhu.
@@ -922,6 +928,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 model_name=model_name,
                 prefix=prefix,
                 chunk_idx=i + 1,
+                temperature=temperature,
             )
             for i, chunk in enumerate(chunks)
         ]
@@ -986,7 +993,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 {"role": "system", "content": strict_system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": 0.1, # Low temperature for analytical consistency
+            "temperature": temperature,  # Z Administrace (prompt2), viz ADR-027
             "top_p": top_p,
             "presence_penalty": presence_penalty,
             "frequency_penalty": frequency_penalty,

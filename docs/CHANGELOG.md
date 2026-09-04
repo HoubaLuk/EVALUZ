@@ -2,6 +2,41 @@
 
 ---
 
+## [v3.15.0] — 2026-09-04 — Auditní stopa lektorského zásahu a determinismus statistiky
+
+### Problém
+
+Lektor nahlásil, že tatáž sada ÚZ vykázala na dvou strojích v kartě Analýza třídy různou procentuální úspěšnost u jednotlivých kritérií. Podrobná kontrola ukázala, že model u jednoho kritéria skutečně rozhodl v obou bězích jinak — statistika tedy počítala správně a nález sám o sobě chybou nebyl. Čtení kódu při té příležitosti ale odhalilo pět nezávislých vad, které tenhle incident nezpůsobily, a jednu z nich přímo v mechanismu manuální opravy lektorem, tedy v pojistce, na které stojí celý Man-in-the-Loop. Společné mají to, že tiše ztrácejí informaci nebo tiše lžou o číslech — nic z toho nevyhodí chybu ani se neobjeví v logu.
+
+### Manuální zásah lektora už neničí data a nechává stopu (ADR-025)
+
+- **`backend/api/analytics.py`** — `patch_evaluation_score` dosud přepsal celý `json_result` tím, co poslal klient. Frontend přitom staví nový objekt jen ze čtyř klíčů, takže se uložením ztratily `max_skore` a `identita`; frontend pak spadl na fallback výpočet maxima, chybný u kritérií za víc než 1 bod (vada odstraněná v v3.9.10, sem se vracela zadními vrátky). Nově se úprava **slučuje** a serverem vlastněné klíče se berou z uložené verze.
+- **`backend/api/analytics.py`** — `celkove_skore` **přepočítává server** ze samotných verdiktů; klientem poslaná hodnota se ignoruje. Skóre je odvozená veličina, ne vstup.
+- **`backend/api/analytics.py`, `backend/models/db_models.py`, `backend/core/database.py`** — nové sloupce `ai_original_json`, `modified_at`, `modified_by`. Původní hodnocení AI se uchová při **první** úpravě a další úpravy ho nepřepíšou. Změněná kritéria dostanou příznak `_lecturer_modified`. Migrace přes zavedený idempotentní mechanismus v `run_migrations()` (Postgres i SQLite), bez unique constraintů a bez mazání dat.
+
+### Analytika hlásí rozpor místo tichého 0 % (ADR-026)
+
+- **`backend/services/analytics.py`** — statistika se počítá proti **aktuálním** kritériím, ale výsledky studentů jsou zamrzlé z doby vyhodnocení. Po přejmenování kritéria párování selhalo, `passes` nenaskočil, jmenovatel zůstal — a kritérium se zobrazilo jako 0% úspěšnost, k nerozeznání od legitimní nuly. Nový čítač `seen` obojí odliší a odpověď nese `criteria_mismatch` se dvěma seznamy: kritéria bez jediného výsledku a výsledky bez kritéria.
+- **`src/components/TabAnalytics.tsx`** — varovný banner vypisuje obě strany rozporu jmenovitě. Výpočet **neblokuje**. Drobné rozšíření názvu zachytí stávající částečná shoda a varování se pro ně záměrně nespustí, aby si na něj lektor nezvykl.
+
+### Deterministické pořadí kritérií a zapojení teploty fáze 2 (ADR-027)
+
+- **`backend/services/analytics.py`** — v celém souboru dosud nebyl `order_by` ani jednou. `db_criteria` se načítalo bez `ORDER BY`, přičemž frontend popisuje sloupce v grafu **podle pozice** (`K${i + 1}`). PostgreSQL pořadí bez `ORDER BY` negarantuje a `save_criteria` dělá delete+insert — „K7" tak mohlo na dvou strojích označovat jiné kritérium. Doplněno `ORDER BY Criterion.id` (= pořadí z markdownu, které lektor vidí v editoru) i `ORDER BY id` u obou `.first()` dotazů.
+- **`src/components/TabAnalytics.tsx`** — tooltip ukazuje `full_name` místo názvu useknutého na 20 znaků, který u dvojic kritérií lišících se jen jménem osoby vykresloval identický popisek.
+- **`backend/services/llm_engine.py`, `backend/api/evaluate.py`** — teplota pro evaluaci ÚZ se v Administraci uložila, zobrazila zpět, a při vyhodnocování **ignorovala** (natvrdo `0.1` na obou volacích místech). Zbylé tři fáze ji z DB čtou správně. `evaluate_report` a `_evaluate_chunk` nově přebírají `temperature` z `prompt2`, protaženou frontou v `task_data`. **Hodnota se nemění** — 0,1 v seederu i jako fallback, takže chování zůstává beze změny; volba hodnoty je nadále na lektorovi v UI.
+
+### Testy
+
+- **`backend/tests/test_manual_override.py`** (nový, 8 testů) — zachování `max_skore`/`identita`, uložení a neměnnost `ai_original_json`, záznam kdo/kdy, příznak u změněného kritéria (a jeho absence u nezměněného), serverový přepočet skóre.
+- **`backend/tests/test_analytics_determinism.py`** (nový, 6 testů) — skutečné přejmenování se ohlásí, kosmetická úprava ne, osiřelý výsledek se ohlásí, legitimní 0 % nevaruje, pořadí `stats` odpovídá sadě a je stabilní přes opakovaná volání.
+- Celkem 114 testů.
+
+### Otevřeno
+
+Reprodukovatelnost vyhodnocení zůstává vědomým rozhodnutím, ne chybou: po zapojení ADR-027 lze teplotu nastavit v Administraci, ale `temperature=0` (greedy decoding) rozptyl jen sníží — continuous batching ve vLLM mění pořadí sčítání v pohyblivé řádové čárce, takže bitově shodné výsledky nezaručí ani ono.
+
+---
+
 ## [v3.14.1] — 2026-09-01 — Viditelný pád nahrávání místo tiché ztráty
 
 ### Problém

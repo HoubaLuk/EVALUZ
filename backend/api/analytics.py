@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
+import datetime
 import json
 
 from core.database import get_db
 from models.db_models import StudentEvaluation, Lecturer, ClassAnalysis
 from models.evaluation import EvaluationResponse
-from services.analytics import generate_class_summary
 from services.analytics import generate_class_summary
 from utils.sorting import sort_evaluations_by_surname
 from api.auth import get_current_lecturer, apply_data_isolation
@@ -15,6 +15,74 @@ from pydantic import BaseModel
 
 class EvaluationPatchRequest(BaseModel):
     json_result: dict
+
+
+# Klíče, které si drží server a klient je nesmí přepsat ani zahodit (ADR-025).
+# Frontend posílá jen podmnožinu JSONu (jmeno_studenta, celkove_skore, zpetna_vazba,
+# vysledky), takže prostý přepis mazal `max_skore` a `identita`.
+_SERVER_OWNED_KEYS = ("max_skore", "identita")
+
+
+def _merge_evaluation_json(stored: dict, incoming: dict) -> dict:
+    """Sloučí lektorovu úpravu do uloženého hodnocení místo jeho nahrazení.
+
+    Klient posílá jen ta pole, která umí editovat. Původní implementace dělala
+    `json_result = request.json_result`, čímž se nenávratně ztratilo všechno ostatní —
+    zejména `max_skore` (autoritativní maximum z DB, v3.9.10) a `identita`. Frontend pak
+    spadl na fallback výpočet maxima, který je u kritérií za víc než 1 bod chybný.
+    """
+    merged = dict(stored or {})
+    merged.update(incoming or {})
+    # Serverem vlastněné klíče se vrací z uložené verze, i kdyby je klient poslal.
+    for key in _SERVER_OWNED_KEYS:
+        if key in (stored or {}):
+            merged[key] = stored[key]
+    return merged
+
+
+def _mark_lecturer_edits(stored_vysledky: list, incoming_vysledky: list) -> list:
+    """Označí kritéria, do kterých zasáhl lektor, příznakem `_lecturer_modified`.
+
+    Diff se dělá na serveru podle názvu kritéria, takže frontend nemusí nic posílat navíc.
+    Jednou nastavený příznak se nemaže — drží informaci, že do položky sáhl člověk, i když
+    ji lektor později vrátí na původní hodnotu.
+    """
+    original_by_name = {
+        v.get("nazev"): v for v in (stored_vysledky or []) if isinstance(v, dict)
+    }
+    result = []
+    for item in (incoming_vysledky or []):
+        if not isinstance(item, dict):
+            result.append(item)
+            continue
+        item = dict(item)
+        before = original_by_name.get(item.get("nazev"))
+        if before is not None:
+            changed = any(
+                before.get(field) != item.get(field)
+                for field in ("splneno", "body", "oduvodneni")
+            )
+            if changed or before.get("_lecturer_modified"):
+                item["_lecturer_modified"] = True
+        result.append(item)
+    return result
+
+
+def _recalculate_score(vysledky: list) -> int:
+    """Přepočítá celkové skóre ze splněných kritérií — server je autorita, ne klient.
+
+    Stejná logika jako v `_validate_and_fix_vysledky` (llm_engine.py): sčítají se body
+    pouze u splněných kritérií. Bez toho by klient mohl uložit skóre, které neodpovídá
+    jednotlivým verdiktům, a analytika by pak počítala z nekonzistentních dat.
+    """
+    total = 0
+    for v in (vysledky or []):
+        if not isinstance(v, dict) or not v.get("splneno"):
+            continue
+        body = v.get("body")
+        if isinstance(body, (int, float)):
+            total += body
+    return total
 
 class NamePatchRequest(BaseModel):
     name: str
@@ -135,10 +203,23 @@ def patch_evaluation_score(evaluation_id: int, request: EvaluationPatchRequest, 
     
     if not eval_record:
         raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
-        
-    # Uložení nového JSON z frontendu (JSONType přijímá dict přímo)
-    eval_record.json_result = request.json_result
-    
+
+    stored = eval_record.json_result if isinstance(eval_record.json_result, dict) else {}
+
+    # Auditní stopa (ADR-025): původní hodnocení AI se uchová při PRVNÍ úpravě.
+    # Další úpravy ho nepřepíšou — drží se verze, kterou skutečně vyprodukoval model.
+    if eval_record.ai_original_json is None:
+        eval_record.ai_original_json = stored
+
+    merged = _merge_evaluation_json(stored, request.json_result)
+    merged["vysledky"] = _mark_lecturer_edits(stored.get("vysledky"), merged.get("vysledky"))
+    # Skóre je odvozená hodnota — počítá ho server ze samotných verdiktů, ne klient.
+    merged["celkove_skore"] = _recalculate_score(merged.get("vysledky"))
+
+    eval_record.json_result = merged
+    eval_record.modified_at = datetime.datetime.utcnow()
+    eval_record.modified_by = current_user.id
+
     # Invalidation of cache (only for the current lecturer)
     if eval_record.scenario_name:
         db.query(ClassAnalysis).filter(

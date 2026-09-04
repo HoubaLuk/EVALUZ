@@ -1,17 +1,18 @@
 # Projektový Kontext — EVALUZ
-**Verze: 3.14.1 | Poslední aktualizace: 2026-09-01**
+**Verze: 3.15.0 | Poslední aktualizace: 2026-09-04**
 
 ## Aktuální Stav
 
-Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 100 testů pass.
+Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 114 testů pass.
 
 Poslední vývojová linie řešila **provozní robustnost dávkového vyhodnocování** odhalenou pilotem:
 - **v3.11.0** — náprava RBAC izolace dat (`DataScope`, fail-closed `PERSONAL`, ADR-014).
 - **v3.12.0** — doručování WS zpráv přes Postgres LISTEN/NOTIFY napříč uvicorn procesy (ADR-015), LLM concurrency dělená počtem workerů (ADR-016).
 - **v3.13.0** — z dávky N ÚZ se vyhodnocoval jen první: `broadcast()` sahal na jedno sdílené asyncpg spojení ze všech úloh naráz (ADR-017). Doplněn strop kontextového okna čtený ze serveru (ADR-018) a deterministické přiřazení kritérií (ADR-019).
 - **v3.13.1** — zpětná vazba se tiše ztrácela vlivem slabých referencí u `asyncio.create_task()` (ADR-020); část lektorů neviděla v UI vlastní výsledky, protože frontend měl natvrdo `class/1` (ADR-021).
-- **v3.14.1** — Soubor nad limit velikosti (10 MB) se ve fast-scanu nově hlásí jmenovitě místo tichého zmizení ze seznamu; kontrola velikosti běží ve frontendu před odesláním, `Failed to fetch` se překládá do srozumitelné hlášky (ADR-024). Skutečná síťová příčina hlášeného „Failed to fetch" u jedné lektorky zůstává neprokázaná.
 - **v3.14.0** — ÚZ čekající na volný slot souběžnosti je nově vidět (`EVAL_QUEUED`, stav „Ve frontě") a jde zrušit (ADR-022); třídní analytika se nespustí, dokud není celá sada vyhodnocená a schválená (ADR-023).
+- **v3.14.1** — Soubor nad limit velikosti (10 MB) se ve fast-scanu nově hlásí jmenovitě místo tichého zmizení ze seznamu; kontrola velikosti běží ve frontendu před odesláním, `Failed to fetch` se překládá do srozumitelné hlášky (ADR-024). Skutečná síťová příčina hlášeného „Failed to fetch" u jedné lektorky zůstává neprokázaná.
+- **v3.15.0** — Manuální zásah lektora dřív přepsal celé hodnocení tím, co poslal klient: ztratily se `max_skore` a `identita` a po člověku nezůstala stopa. Nově se slučuje, skóre přepočítává server a původní hodnocení AI se uchová v `ai_original_json` (ADR-025). Analytika hlásí rozpor mezi uloženými výsledky a upravenými kritérii místo tichého 0 % (ADR-026) a má deterministické pořadí kritérií; teplota fáze 2 se konečně čte z Administrace (ADR-027).
 
 ## 1. Vize a Cíl
 
@@ -26,7 +27,7 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 - **Databáze:** SQLite (dev/test) / PostgreSQL 17 (produkce) — Alembic migrace + `run_migrations()` kobercový nálet.
 - **LLM:** vLLM (primární), OpenRouter, Ollama, LM Studio — OpenAI-compatible API. Skutečné kontextové okno se čte ze serveru (`GET /v1/models` → `max_model_len`) a slouží jako strop nad nastavením v Administraci (ADR-018).
 - **Exporty:** Excel (openpyxl) a PDF (fpdf2).
-- **Testy:** pytest + pytest-asyncio + respx. 100 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
+- **Testy:** pytest + pytest-asyncio + respx. 114 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
 - **Produkce:** Docker Compose (nginx + backend + PostgreSQL), non-root user `evaluz`, nginx reverse proxy s CSP hlavičkami, `SecurityHeadersMiddleware`, slowapi rate limiting.
 
 ## 3. Implementované Moduly

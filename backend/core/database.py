@@ -151,6 +151,16 @@ def run_migrations(engine):
                         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='is_approved') THEN
                             ALTER TABLE student_evaluations ADD COLUMN is_approved BOOLEAN DEFAULT FALSE;
                         END IF;
+                        -- Auditní stopa lektorského zásahu (ADR-025)
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='ai_original_json') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN ai_original_json JSONB;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='modified_at') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN modified_at TIMESTAMP;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_evaluations' AND column_name='modified_by') THEN
+                            ALTER TABLE student_evaluations ADD COLUMN modified_by INTEGER REFERENCES lecturers(id) ON DELETE SET NULL;
+                        END IF;
                     END IF;
                 END $$;
             """))
@@ -166,6 +176,10 @@ def run_migrations(engine):
                 ("student_identity", "TEXT"),
                 ("lecturer_id", "INTEGER REFERENCES lecturers(id) ON DELETE CASCADE"),
                 ("is_approved", "BOOLEAN DEFAULT FALSE"),
+                # Auditní stopa lektorského zásahu (ADR-025)
+                ("ai_original_json", "TEXT"),
+                ("modified_at", "TIMESTAMP"),
+                ("modified_by", "INTEGER REFERENCES lecturers(id) ON DELETE SET NULL"),
             ]
             for c_name, c_type in cols:
                 try:

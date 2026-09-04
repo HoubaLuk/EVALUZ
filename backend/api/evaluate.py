@@ -300,6 +300,13 @@ async def evaluate_batch(
     # 0. Fetch current Super-Prompt and    # Fetch phase 2 prompt
     prompt_record = db.query(SystemPrompt).filter(SystemPrompt.phase_name == "prompt2").first()
     db_system_prompt_str = prompt_record.content if prompt_record else "Vyhodnoť záznam podle zadaných kritérií. Vrať striktní JSON."
+    # Teplota z Administrace (ADR-027). Dřív se načetl jen `.content` a teplota zůstala
+    # natvrdo 0.1 v llm_engine — nastavení z UI se tedy uložilo, zobrazilo, a ignorovalo.
+    evaluation_temperature = (
+        prompt_record.temperature
+        if prompt_record and prompt_record.temperature is not None
+        else 0.1
+    )
     
     # Přidání formátovacích pravidel pro textové výstupy (zpetna_vazba a oduvodneni) kvůli PDF kompatibilitě
     system_prompt_str = f"{db_system_prompt_str}\n\nDŮLEŽITÉ POKYNY K FORMÁTOVÁNÍ TEXTOVÝCH POLÍ:\n1. NIKDY nepoužívej Markdown tabulky (v PDF se rozpadají a přetékají okraje).\n2. Strukturu tvoř výhradně pomocí nadpisů třetí úrovně (### Nadpis), tučného písma (**text**) a standardních odrážek (- text)."
@@ -398,6 +405,8 @@ async def evaluate_batch(
     async def process_single_file_bg(task_data: dict):
         file_data = task_data['file_data']
         system_prompt = task_data['system_prompt']
+        # .get() kvůli úkolům zařazeným před nasazením ADR-027, které klíč ještě nemají.
+        task_temperature = task_data.get('temperature', 0.1)
         criteria_markdown = task_data['criteria_markdown']
         current_user_id = task_data['lecturer_id']
         scen_id = task_data['scenario_id']
@@ -436,6 +445,7 @@ async def evaluate_batch(
                 report_text=extracted_text,
                 criteria_markdown=criteria_markdown,
                 system_prompt=system_prompt,
+                temperature=task_temperature,
                 db=db_bg,
                 scenario_id=scen_id,
                 student_log_prefix=student_name,
@@ -557,6 +567,7 @@ async def evaluate_batch(
             "handler": process_single_file_bg,
             "file_data": file_data,
             "system_prompt": system_prompt_str,
+            "temperature": evaluation_temperature,
             "criteria_markdown": criteria_str,
             "scenario_id": scenario_id,
             "scenario_display_name": scenario_display_name,

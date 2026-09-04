@@ -63,7 +63,9 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             ClassAnalysis.scenario_id == scenario_id,
             ClassAnalysis.class_id == class_id
         )
-        cached_analysis = apply_data_isolation(q, ClassAnalysis, current_user, db).first()
+        cached_analysis = apply_data_isolation(q, ClassAnalysis, current_user, db).order_by(
+            ClassAnalysis.id
+        ).first()
         if cached_analysis and cached_analysis.content_json:
             return cached_analysis.content_json
         # Žádná cache a force=False → vrátíme prázdný stav, NE generování.
@@ -84,13 +86,22 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             evaluations.append(e)
     
     # Získání definic kritérií z DB VÝHRADNĚ pro aktuálního uživatele dle role.
+    # ORDER BY je nutné (ADR-027): bez něj PostgreSQL pořadí řádků negarantuje a `.first()`
+    # by při více řádcích vybral libovolný z nich.
     q3 = db.query(EvaluationCriteria).filter(EvaluationCriteria.scenario_name == scenario_id)
-    criteria_record = apply_data_isolation(q3, EvaluationCriteria, current_user, db).first()
-    
+    criteria_record = apply_data_isolation(q3, EvaluationCriteria, current_user, db).order_by(
+        EvaluationCriteria.id
+    ).first()
+
     db_criteria = []
     if criteria_record:
         from models.db_models import Criterion
-        db_criteria = db.query(Criterion).filter(Criterion.evaluation_criteria_id == criteria_record.id).all()
+        # Řazení podle id = pořadí vložení = pořadí kritérií v markdownu, které lektor vidí
+        # v editoru. Bez něj se pořadí po delete+insert v `save_criteria` mění a popisky
+        # K1…K25 v grafu (přidělované podle pozice) ukazují pokaždé na jiné kritérium.
+        db_criteria = db.query(Criterion).filter(
+            Criterion.evaluation_criteria_id == criteria_record.id
+        ).order_by(Criterion.id).all()
 
     # Fallback: Pokud v DB definice kritérií chybí, pokusíme se je odvodit z již hotových výsledků.
     if not db_criteria and evaluations:
@@ -129,7 +140,8 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             "average_score": 0,
             "max_score": max_possible_sc,
             "needs_help": [],
-            "criterion_failures": {}
+            "criterion_failures": {},
+            "criteria_mismatch": None
         }
         
     total_students = len(evaluations)
@@ -141,10 +153,16 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         criteria_totals[c.nazev] = {
             "short_name": c.nazev[:20] + "..." if len(c.nazev) > 20 else c.nazev,
             "passes": 0,
+            # `seen` odliší „0 %, protože všichni selhali" od „0 %, protože se kritérium
+            # s ničím nespárovalo" (ADR-026). Bez něj obojí vypadá v UI identicky.
+            "seen": 0,
             "total_pts": 0,
             "max_pts": c.body
         }
         criterion_failures[c.nazev] = []
+
+    # Názvy ze uložených výsledků, které nesedly na žádné aktuální kritérium.
+    orphan_result_names = set()
         
     student_scores = []
     
@@ -169,10 +187,16 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
                             matched_key = c_name
                             break
                             
+                if not matched_key:
+                    # Uložený výsledek neodpovídá žádnému aktuálnímu kritériu — typicky proto,
+                    # že se kritérium po vyhodnocení přejmenovalo nebo smazalo.
+                    orphan_result_names.add(name)
+
                 if matched_key:
+                    criteria_totals[matched_key]["seen"] += 1
                     is_met = criteria.get("splneno", False)
                     bod_award = criteria.get("body", 0)
-                    
+
                     if is_met:
                         criteria_totals[matched_key]["passes"] += 1
                     else:
@@ -204,6 +228,24 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
             "error_rate": 100 - success_rate
         })
         
+    # Rozpor mezi uloženými výsledky a aktuální sadou kritérií (ADR-026).
+    # Statistika se počítá proti AKTUÁLNÍM kritériím, ale výsledky studentů jsou zamrzlé
+    # z doby vyhodnocení. Když se kritérium mezitím přejmenuje, párování selže: `passes`
+    # nenaskočí, jmenovatel zůstane a kritérium se tváří jako 0% úspěšnost. Dřív to bylo
+    # v UI nerozeznatelné od legitimní nuly.
+    unmatched_criteria = [name for name, counts in criteria_totals.items() if counts["seen"] == 0]
+    criteria_mismatch = None
+    if unmatched_criteria or orphan_result_names:
+        criteria_mismatch = {
+            "unmatched_criteria": sorted(unmatched_criteria),
+            "orphan_results": sorted(orphan_result_names),
+        }
+        print(
+            f">>> [ANALYTICS] ⚠ Rozpor kritérií: {len(unmatched_criteria)} kritérií bez jediného "
+            f"výsledku, {len(orphan_result_names)} výsledků bez kritéria. "
+            f"Pravděpodobně byla kritéria po vyhodnocení upravena."
+        )
+
     # Seřazení největších chyb (kritéria, kde třída nejvíc "hoří").
     sorted_errors = sorted(error_rates, key=lambda x: x["error_rate"], reverse=True)
     top_errors = [e["name"] for e in sorted_errors[:3] if e["error_rate"] > 0]
@@ -310,15 +352,18 @@ async def generate_class_summary(class_id: int, scenario_id: str, force: bool, d
         "average_score": average_score,
         "max_score": max_possible_sc,
         "needs_help": needs_help,
-        "criterion_failures": criterion_failures
+        "criterion_failures": criterion_failures,
+        "criteria_mismatch": criteria_mismatch
     }
- 
+
     import datetime
     q_cache = db.query(ClassAnalysis).filter(
         ClassAnalysis.scenario_id == scenario_id,
         ClassAnalysis.class_id == class_id
     )
-    cached_analysis = apply_data_isolation(q_cache, ClassAnalysis, current_user, db).first()
+    cached_analysis = apply_data_isolation(q_cache, ClassAnalysis, current_user, db).order_by(
+        ClassAnalysis.id
+    ).first()
     
     if not cached_analysis:
         cached_analysis = ClassAnalysis(

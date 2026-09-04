@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.14.1  
+**Verze:** 3.15.0  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -529,6 +529,10 @@ backend/tests/
 ├── test_criteria_matching.py    # parser kritérií + přiřazení výsledků LLM (14 testů, ADR-019)
 ├── test_class_scoping.py        # rozsah třídy, kontrakt classes/ensure (6 testů, ADR-021)
 ├── test_analytics_gate.py       # brána analytiky — úplnost a schválení (4 testy, ADR-023)
+├── test_fast_scan_limits.py     # limit velikosti při fast-scanu, pole `skipped` (3 testy, ADR-024)
+├── test_manual_override.py      # auditní stopa lektorského zásahu — slučování, ai_original_json,
+│                                #   kdo/kdy, serverový přepočet skóre (8 testů, ADR-025)
+├── test_analytics_determinism.py # rozpor kritérií a stabilní pořadí `stats` (6 testů, ADR-026, ADR-027)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
@@ -537,7 +541,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **100 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **114 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -978,6 +982,56 @@ Vedle toho `e.json_result.get("vysledky")` předpokládá `dict`; u staršího z
 **Rozhodnutí:** `fast_scan_batch` nově sbírá jména nezpracovaných souborů (limit velikosti i výjimka při čtení) do pole `skipped` v odpovědi; `print()` nahrazen `logger.warning`/`logger.error(exc_info=True)`. Frontend při neprázdném `skipped` odstraní optimisticky vykreslené řádky těch studentů a vypíše jmenovitý seznam s vysvětlením. Kontrola velikosti (`MAX_FILE_BYTES`, `MAX_UPLOAD_BATCH_BYTES` v `src/utils/api.ts`) navíc běží **před** odesláním, takže běžný případ (jeden velký soubor) nikdy nedorazí až k nginx limitu; `describeFetchError()` převádí syrové `TypeError: Failed to fetch` na akční českou větu pro případy, kdy request přesto padne mimo aplikaci.
 
 **Kompromis:** Toto vědomě neopravuje síťovou vrstvu — pokud je příčina u Ivony Palové skutečně mimo aplikaci (firewall, proxy), tahle změna to sama neodstraní, jen z toho udělá čitelnou chybovou hlášku místo tiché nebo prázdné. Rozlišení mezi „aplikace zahodila soubor" a „request se nikam nedostal" je teď v UI viditelné a jde podle něj postupovat dál.
+
+---
+
+### ADR-025: Auditní stopa lektorského zásahu (v3.15.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** `patch_evaluation_score` provedl `eval_record.json_result = request.json_result`, tedy úplný přepis tím, co poslal klient. Frontend přitom v `handleSaveChanges` staví nový objekt jen ze čtyř klíčů (`jmeno_studenta`, `celkove_skore`, `zpetna_vazba`, `vysledky`), takže se uložením nenávratně ztratily `max_skore` a `identita`. Frontend pak spadl na fallback `evalRecord.max_skore ?? (...)`, který u kritérií za víc než 1 bod počítá maximum chybně — přesně ta vada, kterou v3.9.10 odstraňovala zavedením autoritativního `max_skore`. Dnes je to maskované tím, že sada MS2 má 1 bod na kritérium.
+
+Vedle toho po zásahu člověka nezůstala žádná stopa: původní hodnocení AI bylo pryč, `StudentEvaluation` nemá `modified_at` ani `modified_by`, a `is_approved` nerozliší „schvaluji, jak to AI vygenerovala" od „schvaluji po svých opravách". Nešlo tedy ani zpětně změřit, jak často se model s lektory rozchází a u kterých kritérií — což je právě ta data, kterou by bylo potřeba k precizaci kritérií i k metodické obhajobě nástroje.
+
+**Možnosti:**
+- A: Opravit tvar payloadu ve frontendu, ať posílá celý objekt — řeší ztrátu dat, ale ne chybějící stopu, a příště se to rozejde znovu.
+- **B (zvoleno):** Server je jediné místo pravdy — slučuje, přepočítává a zaznamenává. Kontrakt s frontendem se nemění.
+
+**Rozhodnutí:** `patch_evaluation_score` slučuje příchozí úpravu do uloženého hodnocení (`_merge_evaluation_json`) a klíče `max_skore` a `identita` vrací vždy z uložené verze, i kdyby je klient poslal. `celkove_skore` se přepočítá ze `vysledky` na serveru (`_recalculate_score`) — skóre je odvozená hodnota, ne vstup od klienta. Při **první** úpravě se původní `json_result` uloží do nového sloupce `ai_original_json`; další úpravy ho nepřepíšou, takže stopa drží verzi od AI, ne předchozí verzi od lektora. Server si sám diffne kritéria podle názvu a u změněných nastaví `_lecturer_modified: true` (`_mark_lecturer_edits`). Doplněny sloupce `ai_original_json`, `modified_at`, `modified_by` přes zavedený idempotentní mechanismus v `run_migrations()`.
+
+**Kompromis:** JSON záznamu se zhruba zdvojnásobí, protože si nese i původní verzi. U dokumentů této velikosti je to zanedbatelné proti hodnotě dohledatelnosti. Příznak `_lecturer_modified` se jednou nastavený nemaže — drží informaci, že do položky sáhl člověk, i když ji lektor později vrátí na původní hodnotu; to je záměr, ne opomenutí.
+
+---
+
+### ADR-026: Detekce rozporu mezi uloženými výsledky a aktuálními kritérii (v3.15.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Analytika načítá kritéria z **aktuálního** stavu DB, ale páruje je proti výsledkům zamrzlým v `json_result` z doby vyhodnocení; `StudentEvaluation` si kopii kritérií neukládá. Když se kritérium po vyhodnocení přejmenuje, přesná shoda selže, `passes` nikdy nenaskočí, jmenovatel `total_students` zůstane — a kritérium se zobrazí jako **0 % úspěšnost**, k nerozeznání od legitimní nuly. Stejně tiše se chová přidání kritéria (0 % u všech) i smazání (výsledky se zahodí). `save_criteria` navíc při každém uložení kritéria maže a vkládá znovu, takže i „uložil jsem to beze změny" je z pohledu DB výměna.
+
+**Možnosti:**
+- A: Snímek kritérií u každého vyhodnocení — správnější dlouhodobě, ale vyžaduje rozhodnutí, co dělat, když byli studenti hodnoceni proti různým verzím sady, a nese změnu schématu.
+- **B (zvoleno):** Rozpor detekovat a hlásit jmenovitě, výpočet neblokovat.
+
+**Rozhodnutí:** `criteria_totals` dostalo čítač `seen`, který se inkrementuje při každém spárování bez ohledu na splněno/nesplněno — tím se odliší „0 %, protože všichni selhali" od „0 %, protože se to s ničím nespárovalo". Po agregaci se sestaví `unmatched_criteria` (kritéria bez jediného výsledku) a `orphan_results` (názvy ze `vysledky`, které nesedly na žádné kritérium); je-li kterákoli množina neprázdná, odpověď nese `criteria_mismatch` a `TabAnalytics.tsx` ho zobrazí jmenovitě jako varování.
+
+**Kompromis:** Analytika se **neblokuje** — jen přestane tvrdit, že číslo znamená něco, co neznamená. Drobné rozšíření názvu (např. doplnění paragrafu) zachytí stávající částečná shoda v matcheru a varování se pro ně záměrně nespustí; kdyby se hlásila i kosmetika, lektor by si na varování zvykl a přestal ho číst.
+
+---
+
+### ADR-027: Deterministické pořadí kritérií a zapojení teploty pro fázi 2 (v3.15.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Dva nezávislé nálezy se společným rysem — nastavení nebo pořadí, které se tváří určitě, ale určité není.
+
+V `analytics.py` nebyl `order_by` ani jednou. `db_criteria` se načítalo bez `ORDER BY`, z toho vznikalo pořadí klíčů v `criteria_totals` a následně pořadí pole `stats`. Frontend přitom popisuje sloupce v grafu **podle pozice** (`K${i + 1}`), ne podle identity kritéria. PostgreSQL bez `ORDER BY` pořadí negarantuje a `save_criteria` dělá delete+insert, po kterém se fyzické pořadí běžně mění — „K7" tak mohlo na dvou strojích označovat jiné kritérium. Ze stejného důvodu byl nedeterministický i výběr `.first()` u kritérií a u cache analýzy, protože obě tabulky jsou bez unique constraintu.
+
+Souběžně: Administrace ukládá i vrací `temperature` pro všechny čtyři fáze a UI ji pro `prompt2` zobrazuje, ale vyhodnocování si z `prompt2` bralo jen `.content` a `evaluate_report` mělo teplotu natvrdo `0.1` na obou volacích místech. Nastavení se tedy uložilo, zobrazilo zpět — a ignorovalo. Nikdo si toho nevšiml, protože uložená hodnota (0,1) byla shodou okolností totožná s tou natvrdo zadanou. Ostatní tři fáze teplotu z DB čtou správně.
+
+**Rozhodnutí:** `ORDER BY Criterion.id` u načtení kritérií — vkládají se v pořadí z markdownu, takže číslování K1…KN nově odpovídá pořadí, které lektor vidí v editoru. `ORDER BY id` doplněn i u obou `.first()` dotazů. Tooltip grafu ukazuje `full_name` místo `name` useknutého na 20 znaků, které u dvojic kritérií lišících se jen jménem osoby vykreslovalo identický popisek. `evaluate_report` a `_evaluate_chunk` dostaly parametr `temperature`, který `evaluate.py` naplní z `prompt2` a protáhne frontou v `task_data`.
+
+**Kompromis:** Determinismus se řeší řazením, ne unique constraintem — ten by na produkční DB s případnými existujícími duplicitami selhal a jeho zavedení by znamenalo mazat data. Hodnota teploty se nemění (0,1 v seederu i jako fallback), takže zapojení je z hlediska chování nulová změna; volba hodnoty zůstává na lektorovi v UI, jak je zásadou projektu. Vědomě se nezavádí pevný `seed` — při greedy decodingu nic nedělá a continuous batching ve vLLM plnou reprodukovatelnost stejně nezaručí.
 
 ---
 

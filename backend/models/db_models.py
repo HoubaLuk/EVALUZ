@@ -65,6 +65,12 @@ class StudentEvaluation(Base):
     source_filename = Column(String) # Original filename
     created_at = Column(DateTime)
     is_approved = Column(Boolean, default=False)
+    # Auditní stopa lektorského zásahu (ADR-025). Man-in-the-Loop je pojistkou jen tehdy,
+    # když po zásahu člověka zůstane stopa — jinak nelze zpětně zjistit, co řekla AI,
+    # kdo to změnil, ani jak často se model s lektory rozchází.
+    ai_original_json = Column(JSONType)  # Původní hodnocení AI, uloží se při PRVNÍ úpravě
+    modified_at = Column(DateTime)
+    modified_by = Column(Integer, ForeignKey("lecturers.id", ondelete="SET NULL"))
 
 class AppSettings(Base):
     __tablename__ = "app_settings"
