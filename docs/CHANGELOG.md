@@ -2,6 +2,33 @@
 
 ---
 
+## [v3.15.1] — 2026-09-04 — Seeder už nepřepisuje prompty vytvořené správcem
+
+### Problém
+
+Při kontrole promptů vyšlo najevo, že `_upsert_prompt()` u existujícího řádku bezpodmínečně přepsal **obsah i teplotu** továrními hodnotami ze `seeder.py`. Spouštělo se to při startu backendu, kdykoli se konstanta `PROMPT_VERSION` v kódu lišila od hodnoty v `app_settings`. Mechanismus nerozlišoval prompt upravený správcem od nedotčeného a `system_prompts` nemá historii ani verzování — přepsaný text tedy nešlo obnovit. V UI se neobjevilo nic, jedinou stopou byl `print()` v logu.
+
+Reálná sázka: produkční `prompt2` je rozsáhlý instruktážní text s deseti očíslovanými pravidly, který vznikl mimo repozitář. Zvýšení konstanty by ho nahradilo patnáctiřádkovým výchozím zněním. Po v3.15.0 by navíc reset zasáhl i teplotu, která už ovlivňuje chování hodnocení.
+
+K přepsání zatím nedošlo — konstanta zůstala od svého zavedení na `"3.10"`. Šlo o nastraženou past, ne o incident.
+
+### Prompty se doplňují, nikdy nepřepisují (ADR-028)
+
+- **`backend/core/seeder.py`** — `_upsert_prompt()` nahrazeno `_ensure_prompt()`, které u existujícího řádku okamžitě vrací `False` a nesahá na něj. Prompty i teploty administrují správci v UI a texty vznikají mimo repozitář, takže tovární znění nemá co „vylepšovat".
+- **`backend/core/seeder.py`** — konstanta `PROMPT_VERSION` a její záznam v `app_settings` odstraněny. Nepoužívaly se nikde jinde než v této bráně; bez přepisování šlo o mrtvý kód. (Osiřelý řádek `PROMPT_VERSION` v existujících databázích je neškodný a nemaže se.)
+- **`backend/core/seeder.py`** — doplňování chybějících promptů běží nově při **každém** startu, ne jen při změně verze. Dřív se smazaný nebo nezaložený prompt sám neobnovil a příslušná fáze tiše běžela na nouzovém jednořádkovém textu z kódu.
+
+### Testy
+
+- **`backend/tests/test_seeder_prompts.py`** (nový, 8 testů) — upravený obsah i teplota přežijí opakované seedování, ochrana platí pro všechny čtyři fáze, chybějící prompt se obnoví a obnova jednoho nesmí sáhnout na ostatní. Dvojice testů míří přímo na `_ensure_prompt()`, protože opakované `seed_database()` samo o sobě starou chybu nereprodukuje — ta se spouštěla až změnou konstanty v kódu. Ověřeno dočasným vrácením původního chování: 5 z 8 testů selže.
+- Celkem 122 testů.
+
+### Dokumentace
+
+- **`docs/TECHNICAL_DOCUMENTATION.md`** — ADR-028 včetně zdůvodnění, proč nebyla zvolena varianta s příznakem „upraveno správcem": riziko zvolené varianty je malé, protože **struktura JSON odpovědi je v kódu, ne v promptu**, takže budoucí změny schématu na obsahu `prompt2` nezávisí.
+
+---
+
 ## [v3.15.0] — 2026-09-04 — Auditní stopa lektorského zásahu a determinismus statistiky
 
 ### Problém

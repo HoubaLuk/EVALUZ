@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.15.0  
+**Verze:** 3.15.1  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -572,6 +572,7 @@ backend/tests/
 ├── test_manual_override.py      # auditní stopa lektorského zásahu — slučování, ai_original_json,
 │                                #   kdo/kdy, serverový přepočet skóre (8 testů, ADR-025)
 ├── test_analytics_determinism.py # rozpor kritérií a stabilní pořadí `stats` (6 testů, ADR-026, ADR-027)
+├── test_seeder_prompts.py       # seeder nepřepisuje prompty správce (8 testů, ADR-028)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
@@ -580,7 +581,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **114 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **122 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -1071,6 +1072,26 @@ Souběžně: Administrace ukládá i vrací `temperature` pro všechny čtyři f
 **Rozhodnutí:** `ORDER BY Criterion.id` u načtení kritérií — vkládají se v pořadí z markdownu, takže číslování K1…KN nově odpovídá pořadí, které lektor vidí v editoru. `ORDER BY id` doplněn i u obou `.first()` dotazů. Tooltip grafu ukazuje `full_name` místo `name` useknutého na 20 znaků, které u dvojic kritérií lišících se jen jménem osoby vykreslovalo identický popisek. `evaluate_report` a `_evaluate_chunk` dostaly parametr `temperature`, který `evaluate.py` naplní z `prompt2` a protáhne frontou v `task_data`.
 
 **Kompromis:** Determinismus se řeší řazením, ne unique constraintem — ten by na produkční DB s případnými existujícími duplicitami selhal a jeho zavedení by znamenalo mazat data. Hodnota teploty se nemění (0,1 v seederu i jako fallback), takže zapojení je z hlediska chování nulová změna; volba hodnoty zůstává na lektorovi v UI, jak je zásadou projektu. Vědomě se nezavádí pevný `seed` — při greedy decodingu nic nedělá a continuous batching ve vLLM plnou reprodukovatelnost stejně nezaručí.
+
+---
+
+### ADR-028: Seeder nikdy nepřepisuje existující prompty (v3.15.1)
+
+**Status:** Decided & Implemented
+
+**Kontext:** `_upsert_prompt()` u existujícího řádku bezpodmínečně přepsal **obsah i teplotu** továrními hodnotami z `seeder.py`. Spouštělo se to při každém startu backendu, kdykoli se konstanta `PROMPT_VERSION` v kódu lišila od hodnoty uložené v `app_settings`. Mechanismus nerozlišoval prompt upravený správcem od nedotčeného, `system_prompts` nemá historii ani verzování, takže přepsaný text nešlo obnovit — jedinou stopou byl `print()` v logu, v UI se neobjevilo nic.
+
+Reálná sázka: produkční `prompt2` je rozsáhlý instruktážní text s deseti očíslovanými pravidly (interpretace zkratek útvarů, logická konzistence, tolerance ke stylistice), který vznikl mimo repozitář. Zvýšení konstanty by ho nahradilo patnáctiřádkovým výchozím zněním. Od v3.15.0 (ADR-027) by navíc reset zasáhl i teplotu, která už ovlivňuje chování hodnocení.
+
+**Možnosti:**
+- A: Příznak „upraveno správcem" — seeder přeskakuje označené řádky, nedotčené dál aktualizuje. Zachovává užitečnost mechanismu, ale stojí sloupec, migraci a další stav, který může být nastavený špatně.
+- **B (zvoleno):** Seeder pouze doplňuje chybějící prompty a existující nikdy nemění.
+
+**Rozhodnutí:** `_upsert_prompt()` nahrazeno `_ensure_prompt()`, které u existujícího řádku okamžitě vrací `False` a nesahá na něj. Konstanta `PROMPT_VERSION` i její záznam v `app_settings` odstraněny — nepoužívaly se nikde jinde než v této bráně, takže bez přepisování šlo o mrtvý kód. Doplňování chybějících promptů nově běží při **každém** startu, ne jen při změně verze.
+
+**Proč B, ne A:** prompty v tomhle nasazení autorují správci mimo repozitář a vkládají je přes Administraci. Tovární znění tedy nemá co „vylepšovat" — jediné, co mechanismus dokázal, bylo zahodit cizí práci. Přidávat kvůli němu sloupec a stavovou logiku by znamenalo udržovat složitost pro schopnost, kterou nikdo nechce. Riziko varianty B (vylepšený výchozí prompt se sám nerozšíří) je navíc malé: **struktura JSON odpovědi je v kódu, ne v promptu**, takže budoucí změny schématu na obsahu `prompt2` nezávisí.
+
+**Vedlejší přínos:** dřív se doplňování spouštělo jen při změně verze, takže smazaný nebo nezaložený prompt se sám neobnovil a příslušná fáze tiše běžela na nouzovém jednořádkovém textu z kódu (`evaluate.py` má fallback `"Vyhodnoť záznam podle zadaných kritérií."`). Kontrola při každém startu tuhle tichou degradaci odstraňuje.
 
 ---
 

@@ -2,9 +2,11 @@ from sqlalchemy.orm import Session
 from models.db_models import SystemPrompt, AppSettings
 from core.config import settings
 
-# Verze promptů — při navýšení se existující záznamy v DB přepíší na nové výchozí hodnoty.
-# Zvyšuj při každé smysluplné změně textu promptu (semver: major.minor).
-PROMPT_VERSION = "3.10"
+# Výchozí prompty se používají POUZE při zakládání chybějícího záznamu (ADR-028).
+# Existující prompt se nikdy nepřepisuje — texty se administrují v UI a vznikají mimo
+# repozitář, takže tovární verze nemá co „vylepšovat". Dřívější mechanismus s
+# PROMPT_VERSION při zvýšení konstanty v kódu tiše přepsal obsah i teplotu všech čtyř
+# promptů; nerozlišoval upravený prompt od nedotčeného a ztracený text nešlo obnovit.
 
 # Default Prompts
 DEFAULT_PROMPT_PHASE1 = """Jsi doprovodný asistent pro lektory, kteří tvoří metodiku pro vyhodnocování policejních úředních záznamů (ÚZ) na Útvaru policejního vzdělávání a služební přípravy (ÚPVSP).
@@ -71,34 +73,37 @@ def _seed_setting(db: Session, key: str, value: str):
         db.rollback()
 
 
-def _upsert_prompt(db: Session, phase_name: str, content: str, temperature: float):
-    """Vytvoří nebo aktualizuje systémový prompt. Používá se pro automatický upgrade při změně PROMPT_VERSION."""
+def _ensure_prompt(db: Session, phase_name: str, content: str, temperature: float) -> bool:
+    """Založí systémový prompt, pokud chybí. EXISTUJÍCÍ NIKDY NEPŘEPÍŠE (ADR-028).
+
+    Prompty i teploty spravují správci v Administraci a texty vznikají mimo repozitář.
+    Přepsat je továrním výchozím zněním znamená nevratně zahodit práci, kterou aplikace
+    nijak nezálohuje — `system_prompts` nemá historii ani verzování.
+
+    Vrací True, pokud záznam vznikl.
+    """
     existing = db.query(SystemPrompt).filter(SystemPrompt.phase_name == phase_name).first()
     if existing:
-        existing.content = content
-        existing.temperature = temperature
-    else:
-        db.add(SystemPrompt(phase_name=phase_name, content=content, temperature=temperature))
+        return False
+    db.add(SystemPrompt(phase_name=phase_name, content=content, temperature=temperature))
+    return True
 
 
 def seed_database(db: Session):
-    # Zjistíme verzi promptů uloženou v DB
-    db_prompt_version = db.query(AppSettings).filter(AppSettings.key == "PROMPT_VERSION").first()
-    stored_version = db_prompt_version.value if db_prompt_version else None
-    needs_prompt_upgrade = stored_version != PROMPT_VERSION
-
-    # Seed / upgrade Prompts
-    if needs_prompt_upgrade:
-        print(f"[SEED] Prompty: verze v DB='{stored_version}' → aktualizuji na '{PROMPT_VERSION}'")
-        _upsert_prompt(db, "prompt1", DEFAULT_PROMPT_PHASE1, 0.1)
-        _upsert_prompt(db, "prompt2", DEFAULT_PROMPT_PHASE2, 0.1)
-        _upsert_prompt(db, "prompt_feedback", DEFAULT_PROMPT_FEEDBACK, 0.5)
-        _upsert_prompt(db, "prompt3", DEFAULT_PROMPT_PHASE3, 0.1)
-        # Uložíme novou verzi do AppSettings
-        if db_prompt_version:
-            db_prompt_version.value = PROMPT_VERSION
-        else:
-            db.add(AppSettings(key="PROMPT_VERSION", value=PROMPT_VERSION))
+    # Prompty: doplní se pouze ty, které v DB chybí (ADR-028). Kontrola běží při každém
+    # startu — dřív byla podmíněná změnou PROMPT_VERSION, takže smazaný nebo nezaložený
+    # prompt se sám neobnovil a fáze tiše běžela na nouzovém jednořádkovém textu z kódu.
+    created = [
+        name for name, content, temp in (
+            ("prompt1", DEFAULT_PROMPT_PHASE1, 0.1),
+            ("prompt2", DEFAULT_PROMPT_PHASE2, 0.1),
+            ("prompt_feedback", DEFAULT_PROMPT_FEEDBACK, 0.5),
+            ("prompt3", DEFAULT_PROMPT_PHASE3, 0.1),
+        )
+        if _ensure_prompt(db, name, content, temp)
+    ]
+    if created:
+        print(f"[SEED] Chybějící prompty založeny z výchozích hodnot: {', '.join(created)}")
         db.commit()
 
     # Seed Settings — každý klíč má vlastní commit přes _seed_setting() (odolné vůči IntegrityError)
