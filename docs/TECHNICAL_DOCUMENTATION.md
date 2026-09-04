@@ -76,6 +76,8 @@ EVALUZ je webová aplikace pro AI-asistované hodnocení úředních záznamů (
 5. **Uložení**: `json_result` je aktualizován v DB. WebSocket notifikuje lektora → frontend přejde na `evaluated`.
 6. **Man-in-the-Loop**: Lektor zkontroluje výsledky, případně opraví odůvodnění nebo body, pak záznamy schválí (`is_approved=true`). Teprve schválené záznamy vstupují do analytiky (Phase 3).
 
+   Ruční oprava jde přes `PATCH /analytics/evaluation/{id}/score`. Od v3.15.0 (ADR-025) se úprava **slučuje** do uloženého hodnocení, nepřepisuje ho: frontend posílá jen podmnožinu klíčů (`jmeno_studenta`, `celkove_skore`, `zpetna_vazba`, `vysledky`), takže prostý přepis mazal `max_skore` a `identita`. Server navíc `celkove_skore` **přepočítává** ze samotných verdiktů — klientem poslaná hodnota se ignoruje, skóre je odvozená veličina. Při první úpravě se původní hodnocení AI uloží do `ai_original_json` (další úpravy ho nepřepíšou), zaznamená se `modified_at`/`modified_by` a změněná kritéria dostanou v JSON příznak `_lecturer_modified: true`. Endpoint zároveň invaliduje cache analytiky pro daný scénář.
+
 ### 1.4 Asynchronní fronta (EvaluationQueue)
 
 `EvaluationQueue` v `api/evaluate.py` zajišťuje:
@@ -137,6 +139,23 @@ PLATFORM_CONTEXT_DEFAULTS = {
 Platforma se detekuje automaticky z `VLLM_API_URL` (OpenRouter URL má přednost před nastavením v DB). Uživatel může přepsat kontextové okno hodnotou v DB (`LLM_CONTEXT_WINDOW`).
 
 ### 2.3 Fáze AI zpracování
+
+#### Prompty a teplota — kde se co čte
+
+Každá fáze má v tabulce `system_prompts` vlastní řádek (`phase_name`) s textem promptu **a teplotou**. Obojí je editovatelné v Admin UI.
+
+| Fáze | `phase_name` | Text promptu čte | Teplotu čte |
+|---|---|---|---|
+| Precizace kritérií | `prompt1` | `api/criteria.py` | `api/criteria.py:57` |
+| **Evaluace ÚZ** | `prompt2` | `api/evaluate.py:301` | `api/evaluate.py` → `task_data['temperature']` → `evaluate_report()` (od v3.15.0, ADR-027) |
+| Individuální zpětná vazba | `prompt_feedback` | `llm_engine.py:694` | `llm_engine.py:700` |
+| Analýza třídy | `prompt3` | `analytics.py:241` | `analytics.py:243` |
+
+> **Do v3.14.1 se teplota fáze 2 v UI uložila, zobrazila zpět — a ignorovala** (natvrdo `0.1` v `llm_engine.py`). Vada zůstala dlouho neodhalená, protože výchozí hodnota v seederu je rovněž 0,1, takže se nastavení a skutečné chování shodovaly náhodou. Při přidávání dalšího konfigurovatelného parametru vždy ověřit, že se skutečně čte tam, kde se má projevit — ne jen že se uloží.
+
+**Co lze a nelze měnit promptem:** `prompt2` je systémový prompt, který se předřadí uživatelskému promptu. **Struktura JSON odpovědi je natvrdo v kódu** (`llm_engine.py`, sekce „Požadovaná struktura JSON odpovědi") — přes UI tedy nelze přidat nové pole (např. `jistota`), jen ovlivnit obsah stávajících textových polí, typicky `oduvodneni`. Za `prompt2` se navíc v `evaluate.py:305` automaticky připojují formátovací pokyny pro PDF (zákaz Markdown tabulek, jen `###`, `**tučné**`, `-` odrážky) — doplňky do promptu s nimi nesmí být v rozporu.
+
+**Označování sporných posouzení (metodický pokyn).** Model neumí introspekci do vlastní jistoty; požádat ho o „uveď, jak jsi si jistý" znamená dostat vyprávění o obtížnosti, ne měření. Formulovat proto podmínku jako **vlastnost textu ÚZ** (je splnění doloženo výslovně, nebo se dovozuje?), kterou model z textu skutečně přečte. Značku volit tak, aby šla vyhledat (např. `[SPORNÉ]` na začátku `oduvodneni`) a doplnit výslovný zákaz označovat jednoznačné případy včetně nesplněných — bez něj model označí skoro každé „nesplněno" a značka ztratí výpovědní hodnotu. Podíl označených kritérií hlídat: pod ~10 % je pokyn moc úzký, nad ~35 % moc široký.
 
 #### Phase 1 — Precizace kritérií (Sokratovský asistent)
 `TabCriteria` komponenta. LLM hraje roli Sokratovského asistenta — klade lektorovi upřesňující otázky jednu po druhé, aby kritéria byla jasně měřitelná. Konverzace je filtrována oddělovačem `---`: do pole kritérií se propisuje pouze část za oddělovačem (samotná definovaná kritéria, bez dialogu).
@@ -360,7 +379,7 @@ logger = logging.getLogger("evaluz.llm")
 | `class_rooms` | Třídy (kurzy) přiřazené lektorovi. |
 | `evaluation_criteria` | Hodnotící metodiky (markdown). Filtrováno podle `lecturer_id`. |
 | `criteria` | Rozparsovaná jednotlivá kritéria z `evaluation_criteria`. Používána pro chunking a pro `expected_criteria_names`. |
-| `student_evaluations` | Výsledky evaluací. Klíčové sloupce: `json_result` (JSONB), `source_text` (text ÚZ), `student_identity` (JSONB), `cleaned_name`, `scenario_name`, `scenario_display_name`, `is_approved`, `created_at`. |
+| `student_evaluations` | Výsledky evaluací. Klíčové sloupce: `json_result` (JSONB), `source_text` (text ÚZ), `student_identity` (JSONB), `cleaned_name`, `scenario_name`, `scenario_display_name`, `is_approved`, `created_at`. Auditní stopa lektorského zásahu (ADR-025): `ai_original_json` (JSONB, původní hodnocení AI před první ruční úpravou), `modified_at`, `modified_by` (FK na `lecturers`, `ON DELETE SET NULL`). NULL ve všech třech znamená „hodnocení nebylo ručně upravováno". |
 | `class_analyses` | AI analytika třídy (Phase 3). `content_json` (JSONB), izolováno podle `lecturer_id` + `class_id`. |
 | `app_settings` | Dynamická konfigurace (LLM URL, klíče, modely, prahy, feature flags, CHUNK_SIZE, CHUNK_THRESHOLD_TOKENS_PCT). |
 | `system_prompts` | Prompty pro jednotlivé fáze (`phase_name`). Editovatelné v Admin UI. |
@@ -378,7 +397,13 @@ if isinstance(result, str):  # double-encoded
     result = json.loads(result)
 ```
 
-**Metadata v JSONB bez migrace**: Nová pole jako `_llm_omitted`, `_llm_actual_name` jsou vkládána přímo do `json_result` dict. Nevyžadují DB migraci — JSONB je schemaless. Frontend je čte podmíněně.
+**Metadata v JSONB bez migrace**: Nová pole jako `_llm_omitted`, `_llm_actual_name`, `_lecturer_modified` jsou vkládána přímo do `json_result` dict. Nevyžadují DB migraci — JSONB je schemaless. Frontend je čte podmíněně.
+
+| Příznak | Význam |
+|---|---|
+| `_llm_omitted` | Model kritérium v odpovědi vůbec nevrátil; doplněno jako placeholder se `splneno=false`. Rozlišuje „model rozhodl, že nesplněno" od „model se nevyjádřil". |
+| `_llm_actual_name` | Model použil jiný název, než jaký je v DB; matcher jej přemapoval. Auditní stopa kanonizace (ADR-019). |
+| `_lecturer_modified` | Do kritéria zasáhl lektor (ADR-025). Jednou nastavený se nemaže — drží informaci, že položku měnil člověk, i když ji později vrátí na původní hodnotu. |
 
 > **Poznámka k v3.10.0**: Pole `_partial_recovery` a `_json_repaired` byla odstraněna z kódu (smazány funkce `_check_partial_recovery` a `_repair_truncated_json`). Starší záznamy v DB je mohou stále obsahovat — frontend je ignoruje (pole bylo odstraněno z TypeScript interface).
 
@@ -387,6 +412,10 @@ if isinstance(result, str):  # double-encoded
 - **PostgreSQL (prod):** `run_alembic_migrations()` → `alembic upgrade head`. Záložní `run_migrations()` se volá při selhání Alembic.
 - **SQLite (dev):** `init_db()` + `run_migrations()` — "kobercový nálet" přidává chybějící sloupce při každém startu.
 - **Nové sloupce** musí být přidány na TŘECH místech: `db_models.py`, `database.py` (SQLite + PostgreSQL větve v `run_migrations()`), a nová Alembic migrace v `alembic/versions/`.
+
+> **Alembic migrace není volitelná.** V produkci se `run_migrations()` **vůbec nespouští** — `main.py` ho volá jen pro SQLite, na PostgreSQL proběhne `alembic upgrade head` jako první krok v Dockerfile CMD ještě před startem uvicornu. Sloupec přidaný pouze do `db_models.py` a `run_migrations()` tedy v produkci nikdy nevznikne a aplikace spadne na `UndefinedColumn` při každém dotazu na danou tabulku — SQLAlchemy generuje SELECT se všemi sloupci modelu. Při vývoji na SQLite se to neprojeví, protože `init_db()` → `create_all()` tabulku vytvoří rovnou z modelu.
+>
+> **Alembic řetěz je Postgres-only.** Migrace `a1b2c3d4e5f6` obsahuje `DO $$ ... END $$;`, takže `alembic upgrade head` nelze spustit proti SQLite. Novou migraci je proto nutné ověřit proti skutečnému PostgreSQL (dočasná instance přes `initdb`/`pg_ctl` stačí), ne jen staticky. Ověřit je potřeba i `downgrade` a opětovný `upgrade`.
 
 ### 3.4 Fast-scan pattern
 

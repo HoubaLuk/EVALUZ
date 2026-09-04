@@ -12,7 +12,7 @@ Lektor nahlásil, že tatáž sada ÚZ vykázala na dvou strojích v kartě Anal
 
 - **`backend/api/analytics.py`** — `patch_evaluation_score` dosud přepsal celý `json_result` tím, co poslal klient. Frontend přitom staví nový objekt jen ze čtyř klíčů, takže se uložením ztratily `max_skore` a `identita`; frontend pak spadl na fallback výpočet maxima, chybný u kritérií za víc než 1 bod (vada odstraněná v v3.9.10, sem se vracela zadními vrátky). Nově se úprava **slučuje** a serverem vlastněné klíče se berou z uložené verze.
 - **`backend/api/analytics.py`** — `celkove_skore` **přepočítává server** ze samotných verdiktů; klientem poslaná hodnota se ignoruje. Skóre je odvozená veličina, ne vstup.
-- **`backend/api/analytics.py`, `backend/models/db_models.py`, `backend/core/database.py`** — nové sloupce `ai_original_json`, `modified_at`, `modified_by`. Původní hodnocení AI se uchová při **první** úpravě a další úpravy ho nepřepíšou. Změněná kritéria dostanou příznak `_lecturer_modified`. Migrace přes zavedený idempotentní mechanismus v `run_migrations()` (Postgres i SQLite), bez unique constraintů a bez mazání dat.
+- **`backend/api/analytics.py`, `backend/models/db_models.py`, `backend/core/database.py`, `backend/alembic/versions/c7d8e9f0a1b2_add_lecturer_audit_trail.py`** — nové sloupce `ai_original_json`, `modified_at`, `modified_by`. Původní hodnocení AI se uchová při **první** úpravě a další úpravy ho nepřepíšou. Změněná kritéria dostanou příznak `_lecturer_modified`. Migrace bez unique constraintů a bez mazání dat; existující záznamy mají ve všech třech sloupcích NULL, což pravdivě znamená „nebylo ručně upravováno".
 
 ### Analytika hlásí rozpor místo tichého 0 % (ADR-026)
 
@@ -30,6 +30,12 @@ Lektor nahlásil, že tatáž sada ÚZ vykázala na dvou strojích v kartě Anal
 - **`backend/tests/test_manual_override.py`** (nový, 8 testů) — zachování `max_skore`/`identita`, uložení a neměnnost `ai_original_json`, záznam kdo/kdy, příznak u změněného kritéria (a jeho absence u nezměněného), serverový přepočet skóre.
 - **`backend/tests/test_analytics_determinism.py`** (nový, 6 testů) — skutečné přejmenování se ohlásí, kosmetická úprava ne, osiřelý výsledek se ohlásí, legitimní 0 % nevaruje, pořadí `stats` odpovídá sadě a je stabilní přes opakovaná volání.
 - Celkem 114 testů.
+
+### Dokumentace
+
+- **`docs/TECHNICAL_DOCUMENTATION.md`** — nová tabulka, která fáze čte prompt a teplotu odkud (sekce 2.3), včetně upozornění, že struktura JSON odpovědi je natvrdo v kódu a přes UI do ní nelze přidat pole. Doplněn metodický pokyn k označování sporných posouzení v `prompt2`: podmínku formulovat jako vlastnost textu ÚZ, ne jako dotaz na jistotu modelu (introspekci model neumí, vrátí vyprávění o obtížnosti).
+- **`docs/TECHNICAL_DOCUMENTATION.md`** — sekce 3.3 nově výslovně uvádí, že **Alembic migrace není volitelná**: v produkci se `run_migrations()` vůbec nespouští (`main.py` ho volá jen pro SQLite, na PostgreSQL běží `alembic upgrade head` v Dockerfile CMD), takže sloupec přidaný jen do modelu a `run_migrations()` v produkci nikdy nevznikne a aplikace spadne na `UndefinedColumn`. Při vývoji na SQLite se to neprojeví. Zároveň zdokumentováno, že Alembic řetěz je Postgres-only (migrace `a1b2c3d4e5f6` obsahuje `DO $$`), takže novou migraci nelze ověřit proti SQLite — je nutná dočasná instance PostgreSQL.
+- **`docs/TECHNICAL_DOCUMENTATION.md`** — přehled příznaků v `json_result` (`_llm_omitted`, `_llm_actual_name`, `_lecturer_modified`) a popis chování `PATCH /analytics/evaluation/{id}/score` v toku dat.
 
 ### Otevřeno
 

@@ -2,7 +2,7 @@
 
 ## Datový Model
 - **Lecturer:** Příznaky `is_superadmin`, `is_admin`. Vazba `school_location` určuje organ. článek. Atributy hodnosti: `rank_shortcut`, `rank_full`, `title_before`, `title_after`.
-- **StudentEvaluation:** Ukládá vyhodnocení ÚZ. Klíčové sloupce: `scenario_name` (ID), `scenario_display_name` (čitelný název od v3.7.0), `json_result` (JSONType dict), `is_approved`, `student_identity` (JSONType), `cleaned_name`, `source_text`, `created_at`.
+- **StudentEvaluation:** Ukládá vyhodnocení ÚZ. Klíčové sloupce: `scenario_name` (ID), `scenario_display_name` (čitelný název od v3.7.0), `json_result` (JSONType dict), `is_approved`, `student_identity` (JSONType), `cleaned_name`, `source_text`, `created_at`. Od v3.15.0 auditní stopa ruční opravy (ADR-025): `ai_original_json` (hodnocení od AI před prvním zásahem lektora), `modified_at`, `modified_by`. NULL ve všech třech = hodnocení nebylo ručně upravováno.
 - **ClassAnalysis:** Globální analýza třídy. `content_json` je JSONType — vždy `isinstance(raw, dict)` před `json.loads()`. Sloupce `computed_at` a `version` pro cache invalidaci.
 - **ClassRoom:** Zakládá se **zvlášť pro každého lektora** (fast-scan, výchozí název „Základní kurz", auto-increment ID). ID tedy NENÍ napříč lektory shodné — frontend si ho musí vyžádat přes `POST /evaluate/classes/ensure`, nesmí ho mít natvrdo (ADR-021).
 
@@ -56,6 +56,17 @@
 - Dřív se kontrolovaly jen neschválené mezi **vyhodnocenými**; záznamy bez výsledku (po fast-scanu nebo čekající ve frontě) se tiše přeskočily a analýza popsala jen část skupiny, aniž by to lektor poznal.
 - Odpověď při blokaci: `error: "pending_approvals"` + `pending_count` (čeká na schválení), `unevaluated_count` (bez výsledku), `total_evaluated`, `total_records`. Frontend obě čísla rozlišuje.
 - `json_result` může být u starších záznamů JSON string — brána to ošetřuje a takový záznam počítá jako nevyhodnocený místo pádu na `AttributeError`.
+
+## Ruční oprava lektorem [od v3.15.0, ADR-025]
+- `PATCH /analytics/evaluation/{id}/score` **slučuje** úpravu do uloženého hodnocení, nepřepisuje ho. Frontend posílá jen čtyři klíče, takže prostý přepis mazal `max_skore` a `identita` — frontend pak spadl na fallback výpočet maxima, chybný u kritérií za víc než 1 bod.
+- `celkove_skore` je **odvozená veličina** — přepočítává ji server ze splněných kritérií, hodnota od klienta se ignoruje.
+- Původní hodnocení od AI se uloží do `ai_original_json` při **první** úpravě; další úpravy ho nepřepíšou, takže stopa drží verzi od modelu, ne předchozí verzi od lektora. Změněná kritéria dostanou `_lecturer_modified: true`.
+- **Proč na tom záleží:** Man-in-the-Loop je pojistkou jen tehdy, když je zásah člověka dohledatelný. Bez stopy nešlo zjistit, co model původně rozhodl, ani měřit, jak často se AI s lektory rozchází.
+
+## Determinismus třídní statistiky [od v3.15.0, ADR-026, ADR-027]
+- Statistika se počítá proti **aktuálním** kritériím, ale výsledky studentů jsou zamrzlé z doby vyhodnocení; `StudentEvaluation` si kopii kritérií neukládá. Po přejmenování kritéria párování selže a dřív se takové kritérium tiše zobrazilo jako 0 %. Nově čítač `seen` odliší „nikdo nesplnil" od „nespárováno" a odpověď nese `criteria_mismatch` (`unmatched_criteria`, `orphan_results`), který UI vypíše jmenovitě. Výpočet **neblokuje**.
+- Drobné rozšíření názvu zachytí částečná shoda v matcheru a varování se pro ně záměrně nespouští — jinak by si lektor na varování zvykl a přestal ho číst.
+- Všechny dotazy v `analytics.py` mají `ORDER BY`. Bez něj PostgreSQL pořadí negarantuje a `save_criteria` dělá delete+insert, takže se měnilo; frontend přitom popisuje sloupce grafu podle POZICE (`K${i+1}`) a „K7" mohlo označovat jiné kritérium na jiném stroji. Řazení podle `Criterion.id` = pořadí z markdownu, které lektor vidí v editoru.
 
 ## Klientská Synchronizace
 - **HDD Sync:** Využívá `File System Access API`. 
