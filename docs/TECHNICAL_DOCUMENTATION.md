@@ -415,7 +415,17 @@ if isinstance(result, str):  # double-encoded
 
 > **Alembic migrace není volitelná.** V produkci se `run_migrations()` **vůbec nespouští** — `main.py` ho volá jen pro SQLite, na PostgreSQL proběhne `alembic upgrade head` jako první krok v Dockerfile CMD ještě před startem uvicornu. Sloupec přidaný pouze do `db_models.py` a `run_migrations()` tedy v produkci nikdy nevznikne a aplikace spadne na `UndefinedColumn` při každém dotazu na danou tabulku — SQLAlchemy generuje SELECT se všemi sloupci modelu. Při vývoji na SQLite se to neprojeví, protože `init_db()` → `create_all()` tabulku vytvoří rovnou z modelu.
 >
-> **Alembic řetěz je Postgres-only.** Migrace `a1b2c3d4e5f6` obsahuje `DO $$ ... END $$;`, takže `alembic upgrade head` nelze spustit proti SQLite. Novou migraci je proto nutné ověřit proti skutečnému PostgreSQL (dočasná instance přes `initdb`/`pg_ctl` stačí), ne jen staticky. Ověřit je potřeba i `downgrade` a opětovný `upgrade`.
+> **Alembic řetěz je Postgres-only.** Migrace `a1b2c3d4e5f6` obsahuje `DO $$ ... END $$;`, takže `alembic upgrade head` nelze spustit proti SQLite. Novou migraci je proto nutné ověřit proti skutečnému PostgreSQL, ne jen staticky.
+
+**Ověření migrací:**
+
+```bash
+backend/scripts/verify_migrations.sh
+```
+
+Postaví dočasnou instanci PostgreSQL, projede celý řetěz od nuly, ověří `downgrade -1` i opětovný `upgrade` (odhalí migraci, kterou nelze vzít zpět), zkontroluje, že existuje právě jeden head, a po sobě uklidí. Nepotřebuje Docker ani zásah do vývojové databáze.
+
+Skript řeší tři pasti, na které se na macOS naráží: Unix socket má limit 103 bajtů (proto socket mimo `mktemp -d`), postgres bez `--locale=C` skončí na „postmaster became multithreaded during startup", a `LC_ALL=C` nesmí prosáknout do Pythonu ani do encodingu clusteru — jinak migrace s českými texty spadnou na `UnicodeDecodeError`, resp. `UnicodeEncodeError`. Cluster se proto zakládá s `--encoding=UTF8 --locale=C`.
 
 ### 3.4 Fast-scan pattern
 
