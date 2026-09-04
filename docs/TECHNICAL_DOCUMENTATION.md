@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.15.1  
+**Verze:** 3.15.2  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -403,7 +403,8 @@ if isinstance(result, str):  # double-encoded
 |---|---|
 | `_llm_omitted` | Model kritérium v odpovědi vůbec nevrátil; doplněno jako placeholder se `splneno=false`. Rozlišuje „model rozhodl, že nesplněno" od „model se nevyjádřil". |
 | `_llm_actual_name` | Model použil jiný název, než jaký je v DB; matcher jej přemapoval. Auditní stopa kanonizace (ADR-019). |
-| `_lecturer_modified` | Do kritéria zasáhl lektor (ADR-025). Jednou nastavený se nemaže — drží informaci, že položku měnil člověk, i když ji později vrátí na původní hodnotu. |
+| `upraveno_lektorem` | Do kritéria zasáhl vyučující (ADR-025). **Odvozuje server** diffem proti uložené verzi — klientovo tvrzení se nepřebírá a nepodložený příznak se zahazuje. Jednou zapsaný se nemaže: drží informaci, že položku měnil člověk, i když ji později vrátí na původní hodnotu. |
+| `jistota` | Míra jistoty modelu dílčím hodnocením, 1–5 (ADR-029). `None` = neuvedeno; starší záznamy pole nemají. Jde o **tvrzení** modelu o obtížnosti, ne měření nejistoty — slouží k triáži, ne jako důkaz správnosti. Neovlivňuje body ani skóre. |
 
 > **Poznámka k v3.10.0**: Pole `_partial_recovery` a `_json_repaired` byla odstraněna z kódu (smazány funkce `_check_partial_recovery` a `_repair_truncated_json`). Starší záznamy v DB je mohou stále obsahovat — frontend je ignoruje (pole bylo odstraněno z TypeScript interface).
 
@@ -573,6 +574,7 @@ backend/tests/
 │                                #   kdo/kdy, serverový přepočet skóre (8 testů, ADR-025)
 ├── test_analytics_determinism.py # rozpor kritérií a stabilní pořadí `stats` (6 testů, ADR-026, ADR-027)
 ├── test_seeder_prompts.py       # seeder nepřepisuje prompty správce (8 testů, ADR-028)
+├── test_jistota.py              # normalizace pole `jistota` (24 testů, ADR-029)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
@@ -581,7 +583,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **122 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **148 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -1037,9 +1039,11 @@ Vedle toho po zásahu člověka nezůstala žádná stopa: původní hodnocení 
 - A: Opravit tvar payloadu ve frontendu, ať posílá celý objekt — řeší ztrátu dat, ale ne chybějící stopu, a příště se to rozejde znovu.
 - **B (zvoleno):** Server je jediné místo pravdy — slučuje, přepočítává a zaznamenává. Kontrakt s frontendem se nemění.
 
-**Rozhodnutí:** `patch_evaluation_score` slučuje příchozí úpravu do uloženého hodnocení (`_merge_evaluation_json`) a klíče `max_skore` a `identita` vrací vždy z uložené verze, i kdyby je klient poslal. `celkove_skore` se přepočítá ze `vysledky` na serveru (`_recalculate_score`) — skóre je odvozená hodnota, ne vstup od klienta. Při **první** úpravě se původní `json_result` uloží do nového sloupce `ai_original_json`; další úpravy ho nepřepíšou, takže stopa drží verzi od AI, ne předchozí verzi od lektora. Server si sám diffne kritéria podle názvu a u změněných nastaví `_lecturer_modified: true` (`_mark_lecturer_edits`). Doplněny sloupce `ai_original_json`, `modified_at`, `modified_by` přes zavedený idempotentní mechanismus v `run_migrations()`.
+**Rozhodnutí:** `patch_evaluation_score` slučuje příchozí úpravu do uloženého hodnocení (`_merge_evaluation_json`) a klíče `max_skore` a `identita` vrací vždy z uložené verze, i kdyby je klient poslal. `celkove_skore` se přepočítá ze `vysledky` na serveru (`_recalculate_score`) — skóre je odvozená hodnota, ne vstup od klienta. Při **první** úpravě se původní `json_result` uloží do nového sloupce `ai_original_json`; další úpravy ho nepřepíšou, takže stopa drží verzi od AI, ne předchozí verzi od lektora. Server si sám diffne kritéria podle názvu a u změněných nastaví `upraveno_lektorem: true` (`_mark_lecturer_edits`). Doplněny sloupce `ai_original_json`, `modified_at`, `modified_by` přes zavedený idempotentní mechanismus v `run_migrations()`.
 
-**Kompromis:** JSON záznamu se zhruba zdvojnásobí, protože si nese i původní verzi. U dokumentů této velikosti je to zanedbatelné proti hodnotě dohledatelnosti. Příznak `_lecturer_modified` se jednou nastavený nemaže — drží informaci, že do položky sáhl člověk, i když ji lektor později vrátí na původní hodnotu; to je záměr, ne opomenutí.
+> **Oprava ve v3.15.2:** první implementace zaváděla vlastní příznak `_lecturer_modified`, přestože pro tentýž pojem už existoval `upraveno_lektorem` — frontend ho nastavuje optimisticky při editaci a vykresluje ikonou. Vznikl tak jeden fakt pod dvěma jmény. Sjednoceno na existující `upraveno_lektorem`, přičemž **autoritou je server**: klientovo tvrzení se nepřebírá a nepodložený příznak se zahazuje. Optimistické nastavení ve frontendu zůstává kvůli okamžité odezvě v UI, ale o uloženém stavu rozhoduje diff proti uložené verzi — jinak by stačil starší nebo zapomnětlivý klient a zásah člověka by se nezaznamenal.
+
+**Kompromis:** JSON záznamu se zhruba zdvojnásobí, protože si nese i původní verzi. U dokumentů této velikosti je to zanedbatelné proti hodnotě dohledatelnosti. Příznak `upraveno_lektorem` se jednou nastavený nemaže — drží informaci, že do položky sáhl člověk, i když ji lektor později vrátí na původní hodnotu; to je záměr, ne opomenutí.
 
 ---
 
@@ -1092,6 +1096,26 @@ Reálná sázka: produkční `prompt2` je rozsáhlý instruktážní text s dese
 **Proč B, ne A:** prompty v tomhle nasazení autorují správci mimo repozitář a vkládají je přes Administraci. Tovární znění tedy nemá co „vylepšovat" — jediné, co mechanismus dokázal, bylo zahodit cizí práci. Přidávat kvůli němu sloupec a stavovou logiku by znamenalo udržovat složitost pro schopnost, kterou nikdo nechce. Riziko varianty B (vylepšený výchozí prompt se sám nerozšíří) je navíc malé: **struktura JSON odpovědi je v kódu, ne v promptu**, takže budoucí změny schématu na obsahu `prompt2` nezávisí.
 
 **Vedlejší přínos:** dřív se doplňování spouštělo jen při změně verze, takže smazaný nebo nezaložený prompt se sám neobnovil a příslušná fáze tiše běžela na nouzovém jednořádkovém textu z kódu (`evaluate.py` má fallback `"Vyhodnoť záznam podle zadaných kritérií."`). Kontrola při každém startu tuhle tichou degradaci odstraňuje.
+
+---
+
+### ADR-029: Pole `jistota` u dílčího hodnocení (v3.15.2)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Rozptyl modelu je pro lektora neviditelný — u každého kritéria vidí jeden verdikt s jedním sebejistě znějícím odůvodněním, a nic neoznačuje, že šlo o hraniční případ. Manuální oprava (ADR-025) je přitom pojistkou jen do té míry, do jaké si lektor problému všimne; napříč 25 kritérii × N studentů si tiše překlopeného hraničního kritéria nevšimne skoro nikdy.
+
+Produkční `prompt2` navíc rozlišuje tři stavy nesplnění („Chybí" / „Chybný" / „Chybný (nejasné/nejednoznačné/nedostatečné)"), ale schéma má jen boolean `splneno` — rozlišovací práce, kterou prompt po modelu chce, se tedy ztrácela. Prompt zároveň velí „v pochybnostech → nesplněno", takže sporné případy systematicky padají v neprospěch studenta. Právě tam má lektorský přezkum největší cenu.
+
+**Možnosti:**
+- A: Značka `[SPORNÉ]` na začátku `oduvodneni` — jde zavést čistě úpravou promptu v UI, bez zásahu do kódu, ale je to volný text: nedá se spolehlivě filtrovat, počítat ani zobrazit jako odznak.
+- **B (zvoleno):** Strukturované pole `jistota` (1–5) u každé položky `vysledky`.
+
+**Rozhodnutí:** Do schématu JSON v obou promptech (jednorázové volání i chunkovaná cesta) přidáno `"jistota": 1-5` se stručnou definicí škály. `_normalize_jistota()` převádí odpověď modelu na celé číslo 1–5 (zvládá `"4"`, `"4/5"`, hodnoty mimo škálu) — ze stejného důvodu, z jakého server normalizuje `body` a přepočítává `celkove_skore`. Frontend zobrazuje výstražnou ikonu u hodnot ≤ 2; po zásahu vyučujícího se neukazuje, protože rozhodl člověk a odhad modelu je bezpředmětný. Placeholder za kritérium, které model vůbec nevrátil, dostává `jistota: 1`.
+
+**Chybějící hodnota se vědomě NEDOPLŇUJE náhradním číslem** — vymyšlený odhad by v UI vypadal stejně jako skutečný. `None` znamená „neuvedeno" a `_validate_and_fix_vysledky` v takovém případě loguje `WARNING`: bez něj by tichá ignorace nového pole modelem vypadala stejně jako „všechno je jednoznačné".
+
+**Kompromis a hranice platnosti:** model touto hodnotou reportuje své **tvrzení** o obtížnosti, ne skutečnou tokenovou nejistotu — introspekci do vlastních pravděpodobností neumí. Nízká jistota je tedy užitečné vodítko, kam se podívat; vysoká jistota **není** důkazem, že je hodnocení správné. Skutečné měření by daly `logprobs` z vLLM, což je ale výrazně větší zásah (u strukturovaného JSON výstupu je obtížné izolovat token nesoucí verdikt). Jistota z principu neovlivňuje body ani skóre — je to informace pro člověka.
 
 ---
 

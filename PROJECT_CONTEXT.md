@@ -1,9 +1,9 @@
 # Projektový Kontext — EVALUZ
-**Verze: 3.15.1 | Poslední aktualizace: 2026-09-04**
+**Verze: 3.15.2 | Poslední aktualizace: 2026-09-04**
 
 ## Aktuální Stav
 
-Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 122 testů pass.
+Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 148 testů pass.
 
 Poslední vývojová linie řešila **provozní robustnost dávkového vyhodnocování** odhalenou pilotem:
 - **v3.11.0** — náprava RBAC izolace dat (`DataScope`, fail-closed `PERSONAL`, ADR-014).
@@ -14,6 +14,7 @@ Poslední vývojová linie řešila **provozní robustnost dávkového vyhodnoco
 - **v3.14.1** — Soubor nad limit velikosti (10 MB) se ve fast-scanu nově hlásí jmenovitě místo tichého zmizení ze seznamu; kontrola velikosti běží ve frontendu před odesláním, `Failed to fetch` se překládá do srozumitelné hlášky (ADR-024). Skutečná síťová příčina hlášeného „Failed to fetch" u jedné lektorky zůstává neprokázaná.
 - **v3.15.0** — Manuální zásah lektora dřív přepsal celé hodnocení tím, co poslal klient: ztratily se `max_skore` a `identita` a po člověku nezůstala stopa. Nově se slučuje, skóre přepočítává server a původní hodnocení AI se uchová v `ai_original_json` (ADR-025). Analytika hlásí rozpor mezi uloženými výsledky a upravenými kritérii místo tichého 0 % (ADR-026) a má deterministické pořadí kritérií; teplota fáze 2 se konečně čte z Administrace (ADR-027).
 - **v3.15.1** — Seeder už nikdy nepřepisuje existující prompty. Dřív při zvýšení `PROMPT_VERSION` v kódu tiše nahradil obsah **i teplotu** všech čtyř promptů továrními hodnotami; `system_prompts` nemá historii, takže text vytvořený mimo repozitář nešlo obnovit (ADR-028). Doplňování chybějících promptů nově běží při každém startu, takže smazaný prompt už fázi tiše nedegraduje na nouzový jednořádkový text.
+- **v3.15.2** — Každé dílčí hodnocení nese `jistota` 1–5; u hodnot ≤ 2 se v UI zobrazí výstraha, aby lektor věděl, kam se podívat (ADR-029). Je to tvrzení modelu o obtížnosti, ne měření nejistoty — vysoká jistota není důkazem správnosti. Zároveň opraven zdvojený příznak zásahu vyučujícího: `_lecturer_modified` z v3.15.0 sjednocen na existující `upraveno_lektorem`, které nově odvozuje server, ne klient.
 
 ## 1. Vize a Cíl
 
@@ -28,7 +29,7 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 - **Databáze:** SQLite (dev/test) / PostgreSQL 17 (produkce) — Alembic migrace + `run_migrations()` kobercový nálet.
 - **LLM:** vLLM (primární), OpenRouter, Ollama, LM Studio — OpenAI-compatible API. Skutečné kontextové okno se čte ze serveru (`GET /v1/models` → `max_model_len`) a slouží jako strop nad nastavením v Administraci (ADR-018).
 - **Exporty:** Excel (openpyxl) a PDF (fpdf2).
-- **Testy:** pytest + pytest-asyncio + respx. 122 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
+- **Testy:** pytest + pytest-asyncio + respx. 148 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
 - **Produkce:** Docker Compose (nginx + backend + PostgreSQL), non-root user `evaluz`, nginx reverse proxy s CSP hlavičkami, `SecurityHeadersMiddleware`, slowapi rate limiting.
 
 ## 3. Implementované Moduly

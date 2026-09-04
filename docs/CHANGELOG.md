@@ -2,6 +2,33 @@
 
 ---
 
+## [v3.15.2] — 2026-09-04 — Míra jistoty u dílčího hodnocení
+
+### Problém
+
+Rozptyl modelu je pro lektora neviditelný: u každého kritéria vidí jeden verdikt s jedním sebejistě znějícím odůvodněním a nic neoznačuje, že šlo o hraniční případ. Manuální oprava je přitom pojistkou jen do té míry, do jaké si lektor problému všimne — napříč 25 kritérii × N studentů si tiše překlopeného kritéria nevšimne skoro nikdy. Produkční `prompt2` navíc rozlišuje tři stavy nesplnění, ale schéma má jen boolean `splneno`, takže se ta rozlišovací práce ztrácela.
+
+### Pole `jistota` (ADR-029)
+
+- **`backend/services/llm_engine.py`** — do schématu JSON v obou promptech (jednorázové volání i chunkovaná cesta) přidáno `"jistota": 1-5` se stručnou definicí škály: nižší hodnota tam, kde se splnění dovozuje z kontextu nebo záleží na právním výkladu; vyšší tam, kde je údaj uveden výslovně — a to i u nesplněných kritérií, protože zjevná absence je jednoznačná také.
+- **`backend/services/llm_engine.py`** — `_normalize_jistota()` převádí odpověď na celé číslo 1–5 (zvládá `"4"`, `"4/5"`, hodnoty mimo škálu, `bool` odmítne). Chybějící hodnota se vědomě **nedoplňuje náhradním číslem** — vymyšlený odhad by v UI vypadal stejně jako skutečný. Placeholder za kritérium, které model vůbec nevrátil, dostává `jistota: 1`.
+- **`backend/services/llm_engine.py`** — `WARNING` do logu, když model pole nevyplnil. Bez toho by tichá ignorace nového pole vypadala stejně jako „všechno je jednoznačné".
+- **`src/types.ts`, `src/components/TabEvaluation.tsx`** — u hodnot ≤ 2 se zobrazí výstražná ikona s vysvětlením. Po zásahu vyučujícího se neukazuje — rozhodl člověk, odhad modelu je bezpředmětný.
+
+**Hranice platnosti:** model tímhle reportuje své **tvrzení** o obtížnosti, ne skutečnou tokenovou nejistotu. Nízká jistota je vodítko, kam se podívat; vysoká **není** důkazem správnosti. Jistota neovlivňuje body ani skóre.
+
+### Opraven zdvojený příznak zásahu vyučujícího
+
+- **`backend/api/analytics.py`** — v3.15.0 zavedla vlastní příznak `_lecturer_modified`, přestože pro tentýž pojem už existoval `upraveno_lektorem`, který frontend nastavuje a vykresluje ikonou. Vznikl tak jeden fakt pod dvěma jmény. Sjednoceno na existující název, přičemž **autoritou je server**: klientovo tvrzení se nepřebírá a nepodložený příznak se zahazuje. Optimistické nastavení ve frontendu zůstává kvůli odezvě v UI, ale o uloženém stavu rozhoduje diff proti uložené verzi.
+
+### Testy
+
+- **`backend/tests/test_jistota.py`** (nový, 24 testů) — normalizace hodnot i nepoužitelných vstupů, `bool` neprojde jako 1, chybějící pole zůstane `None` místo dohadu, placeholder dostane nejnižší jistotu, logování chybějícího pole, a kontrola, že jistota neovlivňuje skóre.
+- **`backend/tests/test_manual_override.py`** — 2 nové testy: příznak odvozuje server (nepodložené tvrzení klienta se zahodí) a přežije pozdější vrácení hodnoty zpět.
+- Celkem 148 testů.
+
+---
+
 ## [v3.15.1] — 2026-09-04 — Seeder už nepřepisuje prompty vytvořené správcem
 
 ### Problém

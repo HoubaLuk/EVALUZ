@@ -122,6 +122,24 @@ def _pop_matching_slot(slots: list[str], actual_name: str, prefix: str) -> str:
     return slots.pop(0)
 
 
+def _normalize_jistota(value) -> int | None:
+    """Převede `jistota` od modelu na celé číslo 1–5, jinak na None (ADR-029).
+
+    Model vrací občas `"4"`, `"4/5"` nebo hodnotu mimo škálu. `None` znamená
+    „neuvedeno" — vědomě se NEDOSAZUJE náhradní číslo, protože vymyšlená jistota
+    by byla horší než žádná: v UI by vypadala stejně jako skutečný odhad modelu.
+    """
+    if isinstance(value, bool):  # bool je podtyp int — odchytit dřív
+        return None
+    if isinstance(value, (int, float)):
+        return min(5, max(1, int(round(value))))
+    if isinstance(value, str):
+        match = re.search(r'\d+', value)
+        if match:
+            return min(5, max(1, int(match.group())))
+    return None
+
+
 def _validate_and_fix_vysledky(
     parsed: dict,
     expected_criteria_names: list[str],
@@ -203,6 +221,8 @@ def _validate_and_fix_vysledky(
         else:
             v['body'] = 0
 
+        v['jistota'] = _normalize_jistota(v.get('jistota'))
+
         known.append(v)
 
     if unknown_names:
@@ -222,6 +242,10 @@ def _validate_and_fix_vysledky(
                 "nazev": name,
                 "splneno": False,
                 "body": 0,
+                # Model se k tomuhle kritériu vůbec nevyjádřil, takže pro jistotu není
+                # žádný podklad. 1 (nejnižší) je poctivé kódování a zároveň zajistí, že
+                # se položka objeví ve filtru „vyžaduje pozornost".
+                "jistota": 1,
                 "oduvodneni": "⚠ Kritérium nebylo v odpovědi LLM. Vyžaduje manuální revizi nebo re-evaluaci.",
                 "citace": "",
                 "_llm_omitted": True,
@@ -232,6 +256,19 @@ def _validate_and_fix_vysledky(
     # kritérium č. 18 jako "1." apod. Řazení zajistí, že 1. kritérium je vždy první.
     order_map = {name: i for i, name in enumerate(expected_criteria_names)}
     known.sort(key=lambda v: order_map.get(v.get('nazev', ''), len(expected_criteria_names)))
+
+    # Kontrola, jestli model pole `jistota` vůbec plní. Bez tohohle by tichá ignorace
+    # nového pole vypadala stejně jako „všechno je jednoznačné" (ADR-029).
+    bez_jistoty = sum(1 for v in known if v.get('jistota') is None)
+    if bez_jistoty:
+        logger.warning(
+            f"{prefix}⚠ U {bez_jistoty} z {len(known)} kritérií model neuvedl použitelnou "
+            f"`jistota` — zkontrolujte prompt fáze 2 v Administraci."
+        )
+    else:
+        nizka = [v['nazev'] for v in known if (v.get('jistota') or 5) <= 2]
+        if nizka:
+            logger.info(f"{prefix}Nízká jistota ({len(nizka)}): {nizka[:3]}{'…' if len(nizka) > 3 else ''}")
 
     parsed['vysledky'] = known
     # Přepočet celkove_skore — nespoléháme na model (může se spočítat špatně).
@@ -611,11 +648,18 @@ Požadovaná struktura JSON odpovědi:
             "nazev": "název kritéria (doslovně z hlavičky, bez čísla a bez jmen osob)",
             "splneno": true/false,
             "body": počet_bodů,
+            "jistota": 1-5,
             "oduvodneni": "1–2 věty: co jsi hledal a co jsi (ne)nalezl",
             "citace": "doslovná věta z textu ÚZ nebo Chybí"
         }}
     ]
 }}
+
+Pole `jistota` je míra tvé jistoty TÍMTO dílčím hodnocením na škále 1–5
+(1 = velmi nejistý, 5 = zcela jistý). Nižší hodnotu použij, když se splnění dovozuje
+z kontextu, text připouští více výkladů nebo posouzení závisí na právním výkladu.
+Vyšší hodnotu použij tam, kde je údaj v ÚZ uveden výslovně a jednoznačně — a to
+i tehdy, když kritérium splněno NENÍ, protože zjevná absence je jednoznačná také.
 """
 
     use_json_mode = platform in ("vllm", "openai")
@@ -972,6 +1016,7 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
                 "nazev": "název kritéria (doslovně z hlavičky, bez čísla a bez jmen osob)",
                 "splneno": true/false,
                 "body": počet_bodů,
+                "jistota": 1-5,
                 "oduvodneni": "tvůj proces myšlení a zdůvodnění zde",
                 "citace": "přesná věta z textu dokazující splnění/nesplnění"
             }}
@@ -979,6 +1024,12 @@ async def evaluate_report(report_text: str, criteria_markdown: str, system_promp
         "celkove_skore": celkový_součet_bodů,
         "zpetna_vazba": "celkové shrnutí a doporučení pro studenta"
     }}
+
+    Pole "jistota" je míra tvé jistoty TÍMTO dílčím hodnocením na škále 1–5
+    (1 = velmi nejistý, 5 = zcela jistý). Nižší hodnotu použij, když se splnění dovozuje
+    z kontextu, text připouští více výkladů nebo posouzení závisí na právním výkladu.
+    Vyšší hodnotu použij tam, kde je údaj v ÚZ uveden výslovně a jednoznačně — a to
+    i tehdy, když kritérium splněno NENÍ, protože zjevná absence je jednoznačná také.
     
     IMPORTANT: Výsledkem tvé odpovědi MUSÍ být validní JSON! 
     NEPIŠ ŽÁDNÝ JINÝ TEXT OKOLO, ŽÁDNÉ VYSVĚTLIVKY ANI MARKDOWN BLOKY (např. ```json).

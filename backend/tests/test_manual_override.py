@@ -162,8 +162,47 @@ class TestAuditTrail:
 
         db_session.refresh(record)
         by_name = {v["nazev"]: v for v in record.json_result["vysledky"]}
-        assert by_name["K1"].get("_lecturer_modified") is True
-        assert "_lecturer_modified" not in by_name["K2"]
+        assert by_name["K1"].get("upraveno_lektorem") is True
+        assert "upraveno_lektorem" not in by_name["K2"]
+
+    def test_flag_is_server_derived_not_client_claimed(self, db_session, api_client):
+        """Klient příznak jen tvrdí — rozhoduje server podle skutečné změny.
+
+        Frontend si `upraveno_lektorem` nastavuje optimisticky kvůli odezvě v UI. Kdyby
+        se jeho tvrzení přebíralo, stačil by starší klient a zásah člověka by se
+        nezaznamenal — nebo naopak by se označilo kritérium, na které nikdo nesáhl.
+        """
+        lecturer = _make_lecturer(db_session, email="server@pcr.cz")
+        room = _make_class(db_session, lecturer)
+        record = _add_record(db_session, lecturer=lecturer, class_id=room.id)
+
+        payload = _lecturer_edit(k1_splneno=True)  # K1 zůstává jak bylo (splneno=True)
+        for v in payload["vysledky"]:
+            v["upraveno_lektorem"] = True  # klient to tvrdí u obou, ač nic nezměnil
+        payload["vysledky"][0]["oduvodneni"] = "AI: splněno"  # vrátit i text na původní
+
+        _patch(api_client, lecturer, record.id, payload)
+
+        db_session.refresh(record)
+        by_name = {v["nazev"]: v for v in record.json_result["vysledky"]}
+        assert "upraveno_lektorem" not in by_name["K1"]
+        assert "upraveno_lektorem" not in by_name["K2"]
+
+    def test_flag_survives_later_revert(self, db_session, api_client):
+        """Vrácení hodnoty zpět nesmí stopu po zásahu člověka smazat."""
+        lecturer = _make_lecturer(db_session, email="revert@pcr.cz")
+        room = _make_class(db_session, lecturer)
+        record = _add_record(db_session, lecturer=lecturer, class_id=room.id)
+
+        _patch(api_client, lecturer, record.id, _lecturer_edit(k1_splneno=False))
+        # Lektor si to rozmyslel a vrátil původní verdikt i text.
+        back = _lecturer_edit(k1_splneno=True)
+        back["vysledky"][0]["oduvodneni"] = "Lektor: po přezkoumání nesplněno"
+        _patch(api_client, lecturer, record.id, back)
+
+        db_session.refresh(record)
+        by_name = {v["nazev"]: v for v in record.json_result["vysledky"]}
+        assert by_name["K1"].get("upraveno_lektorem") is True
 
 
 class TestScoreIsServerAuthoritative:

@@ -34,6 +34,16 @@ export interface CriterionResult {
   body: number;
   oduvodneni: string;
   citace: string;
+  /**
+   * Míra jistoty modelu tímto dílčím hodnocením, 1–5 (ADR-029).
+   * `null` = model ji neuvedl; starší záznamy pole nemají vůbec.
+   *
+   * POZOR: je to modelovo TVRZENÍ o obtížnosti, ne měření jeho nejistoty — model
+   * neumí introspekci do vlastních pravděpodobností. Slouží k triáži, kam se podívat,
+   * ne jako důkaz, že jinde je hodnocení spolehlivé.
+   */
+  jistota?: number | null;
+  /** Zásah vyučujícího. Odvozuje SERVER diffem proti uložené verzi, ne klient. */
   upraveno_lektorem?: boolean;
   _llm_omitted?: boolean;
 }

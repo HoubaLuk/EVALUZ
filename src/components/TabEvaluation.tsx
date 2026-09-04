@@ -1200,6 +1200,15 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                                     <Icon icon={faGraduationCap} size="xs" style={{ color: 'var(--color-primary)' }} />
                                                                 </Tooltip>
                                                             )}
+                                                            {/* Nízká jistota modelu (ADR-029). Po zásahu vyučujícího se
+                                                                neukazuje — rozhodl člověk, odhad modelu je bezpředmětný. */}
+                                                            {!detail.upraveno_lektorem
+                                                                && typeof detail.jistota === 'number'
+                                                                && detail.jistota <= 2 && (
+                                                                <Tooltip content={`Model si tímto hodnocením není jistý (${detail.jistota}/5) — doporučeno ověřit. Jde o vlastní odhad modelu, ne o měření.`}>
+                                                                    <Icon icon={faTriangleExclamation} size="xs" style={{ color: 'var(--color-warning)' }} />
+                                                                </Tooltip>
+                                                            )}
                                                         </div>
                                                     </td>
                                                     <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', verticalAlign: 'top' }}>

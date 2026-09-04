@@ -436,7 +436,7 @@ EVALUZ/
 │   │   ├── tasks.py           # spawn_background() — silné reference na background tasky
 │   │   ├── text.py            # Normalizace názvů souborů a jmen
 │   │   └── sorting.py         # Řazení vyhodnocení podle příjmení
-│   ├── tests/                 # pytest suite (122 testů)
+│   ├── tests/                 # pytest suite (148 testů)
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── main.py                # Vstupní bod, CORS, router registrace
@@ -462,4 +462,4 @@ EVALUZ/
 
 ---
 
-*EVALUZ — Vyvinuto na ÚPVSP. Verze 3.15.1.*
+*EVALUZ — Vyvinuto na ÚPVSP. Verze 3.15.2.*

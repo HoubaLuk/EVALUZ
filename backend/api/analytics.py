@@ -41,10 +41,14 @@ def _merge_evaluation_json(stored: dict, incoming: dict) -> dict:
 
 
 def _mark_lecturer_edits(stored_vysledky: list, incoming_vysledky: list) -> list:
-    """Označí kritéria, do kterých zasáhl lektor, příznakem `_lecturer_modified`.
+    """Určí, do kterých kritérií zasáhl vyučující (`upraveno_lektorem`).
 
-    Diff se dělá na serveru podle názvu kritéria, takže frontend nemusí nic posílat navíc.
-    Jednou nastavený příznak se nemaže — drží informaci, že do položky sáhl člověk, i když
+    Příznak je **serverem odvozený**, ne převzatý od klienta: diff se dělá proti uložené
+    verzi podle názvu kritéria. Frontend si tentýž příznak nastavuje optimisticky kvůli
+    okamžité odezvě v UI, ale jeho tvrzení se nepřebírá — jinak by stačil zapomnětlivý
+    nebo starší klient a zásah člověka by se nezaznamenal.
+
+    Jednou zapsaný příznak se nemaže: drží informaci, že do položky sáhl člověk, i když
     ji lektor později vrátí na původní hodnotu.
     """
     original_by_name = {
@@ -56,14 +60,17 @@ def _mark_lecturer_edits(stored_vysledky: list, incoming_vysledky: list) -> list
             result.append(item)
             continue
         item = dict(item)
-        before = original_by_name.get(item.get("nazev"))
-        if before is not None:
-            changed = any(
-                before.get(field) != item.get(field)
-                for field in ("splneno", "body", "oduvodneni")
-            )
-            if changed or before.get("_lecturer_modified"):
-                item["_lecturer_modified"] = True
+        before = original_by_name.get(item.get("nazev")) or {}
+        changed = any(
+            before.get(field) != item.get(field)
+            for field in ("splneno", "body", "oduvodneni")
+        ) if before else False
+
+        if changed or before.get("upraveno_lektorem"):
+            item["upraveno_lektorem"] = True
+        else:
+            # Nepodložené tvrzení klienta se zahazuje — pole vlastní server.
+            item.pop("upraveno_lektorem", None)
         result.append(item)
     return result
 
