@@ -1200,13 +1200,25 @@ export function TabEvaluation({ selectedStudent, setSelectedStudent, scenarioId,
                                                                     <Icon icon={faGraduationCap} size="xs" style={{ color: 'var(--color-primary)' }} />
                                                                 </Tooltip>
                                                             )}
-                                                            {/* Nízká jistota modelu (ADR-029). Po zásahu vyučujícího se
-                                                                neukazuje — rozhodl člověk, odhad modelu je bezpředmětný. */}
-                                                            {!detail.upraveno_lektorem
-                                                                && typeof detail.jistota === 'number'
-                                                                && detail.jistota <= 2 && (
-                                                                <Tooltip content={`Model si tímto hodnocením není jistý (${detail.jistota}/5) — doporučeno ověřit. Jde o vlastní odhad modelu, ne o měření.`}>
-                                                                    <Icon icon={faTriangleExclamation} size="xs" style={{ color: 'var(--color-warning)' }} />
+                                                            {/* Jistota modelu (ADR-029). Zobrazuje se VŽDY, když ji model uvedl —
+                                                                jinak by lektor nepoznal rozdíl mezi „vysoká jistota" a „pole
+                                                                nedorazilo". Nízké hodnoty se navíc barevně odliší.
+                                                                Po zásahu vyučujícího se neukazuje: rozhodl člověk, odhad modelu
+                                                                je bezpředmětný. */}
+                                                            {!detail.upraveno_lektorem && typeof detail.jistota === 'number' && (
+                                                                <Tooltip content={detail.jistota <= 2
+                                                                    ? `Nízká jistota modelu (${detail.jistota}/5) — doporučeno ověřit. Je to vlastní odhad modelu, ne měření nejistoty.`
+                                                                    : `Jistota modelu tímto hodnocením: ${detail.jistota}/5. Je to vlastní odhad modelu — vysoká hodnota není důkazem správnosti.`}>
+                                                                    <span style={{
+                                                                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                                                                        fontSize: '0.7rem', fontWeight: 700, lineHeight: 1,
+                                                                        padding: '3px 5px', borderRadius: 4, whiteSpace: 'nowrap',
+                                                                        background: detail.jistota <= 2 ? 'rgba(226,132,19,0.15)' : 'rgba(0,0,0,0.06)',
+                                                                        color: detail.jistota <= 2 ? 'var(--color-warning)' : 'var(--text-muted)',
+                                                                    }}>
+                                                                        {detail.jistota <= 2 && <Icon icon={faTriangleExclamation} size="xs" />}
+                                                                        {detail.jistota}/5
+                                                                    </span>
                                                                 </Tooltip>
                                                             )}
                                                         </div>

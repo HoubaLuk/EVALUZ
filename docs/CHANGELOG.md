@@ -2,6 +2,30 @@
 
 ---
 
+## [v3.15.3] — 2026-09-07 — Metadata se do UI vůbec nedostávala
+
+### Problém
+
+Při testování na serveru nebylo pole `jistota` v UI vidět. Příčina není v zobrazení, ale na hranici API: `CriterionResult` je Pydantic model bez `extra='allow'` a **Pydantic v2 nedeklarovaná pole při serializaci tiše zahazuje**. Endpoint `GET /analytics/class/{id}` má `response_model=List[EvaluationResponse]`, jehož `vysledky` jsou právě `List[CriterionResult]` — všechna metadata tedy v databázi byla, ale do prohlížeče nedorazila. Bez chyby, bez záznamu v logu, jen prázdné místo v UI.
+
+Postiženo bylo `jistota`, `upraveno_lektorem`, `_llm_omitted` i `_llm_actual_name`. **Chyba je starší než ADR-029** — pole `jistota` ji jen konečně zviditelnilo, protože bylo nové a jeho absence byla nápadná. U `upraveno_lektorem` se projevovala zákeřněji: frontend si příznak nastavuje optimisticky, takže ikona zásahu vyučujícího se po editaci objevila a po `fetchEvaluations()` zmizela — vypadalo to jako drobná vada vykreslování, ve skutečnosti šlo o ztrátu dat.
+
+### Opraveno (ADR-030)
+
+- **`backend/models/evaluation.py`** — `CriterionResult` dostal `model_config = ConfigDict(extra='allow')` a explicitní deklaraci `jistota` a `upraveno_lektorem`. Explicitní deklarace dává typovou kontrolu a dokumentuje kontrakt; `extra='allow'` chrání budoucí pole a je **jediná cesta pro pole s podtržítkem** — ta v Pydantic v2 deklarovat nelze, jsou vyhrazená pro privátní atributy.
+- **`src/components/TabEvaluation.tsx`** — jistota se zobrazuje **vždy**, když ji model uvedl (odznak `4/5`), ne jen jako výstraha při hodnotě ≤ 2. Bez toho by lektor nepoznal rozdíl mezi „model si je jistý" a „pole nedorazilo". Nízké hodnoty se navíc barevně odliší.
+
+### Testy
+
+- **`backend/tests/test_evaluation_serialization.py`** (nový, 8 testů) — každé metadatové pole musí přežít serializaci, hodnoty se nesmí zkomolit, chybějící jistota nesmí vyrobit hodnotu, a projít musí i pole, které teprve vznikne. Poslední test jde end-to-end přes `GET /analytics/class/{id}`. Ověřeno dočasným odebráním `extra='allow'`: 5 z 8 testů selže.
+- Celkem 156 testů.
+
+### Poučení
+
+Uložení do DB a dostupnost v UI jsou dvě různé věci a mezi nimi leží Pydantic. Ke každému novému metadatovému poli v `json_result` patří regresní test na serializaci — postup „metadata v JSONB bez migrace" sám o sobě nestačí. Doplněno jako varování do sekce 3.2 technické dokumentace.
+
+---
+
 ## [v3.15.2] — 2026-09-04 — Míra jistoty u dílčího hodnocení
 
 ### Problém

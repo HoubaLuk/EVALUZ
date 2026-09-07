@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.15.2  
+**Verze:** 3.15.3  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -397,7 +397,9 @@ if isinstance(result, str):  # double-encoded
     result = json.loads(result)
 ```
 
-**Metadata v JSONB bez migrace**: Nová pole jako `_llm_omitted`, `_llm_actual_name`, `_lecturer_modified` jsou vkládána přímo do `json_result` dict. Nevyžadují DB migraci — JSONB je schemaless. Frontend je čte podmíněně.
+**Metadata v JSONB bez migrace**: Nová pole jako `_llm_omitted`, `_llm_actual_name`, `upraveno_lektorem`, `jistota` jsou vkládána přímo do `json_result` dict. Nevyžadují DB migraci — JSONB je schemaless. Frontend je čte podmíněně.
+
+> **Uložit ale nestačí (ADR-030).** Mezi databází a prohlížečem stojí Pydantic: `CriterionResult` musí mít `extra='allow'`, jinak v2 nedeklarované pole při serializaci **tiše zahodí** a v UI není co zobrazit — bez chyby a bez záznamu v logu. Ke každému novému metadatovému poli patří test v `tests/test_evaluation_serialization.py`.
 
 | Příznak | Význam |
 |---|---|
@@ -575,6 +577,7 @@ backend/tests/
 ├── test_analytics_determinism.py # rozpor kritérií a stabilní pořadí `stats` (6 testů, ADR-026, ADR-027)
 ├── test_seeder_prompts.py       # seeder nepřepisuje prompty správce (8 testů, ADR-028)
 ├── test_jistota.py              # normalizace pole `jistota` (24 testů, ADR-029)
+├── test_evaluation_serialization.py # metadata z json_result dorazí do UI (8 testů, ADR-030)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
@@ -583,7 +586,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **148 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **156 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -1116,6 +1119,24 @@ Produkční `prompt2` navíc rozlišuje tři stavy nesplnění („Chybí" / „
 **Chybějící hodnota se vědomě NEDOPLŇUJE náhradním číslem** — vymyšlený odhad by v UI vypadal stejně jako skutečný. `None` znamená „neuvedeno" a `_validate_and_fix_vysledky` v takovém případě loguje `WARNING`: bez něj by tichá ignorace nového pole modelem vypadala stejně jako „všechno je jednoznačné".
 
 **Kompromis a hranice platnosti:** model touto hodnotou reportuje své **tvrzení** o obtížnosti, ne skutečnou tokenovou nejistotu — introspekci do vlastních pravděpodobností neumí. Nízká jistota je tedy užitečné vodítko, kam se podívat; vysoká jistota **není** důkazem, že je hodnocení správné. Skutečné měření by daly `logprobs` z vLLM, což je ale výrazně větší zásah (u strukturovaného JSON výstupu je obtížné izolovat token nesoucí verdikt). Jistota z principu neovlivňuje body ani skóre — je to informace pro člověka.
+
+---
+
+### ADR-030: Response model nesmí zahazovat metadata z `json_result` (v3.15.3)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Sekce 3.2 zavádí postup „metadata v JSONB bez migrace" — nová pole (`_llm_omitted`, `_llm_actual_name`, `upraveno_lektorem`, `jistota`) se ukládají přímo do `json_result`, protože JSONB je schemaless. Tenhle postup ale kolidoval s Pydantic modelem na výstupu: `CriterionResult` neměl `extra='allow'` a **Pydantic v2 nedeklarovaná pole při serializaci tiše zahazuje**.
+
+Endpoint `GET /analytics/class/{id}` má `response_model=List[EvaluationResponse]`, jehož `vysledky` jsou právě `List[CriterionResult]`. Všechna metadata tedy v databázi byla, ale do prohlížeče se nedostala. Selhání bylo dokonale tiché — žádná chyba, žádný log, jen prázdné místo v UI.
+
+Postiženo bylo i `upraveno_lektorem`: frontend si ho nastavuje optimisticky, takže ikona zásahu vyučujícího se po editaci objevila, ale po `fetchEvaluations()` zmizela. Vypadalo to jako drobná vada vykreslování, ve skutečnosti šlo o ztrátu dat na hranici API. Chyba je starší než ADR-029 — pole `jistota` ji jen konečně zviditelnilo, protože bylo nové a jeho absence byla nápadná.
+
+**Rozhodnutí:** `CriterionResult` dostal `model_config = ConfigDict(extra='allow')` a explicitní deklaraci `jistota` a `upraveno_lektorem`. Explicitní deklarace dává typovou kontrolu a dokumentuje kontrakt; `extra='allow'` chrání pole, která teprve vzniknou, a je **jediná cesta pro pole s podtržítkem** — ta v Pydantic v2 deklarovat nelze, jsou vyhrazená pro privátní atributy.
+
+**Kompromis:** `extra='allow'` propustí i překlep v názvu pole, takže model už není striktní bránou. To je přijatelné: jde o výstupní model nad daty, která si server sám ukládá, ne o validaci nedůvěryhodného vstupu. Tichá ztráta informace je horší riziko než propuštěné pole navíc.
+
+**Poučení do budoucna:** kdykoli přibude metadatové pole do `json_result`, patří k němu regresní test na serializaci (`tests/test_evaluation_serialization.py`). Uložení do DB a dostupnost v UI jsou dvě různé věci a mezi nimi leží Pydantic.
 
 ---
 
