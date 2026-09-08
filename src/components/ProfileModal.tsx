@@ -39,6 +39,10 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
         email: '',
     });
 
+    // Skutečná role z RBAC. Odděleně od `funkcni_zarazeni`, které je jen popiskem do
+    // podpisové doložky — tyhle dvě věci se dřív v UI pletly (ADR-032).
+    const [account, setAccount] = useState({ id: 0, is_admin: false, is_superadmin: false });
+
     // Změna hesla
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -85,6 +89,11 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                     school_location: meData.school_location || '',
                     funkcni_zarazeni: meData.funkcni_zarazeni || '',
                     email: meData.email || '',
+                });
+                setAccount({
+                    id: meData.id || 0,
+                    is_admin: !!meData.is_admin,
+                    is_superadmin: !!meData.is_superadmin,
                 });
             }
 
@@ -253,6 +262,39 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                         </div>
                     ) : activeSection === 'profile' ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            {/* Přehled účtu (ADR-032). Skutečná role se dřív nikde nezobrazovala —
+                                v profilu svítilo jen „funkční zařazení", což je popisek do doložky.
+                                Administrátor tak u sebe viděl „Vyučující" a vypadalo to jako
+                                chyba oprávnění. */}
+                            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '12px 16px' }}>
+                                <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 10px' }}>Přehled účtu</h3>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 16px', fontSize: '0.82rem', alignItems: 'baseline' }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>Role v systému</span>
+                                    <strong style={{ color: account.is_superadmin || account.is_admin ? 'var(--color-primary)' : 'var(--text-primary)' }}>
+                                        {account.is_superadmin ? 'Superadministrátor' : account.is_admin ? 'Administrátor' : 'Vyučující'}
+                                    </strong>
+
+                                    <span style={{ color: 'var(--text-muted)' }}>Oprávnění</span>
+                                    <span>
+                                        {account.is_superadmin
+                                            ? 'Správa systému, promptů, uživatelů a všech vzdělávacích zařízení.'
+                                            : account.is_admin
+                                                ? 'Správa systému, promptů a statistik v rámci vlastního zařízení.'
+                                                : 'Vlastní kritéria, vyhodnocení a analytika. Administrace není přístupná.'}
+                                    </span>
+
+                                    <span style={{ color: 'var(--text-muted)' }}>Organizační článek</span>
+                                    <span>{profile.school_location || '—'}</span>
+
+                                    <span style={{ color: 'var(--text-muted)' }}>Přihlašovací e-mail</span>
+                                    <span>{profile.email || '—'}</span>
+                                </div>
+                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '10px 0 0' }}>
+                                    Roli mění výhradně superadministrátor v Administraci. Pole „Funkční zařazení" níže je
+                                    pouze popisek do podpisové doložky a s oprávněními nesouvisí.
+                                </p>
+                            </div>
+
                             <div>
                                 <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)', margin: '0 0 4px' }}>Osobní údaje</h3>
                                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>Údaje zadané níže budou použity pro generování PDF a oddělení vašich dat v systému.</p>
@@ -294,7 +336,7 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                                     </select>
                                 </div>
                                 <div className="form-group">
-                                    <label>Funkční zařazení</label>
+                                    <label>Funkční zařazení (popisek do doložky)</label>
                                     <select value={profile.funkcni_zarazeni} onChange={e => {
                                         const val = e.target.value;
                                         let newRankShortcut = profile.rank_shortcut;

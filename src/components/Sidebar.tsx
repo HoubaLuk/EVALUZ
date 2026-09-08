@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../utils/api';
+import { saveWorkspace, writeCachedWorkspace } from '../utils/workspace';
 import {
   faFolder, faFolderOpen, faChevronDown, faChevronRight, faChevronLeft,
   faEllipsisVertical, faFileLines, faPen, faTrash, faCopy,
@@ -53,7 +54,17 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
 
   const saveClasses = React.useCallback((newClasses: ClassData[]) => {
     setClasses(newClasses);
-    localStorage.setItem('upvsp_classes', JSON.stringify(newClasses));
+    // Cache pro okamžité vykreslení; zdrojem pravdy je server (ADR-031). Bez uložení
+    // na server existovala modelová situace jen v prohlížeči, kde vznikla.
+    writeCachedWorkspace(newClasses);
+    saveWorkspace(newClasses).catch(err => {
+      console.error('Uložení stromu situací na server selhalo:', err);
+      setToast({
+        message: 'Změnu se nepodařilo uložit na server — na jiném počítači se neprojeví. Zkuste to prosím znovu.',
+        type: 'error',
+      });
+      setTimeout(() => setToast(null), 8000);
+    });
   }, [setClasses]);
 
   const handleSaveEdit = React.useCallback(() => {

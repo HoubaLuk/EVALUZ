@@ -211,6 +211,24 @@ def run_migrations(engine):
                 END $$;
             """))
 
+        # 4b. TABULKA: lecturer_workspaces (ADR-031)
+        # Na PostgreSQL tabulku vytvoří Alembic; tenhle blok je pro SQLite dev, kde
+        # `init_db()` → `create_all()` sice tabulku založí z modelu, ale u existující
+        # vývojové databáze by chyběla. `IF NOT EXISTS` je proto idempotentní.
+        if is_sqlite:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS lecturer_workspaces (
+                    id INTEGER PRIMARY KEY,
+                    lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE,
+                    tree TEXT,
+                    updated_at TIMESTAMP
+                );
+            """))
+            conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_lecturer_workspaces_lecturer_id
+                ON lecturer_workspaces(lecturer_id);
+            """))
+
         # 5. TABULKA: golden_examples
         if not is_sqlite:
             conn.execute(text("""

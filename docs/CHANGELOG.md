@@ -2,6 +2,39 @@
 
 ---
 
+## [v3.16.0] — 2026-09-08 — Modelové situace následují lektora, ne prohlížeč
+
+### Problém
+
+Lektorka vytvořila na jednom počítači modelovou situaci, po opětovném přihlášení na tomtéž počítači ji viděla, ale z jiného počítače zmizela i po refreshi. Příčina: **strom tříd a modelových situací žil výhradně v `localStorage`** (`upvsp_classes`) a `scenario_id` se generuje na klientovi jako `scen-${Date.now()}`. V databázi žádná tabulka scénářů neexistovala.
+
+Data ztracená nebyla — kritéria (25 položek) i tři vyhodnocení v DB zůstala. Jen jejich `scenario_id` nešlo odnikud zjistit, takže se k nim z druhého počítače nedalo dostat.
+
+Souběžně se ukázalo, že lektorce s rolí Administrátor svítilo v profilu i za jménem „Vyučující". Backend přitom oprávnění vynucoval správně (v logu `403` před přidělením role, `200` po něm) — šlo o **dvě různé věci pojmenované stejnými slovy**.
+
+### Strom situací na serveru (ADR-031)
+
+- **`backend/models/db_models.py`, `backend/alembic/versions/d8e9f0a1b2c3_*.py`, `backend/core/database.py`** — nová tabulka `lecturer_workspaces` (`lecturer_id` UNIQUE, `tree` JSONB, `updated_at`). Strom se ukládá jako jeden JSON dokument, ne normalizovaně: frontend s ním vždy pracuje jako s celkem, takže normalizace by přidala složitost a možnost nekonzistence mezi dílčími operacemi.
+- **`backend/api/workspace.py`** (nový) — `GET`/`PUT /api/v1/workspace`. Odpověď rozlišuje `classes: null` (lektor na serveru ještě nic nemá) od `classes: []` (vědomě vymazáno a nesmí se vrátit) — na tom závisí bezpečný přechod ze staré verze.
+- **`src/utils/workspace.ts`** (nový) — `syncWorkspaceOnLogin()` při prvním přihlášení po nasazení jednorázově vytlačí strom z prohlížeče na server, takže o dosavadní situace nikdo nepřijde a zpřístupní se i z ostatních počítačů. `localStorage` zůstává jako **cache pro okamžité vykreslení**, ne jako zdroj pravdy.
+- **`src/App.tsx`, `src/components/Sidebar.tsx`** — strom se načítá ze serveru po přihlášení a každá změna se tam ukládá. Selhání uložení nebrání práci, ale lektor dostane varování, že se změna na jiném počítači neprojeví.
+
+**Kompromis:** souběžná editace ze dvou počítačů skončí „poslední zápis vyhrává". Při třech uživatelích přijatelné; `updated_at` umožní poznat, kdy k tomu došlo.
+
+### Funkční zařazení není role (ADR-032)
+
+- **`src/App.tsx`** — za jménem se zobrazuje **skutečná RBAC role**. Dřív tam bylo `funkcni_zarazeni` s natvrdo zadaným fallbackem `' - Vyučující'`, takže administrátorovi bez vyplněného zařazení svítilo u jména „Vyučující" bez ohledu na oprávnění.
+- **`src/components/ProfileModal.tsx`** — nový panel „Přehled účtu": role, co konkrétně smí, organizační článek, přihlašovací e-mail, a poznámka, že roli mění výhradně superadministrátor. Pole níže přejmenováno na „Funkční zařazení (popisek do doložky)".
+
+Obě pole zůstávají — mají různé účely. Slučovat je by znamenalo buď ztratit popisek do doložky, nebo dát uživateli možnost měnit si vlastní oprávnění.
+
+### Testy
+
+- **`backend/tests/test_workspace.py`** (nový, 9 testů) — strom přežije a vrátí se, `null` vs. prázdný seznam, opakované uložení aktualizuje místo duplikace, izolace mezi lektory, odmítnutí nesmyslně velkého stromu, situace bez názvu uložení neshodí.
+- Celkem 165 testů. Migrace ověřena proti reálnému PostgreSQL přes `backend/scripts/verify_migrations.sh` (upgrade → downgrade → upgrade).
+
+---
+
 ## [v3.15.3] — 2026-09-07 — Metadata se do UI vůbec nedostávala
 
 ### Problém

@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.15.3  
+**Verze:** 3.16.0  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -380,6 +380,7 @@ logger = logging.getLogger("evaluz.llm")
 | `evaluation_criteria` | Hodnotící metodiky (markdown). Filtrováno podle `lecturer_id`. |
 | `criteria` | Rozparsovaná jednotlivá kritéria z `evaluation_criteria`. Používána pro chunking a pro `expected_criteria_names`. |
 | `student_evaluations` | Výsledky evaluací. Klíčové sloupce: `json_result` (JSONB), `source_text` (text ÚZ), `student_identity` (JSONB), `cleaned_name`, `scenario_name`, `scenario_display_name`, `is_approved`, `created_at`. Auditní stopa lektorského zásahu (ADR-025): `ai_original_json` (JSONB, původní hodnocení AI před první ruční úpravou), `modified_at`, `modified_by` (FK na `lecturers`, `ON DELETE SET NULL`). NULL ve všech třech znamená „hodnocení nebylo ručně upravováno". |
+| `lecturer_workspaces` | Strom tříd a modelových situací lektora jako JSON (ADR-031). Dřív jen v `localStorage`, takže situace vytvořená na jednom počítači na jiném neexistovala. |
 | `class_analyses` | AI analytika třídy (Phase 3). `content_json` (JSONB), izolováno podle `lecturer_id` + `class_id`. |
 | `app_settings` | Dynamická konfigurace (LLM URL, klíče, modely, prahy, feature flags, CHUNK_SIZE, CHUNK_THRESHOLD_TOKENS_PCT). |
 | `system_prompts` | Prompty pro jednotlivé fáze (`phase_name`). Editovatelné v Admin UI. |
@@ -578,6 +579,7 @@ backend/tests/
 ├── test_seeder_prompts.py       # seeder nepřepisuje prompty správce (8 testů, ADR-028)
 ├── test_jistota.py              # normalizace pole `jistota` (24 testů, ADR-029)
 ├── test_evaluation_serialization.py # metadata z json_result dorazí do UI (8 testů, ADR-030)
+├── test_workspace.py            # strom tříd a situací na serveru (9 testů, ADR-031)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
@@ -586,7 +588,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **156 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **165 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -1137,6 +1139,45 @@ Postiženo bylo i `upraveno_lektorem`: frontend si ho nastavuje optimisticky, ta
 **Kompromis:** `extra='allow'` propustí i překlep v názvu pole, takže model už není striktní bránou. To je přijatelné: jde o výstupní model nad daty, která si server sám ukládá, ne o validaci nedůvěryhodného vstupu. Tichá ztráta informace je horší riziko než propuštěné pole navíc.
 
 **Poučení do budoucna:** kdykoli přibude metadatové pole do `json_result`, patří k němu regresní test na serializaci (`tests/test_evaluation_serialization.py`). Uložení do DB a dostupnost v UI jsou dvě různé věci a mezi nimi leží Pydantic.
+
+---
+
+### ADR-031: Strom tříd a modelových situací patří na server (v3.16.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Strom tříd a modelových situací žil výhradně v `localStorage` prohlížeče (`upvsp_classes`) a `scenario_id` se generuje na klientovi jako `scen-${Date.now()}`. V databázi žádná tabulka scénářů neexistovala — backend zná `scenario_name` jen jako řetězec, na který se odkazují kritéria a vyhodnocení.
+
+Lektorka proto vytvořila modelovou situaci na jednom počítači, po opětovném přihlášení na tomtéž počítači ji viděla (localStorage přetrvá), ale z jiného počítače zmizela. **Data přitom ztracená nebyla** — kritéria i vyhodnocení v DB zůstala. Jen jejich `scenario_id` nešlo odnikud zjistit, takže se k nim nedalo dostat. Pro pilot běžící na více strojích je to zásadní: pracovní plocha nesledovala uživatele.
+
+**Možnosti:**
+- A: Normalizovat do tabulek `classes` + `scenarios` s vazbami. Čistší datový model, ale frontend se stromem vždy pracuje jako s celkem (načte, upraví, uloží), takže by přibyla složitost a možnost nekonzistence mezi dílčími operacemi.
+- **B (zvoleno):** Jeden řádek na lektora s celým stromem jako JSON dokument.
+
+**Rozhodnutí:** Tabulka `lecturer_workspaces` (`lecturer_id` UNIQUE, `tree` JSONB, `updated_at`) a endpointy `GET`/`PUT /api/v1/workspace`. Server je zdrojem pravdy; `localStorage` zůstává jako **cache pro okamžité vykreslení**, aby strom po přihlášení na okamžik nezmizel.
+
+Odpověď rozlišuje dva stavy, na kterých závisí přechod ze staré verze:
+- `classes: null` — lektor na serveru ještě nic nemá → frontend jednorázově vytlačí strom z prohlížeče nahoru (`syncWorkspaceOnLogin`), takže o dosavadní situace nepřijde,
+- `classes: []` — lektor si strom vědomě vymazal a **nesmí** se mu vrátit z cache.
+
+**Kompromis:** Souběžná editace ze dvou počítačů skončí „poslední zápis vyhrává". Při současné velikosti pilotu (3 uživatelé) je to přijatelné a `updated_at` umožní poznat, kdy k tomu došlo; u větší skupiny by bylo potřeba verzování nebo zámek. Neúspěšné uložení na server nebrání práci — projeví se jako varování a strom zůstane v cache.
+
+---
+
+### ADR-032: Funkční zařazení není role (v3.16.0)
+
+**Status:** Decided & Implemented
+
+**Kontext:** Lektorce byla přidělena role Administrátor, ale v profilu i za jménem v hlavičce se jí zobrazovalo „Vyučující". Vypadalo to jako chyba oprávnění; ve skutečnosti šlo o **dvě různé věci pojmenované stejnými slovy**:
+
+- **RBAC role** (`is_admin` / `is_superadmin`) — přiděluje superadministrátor, řídí přístup. Backend ji vynucoval správně (v logu `403` před přidělením, `200` po něm).
+- **`funkcni_zarazeni`** — samostatné pole, které si uživatel vybírá sám (Vyučující / Metodik / Administrátor) a které slouží jen jako popisek do podpisové doložky a k předvyplnění hodnosti.
+
+`App.tsx` navíc za jménem zobrazoval `funkcni_zarazeni` s natvrdo zadaným fallbackem `' - Vyučující'`, takže administrátorovi bez vyplněného zařazení svítilo u jména „Vyučující" bez ohledu na skutečná oprávnění.
+
+**Rozhodnutí:** Za jménem v hlavičce se nově zobrazuje **skutečná RBAC role**. Profil dostal panel „Přehled účtu" se čtyřmi řádky (role, co konkrétně smí, organizační článek, přihlašovací e-mail) a poznámkou, že roli mění výhradně superadministrátor. Pole níže je přejmenované na „Funkční zařazení (popisek do doložky)".
+
+**Kompromis:** Obě pole zůstávají — mají různé účely a slučovat je by znamenalo buď ztratit popisek do doložky, nebo dát uživateli možnost měnit si vlastní oprávnění. Řešením je pojmenování, ne odstranění.
 
 ---
 

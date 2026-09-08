@@ -89,6 +89,25 @@ class ClassAnalysis(Base):
     computed_at = Column(DateTime)       # Kdy byla AI analýza naposledy vypočítána
     version = Column(Integer, default=1) # Inkrementuje se při každé regeneraci
 
+class LecturerWorkspace(Base):
+    """Strom tříd a modelových situací jednoho lektora (ADR-031).
+
+    Dřív žil výhradně v `localStorage` prohlížeče, takže situace vytvořená na jednom
+    počítači na jiném neexistovala — kritéria a vyhodnocení v DB sice zůstala, ale jejich
+    `scenario_id` nešlo odnikud zjistit, takže se k datům nedalo dostat.
+
+    Strom se ukládá jako jeden JSON dokument, ne normalizovaně do tabulek tříd a situací:
+    frontend s ním vždy pracuje jako s celkem (načte, upraví, uloží), takže normalizace by
+    přidala složitost bez užitku. Daň je „poslední zápis vyhrává" při souběžné editaci
+    ze dvou počítačů — proto `updated_at`, aby šlo poznat, kdy k tomu došlo.
+    """
+    __tablename__ = "lecturer_workspaces"
+    id = Column(Integer, primary_key=True, index=True)
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), unique=True, index=True)
+    tree = Column(JSONType)
+    updated_at = Column(DateTime)
+
+
 class ExportHistory(Base):
     __tablename__ = "export_history"
     id = Column(Integer, primary_key=True, index=True)

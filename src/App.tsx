@@ -6,6 +6,7 @@ import {
 import { Icon } from './components/Icon';
 
 import { Tab, ClassData, DEFAULT_CLASS_DATA } from './types';
+import { readCachedWorkspace, syncWorkspaceOnLogin, writeCachedWorkspace } from './utils/workspace';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { AdminModal } from './components/AdminModal';
@@ -57,10 +58,12 @@ export default function EvaluzDashboard() {
   });
 
   // Lifed State
+  // Cache z prohlížeče slouží jen k okamžitému vykreslení, než dorazí strom ze serveru
+  // (ADR-031). Zdrojem pravdy je server — viz syncWorkspaceOnLogin() níže.
   const [classes, setClasses] = React.useState<ClassData[]>(() => {
-    const stored = localStorage.getItem('upvsp_classes');
-    if (stored) return JSON.parse(stored);
-    localStorage.setItem('upvsp_classes', JSON.stringify(DEFAULT_CLASS_DATA));
+    const cached = readCachedWorkspace();
+    if (cached) return cached;
+    writeCachedWorkspace(DEFAULT_CLASS_DATA);
     return DEFAULT_CLASS_DATA;
   });
 
@@ -200,10 +203,25 @@ export default function EvaluzDashboard() {
           } else {
             const meData = await meRes.json();
             const fullName = `${meData.rank_shortcut || ''} ${meData.title_before || ''} ${meData.first_name || ''} ${meData.last_name || ''}`;
-            const displayRole = meData.funkcni_zarazeni ? ` - ${meData.funkcni_zarazeni}` : ' - Vyučující';
-            setLecturerName(fullName.replace(/\s+/g, ' ').trim() + displayRole);
+            // Za jménem se ukazuje SKUTEČNÁ role (oprávnění), ne funkční zařazení.
+            // Dřív tu bylo `funkcni_zarazeni` s natvrdo zadaným fallbackem „Vyučující“,
+            // takže adminovi svítilo u jména „Vyučující“ a vypadalo to jako chyba
+            // oprávnění — přitom šlo o samostatné pole pro podpisovou doložku (ADR-032).
+            const roleLabel = meData.is_superadmin ? 'Superadmin' : meData.is_admin ? 'Administrátor' : 'Vyučující';
+            setLecturerName(fullName.replace(/\s+/g, ' ').trim() + ` - ${roleLabel}`);
             setLecturerId(meData.id);
             setIsAdminUser(meData.is_superadmin || meData.is_admin);
+
+            // Strom tříd a situací je uložený na serveru (ADR-031). Bez toho existovala
+            // modelová situace jen v prohlížeči, kde vznikla.
+            try {
+              const tree = await syncWorkspaceOnLogin();
+              if (tree !== null) setClasses(tree);
+            } catch (e) {
+              // Selhání synchronizace nesmí zabránit přihlášení — pracuje se dál nad
+              // cache z prohlížeče a příští uložení se pokusí strom vytlačit znovu.
+              console.error('Synchronizace stromu situací selhala:', e);
+            }
 
             if (meData.must_change_password) {
               setAuthState('FORCE_PASSWORD_CHANGE');

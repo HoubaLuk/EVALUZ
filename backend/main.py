@@ -18,7 +18,7 @@ setup_logging(level=settings.LOG_LEVEL, production=settings.is_production)
 logger = logging.getLogger("evaluz.main")
 
 # ── Importy po inicializaci loggeru ─────────────────────────────────────────
-from api import evaluate, admin, criteria, analytics, export, auth
+from api import evaluate, admin, criteria, analytics, export, auth, workspace
 from core.database import get_db, init_db, run_alembic_migrations, SessionLocal
 from core.seeder import seed_database
 from __version__ import __version__
@@ -189,6 +189,7 @@ app.include_router(criteria.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
+app.include_router(workspace.router, prefix="/api/v1")
 from api.statistics import router as statistics_router
 app.include_router(statistics_router, prefix="/api/v1")
 
