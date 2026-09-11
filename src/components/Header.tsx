@@ -6,6 +6,7 @@ import {
   faBars, faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { Icon } from './Icon';
+import { clearSessionState } from '../utils/workspace';
 import { Tab } from '../types';
 import { API_BASE_URL } from '../utils/api';
 
@@ -148,7 +149,7 @@ export function Header({
                     <Icon icon={faUserPen} /> Můj profil
                   </button>
                   <div className="dropdown-item--separator" role="separator" />
-                  <button className="dropdown-item dropdown-item--danger" onClick={() => { localStorage.removeItem('upvsp_token'); window.location.reload(); }}>
+                  <button className="dropdown-item dropdown-item--danger" onClick={() => { clearSessionState(); window.location.reload(); }}>
                     <Icon icon={faRightFromBracket} /> Odhlásit se
                   </button>
                 </div>

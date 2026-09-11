@@ -89,23 +89,42 @@ class ClassAnalysis(Base):
     computed_at = Column(DateTime)       # Kdy byla AI analýza naposledy vypočítána
     version = Column(Integer, default=1) # Inkrementuje se při každé regeneraci
 
-class LecturerWorkspace(Base):
-    """Strom tříd a modelových situací jednoho lektora (ADR-031).
+class StudyGroup(Base):
+    """„Třída" ve stromu vlevo — složka sdružující modelové situace (ADR-033).
 
-    Dřív žil výhradně v `localStorage` prohlížeče, takže situace vytvořená na jednom
-    počítači na jiném neexistovala — kritéria a vyhodnocení v DB sice zůstala, ale jejich
-    `scenario_id` nešlo odnikud zjistit, takže se k datům nedalo dostat.
-
-    Strom se ukládá jako jeden JSON dokument, ne normalizovaně do tabulek tříd a situací:
-    frontend s ním vždy pracuje jako s celkem (načte, upraví, uloží), takže normalizace by
-    přidala složitost bez užitku. Daň je „poslední zápis vyhrává" při souběžné editaci
-    ze dvou počítačů — proto `updated_at`, aby šlo poznat, kdy k tomu došlo.
+    POZOR na jméno: tabulka `classes` (`ClassRoom`) je něco JINÉHO — analytický kbelík,
+    jeden na lektora, na který se váže `class_id` u vyhodnocení. V českém UI se obojímu
+    říká „třída", v kódu se to nesmí plést. Proto `study_groups`.
     """
-    __tablename__ = "lecturer_workspaces"
+    __tablename__ = "study_groups"
     id = Column(Integer, primary_key=True, index=True)
-    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), unique=True, index=True)
-    tree = Column(JSONType)
-    updated_at = Column(DateTime)
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
+    name = Column(String, default="")
+    position = Column(Integer, default=0)
+    created_at = Column(DateTime)
+
+
+class Scenario(Base):
+    """Modelová situace jako DATA, ne jako položka stromu v prohlížeči (ADR-033).
+
+    Dřív situace nikde neexistovala: `scenario_id` se generovalo na klientovi
+    (`scen-${Date.now()}`) a jediným záznamem o tom, že situace vůbec je, byl strom
+    v `localStorage`, později JSON blob v `lecturer_workspaces` (ADR-031). Kritéria
+    a vyhodnocení se na klíč jen odkazovaly — takže když se strom ztratil nebo přepsal,
+    data v DB zůstala, ale nevedla k nim žádná cesta.
+
+    `scenario_key` odpovídá `scenario_name` v `evaluation_criteria` i `student_evaluations`
+    (backend se na něj váže na desítkách míst, ta vazba se nemění). Generuje ho ale SERVER,
+    takže kolize mezi klienty nemůže vzniknout ani teoreticky.
+    """
+    __tablename__ = "scenarios"
+    id = Column(Integer, primary_key=True, index=True)
+    lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
+    group_id = Column(Integer, ForeignKey("study_groups.id", ondelete="CASCADE"), index=True)
+    scenario_key = Column(String, unique=True, index=True)
+    display_name = Column(String, default="")
+    position = Column(Integer, default=0)
+    created_at = Column(DateTime)
 
 
 class ExportHistory(Base):

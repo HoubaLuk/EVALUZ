@@ -5,8 +5,8 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { Icon } from './components/Icon';
 
-import { Tab, ClassData, DEFAULT_CLASS_DATA } from './types';
-import { readCachedWorkspace, syncWorkspaceOnLogin, writeCachedWorkspace } from './utils/workspace';
+import { Tab, ClassData } from './types';
+import { clearSessionState } from './utils/workspace';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { AdminModal } from './components/AdminModal';
@@ -58,16 +58,12 @@ export default function EvaluzDashboard() {
   });
 
   // Lifed State
-  // Cache z prohlížeče slouží jen k okamžitému vykreslení, než dorazí strom ze serveru
-  // (ADR-031). Zdrojem pravdy je server — viz syncWorkspaceOnLogin() níže.
-  const [classes, setClasses] = React.useState<ClassData[]>(() => {
-    const cached = readCachedWorkspace();
-    if (cached) return cached;
-    writeCachedWorkspace(DEFAULT_CLASS_DATA);
-    return DEFAULT_CLASS_DATA;
-  });
+  // Strom přichází výhradně ze serveru (ADR-033); načítá ho Sidebar. V prohlížeči po něm
+  // nezůstává nic — právě cache byla cestou, kudy se strom jednoho lektora dostal
+  // do účtu druhého na sdíleném počítači.
+  const [classes, setClasses] = React.useState<ClassData[]>([]);
 
-  const [activeClassId, setActiveClassId] = useState<string | null>(null);
+  const [activeClassId, setActiveClassId] = useState<number | null>(null);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('scenario') || null
   );
@@ -142,9 +138,11 @@ export default function EvaluzDashboard() {
     window.history.replaceState({}, '', newUrl);
   }, [activeTab, activeScenarioId]);
 
-  const handleSelectScenario = (classId: string, scenarioId: string) => {
-    setActiveClassId(classId);
-    setActiveScenarioId(scenarioId);
+  const handleSelectScenario = (classId: number, scenarioKey: string) => {
+    // `classId` je databázové ID třídy, `scenarioKey` je `scenario_key` — to, co putuje
+    // do URL a do všech volání API. Dřív to bylo obojí jeden klientský řetězec.
+    setActiveClassId(classId || null);
+    setActiveScenarioId(scenarioKey);
     setCachedAnalytics({});
     setHasEvaluations(false);
     setHasCriteria(false);
@@ -155,7 +153,7 @@ export default function EvaluzDashboard() {
     if (activeScenarioId) {
       // Scénář byl načten z URL — najít a nastavit jeho třídu
       for (const cls of classes) {
-        if (cls.scenarios?.some(s => s.id === activeScenarioId)) {
+        if (cls.scenarios?.some(s => s.key === activeScenarioId)) {
           setActiveClassId(cls.id);
           return;
         }
@@ -166,13 +164,13 @@ export default function EvaluzDashboard() {
       const firstClass = classes[0];
       if (firstClass.scenarios && firstClass.scenarios.length > 0) {
         setActiveClassId(firstClass.id);
-        setActiveScenarioId(firstClass.scenarios[0].id);
+        setActiveScenarioId(firstClass.scenarios[0].key);
       }
     }
   }, [classes]);
 
   const activeClass = classes.find(c => c.id === activeClassId);
-  const activeScenario = activeClass?.scenarios.find(s => s.id === activeScenarioId);
+  const activeScenario = activeClass?.scenarios.find(s => s.key === activeScenarioId);
 
   // --- Auth & Initial Load ---
   useEffect(() => {
@@ -198,7 +196,10 @@ export default function EvaluzDashboard() {
           if (!meRes.ok) {
             console.error("Ověřování tokenu selhalo, status:", meRes.status);
             setToken(null);
-            localStorage.removeItem('upvsp_token');
+            // Uklidit VŠECHNO, ne jen token: zbytky stavu po předchozím účtu byly
+            // tím, co se propsalo dalšímu přihlášenému (ADR-033).
+            clearSessionState();
+            setClasses([]);
             setAuthState('LOGIN_REQUIRED');
           } else {
             const meData = await meRes.json();
@@ -212,16 +213,6 @@ export default function EvaluzDashboard() {
             setLecturerId(meData.id);
             setIsAdminUser(meData.is_superadmin || meData.is_admin);
 
-            // Strom tříd a situací je uložený na serveru (ADR-031). Bez toho existovala
-            // modelová situace jen v prohlížeči, kde vznikla.
-            try {
-              const tree = await syncWorkspaceOnLogin();
-              if (tree !== null) setClasses(tree);
-            } catch (e) {
-              // Selhání synchronizace nesmí zabránit přihlášení — pracuje se dál nad
-              // cache z prohlížeče a příští uložení se pokusí strom vytlačit znovu.
-              console.error('Synchronizace stromu situací selhala:', e);
-            }
 
             if (meData.must_change_password) {
               setAuthState('FORCE_PASSWORD_CHANGE');
@@ -566,8 +557,8 @@ export default function EvaluzDashboard() {
             activeClassId={activeClassId}
             activeScenarioId={activeScenarioId}
             onSelectScenario={handleSelectScenario}
-            onScenarioCreated={(classId, scenarioId) => {
-              handleSelectScenario(classId, scenarioId);
+            onScenarioCreated={(classId, scenarioKey) => {
+              handleSelectScenario(classId, scenarioKey);
               setActiveTab('criteria');
             }}
           />
@@ -626,7 +617,6 @@ export default function EvaluzDashboard() {
                     if (!scenariosWithAnalysis.includes(activeScenarioId)) {
                       const newArr = [...scenariosWithAnalysis, activeScenarioId];
                       setScenariosWithAnalysis(newArr);
-                      localStorage.setItem('upvsp_analysis_completed', JSON.stringify(newArr));
                     }
                   }
                 }}

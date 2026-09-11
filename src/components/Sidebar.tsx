@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../utils/api';
-import { saveWorkspace, writeCachedWorkspace } from '../utils/workspace';
+import {
+  fetchTree, createGroup, renameGroup, deleteGroup,
+  createScenario, renameScenario, deleteScenario as deleteScenarioApi,
+} from '../utils/workspace';
 import {
   faFolder, faFolderOpen, faChevronDown, faChevronRight, faChevronLeft,
   faEllipsisVertical, faFileLines, faPen, faTrash, faCopy,
@@ -15,18 +18,37 @@ import { useDialog } from '../contexts/DialogContext';
 export interface SidebarProps {
   classes: ClassData[];
   setClasses: React.Dispatch<React.SetStateAction<ClassData[]>>;
-  activeClassId: string | null;
+  activeClassId: number | null;
+  /** Klíč situace (`scenario_key`) — to, co putuje do URL i do volání API. */
   activeScenarioId: string | null;
-  onSelectScenario: (classId: string, scenarioId: string) => void;
-  onScenarioCreated?: (classId: string, scenarioId: string) => void;
+  onSelectScenario: (classId: number, scenarioKey: string) => void;
+  onScenarioCreated?: (classId: number, scenarioKey: string) => void;
 }
 
 export type EditMode =
   | null
   | { type: 'new_class' }
-  | { type: 'new_scenario'; classId: string }
-  | { type: 'rename_class'; classId: string; currentName: string }
-  | { type: 'rename_scenario'; classId: string; scenId: string; currentName: string };
+  | { type: 'new_scenario'; classId: number }
+  | { type: 'rename_class'; classId: number; currentName: string }
+  | { type: 'rename_scenario'; classId: number; scenId: number; currentName: string };
+
+/**
+ * Rozbalení tříd ve stromu. Čistě kosmetika vázaná na zařízení, takže patří do
+ * prohlížeče — na rozdíl od samotného stromu, který je od ADR-033 výhradně na serveru.
+ * Klíč začíná `upvsp_`, takže ho `clearSessionState()` uklidí při odhlášení.
+ */
+const COLLAPSED_KEY = 'upvsp_collapsed_groups';
+
+function readCollapsed(): Set<number> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    return new Set(raw ? (JSON.parse(raw) as number[]) : []);
+  } catch { return new Set(); }
+}
+
+function writeCollapsed(ids: Set<number>): void {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids])); } catch { /* ignorovat */ }
+}
 
 export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, onSelectScenario, onScenarioCreated }: SidebarProps) {
   const { showConfirm } = useDialog();
@@ -52,54 +74,64 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
     localStorage.setItem('upvsp_sidebar_collapsed', JSON.stringify(next));
   };
 
-  const saveClasses = React.useCallback((newClasses: ClassData[]) => {
-    setClasses(newClasses);
-    // Cache pro okamžité vykreslení; zdrojem pravdy je server (ADR-031). Bez uložení
-    // na server existovala modelová situace jen v prohlížeči, kde vznikla.
-    writeCachedWorkspace(newClasses);
-    saveWorkspace(newClasses).catch(err => {
-      console.error('Uložení stromu situací na server selhalo:', err);
-      setToast({
-        message: 'Změnu se nepodařilo uložit na server — na jiném počítači se neprojeví. Zkuste to prosím znovu.',
-        type: 'error',
-      });
-      setTimeout(() => setToast(null), 8000);
-    });
+  /** Načte strom ze serveru. Rozbalení tříd je čistě UI, drží se v prohlížeči. */
+  const reload = React.useCallback(async (): Promise<ClassData[]> => {
+    const groups = await fetchTree();
+    const sbalene = readCollapsed();
+    const strom = groups.map(g => ({
+      id: g.id,
+      name: g.name,
+      expanded: !sbalene.has(g.id),
+      scenarios: g.scenarios,
+    }));
+    setClasses(strom);
+    return strom;
   }, [setClasses]);
 
-  const handleSaveEdit = React.useCallback(() => {
+  React.useEffect(() => { reload().catch(err => hlasChybu(err)); }, [reload]);
+
+  function hlasChybu(err: unknown) {
+    console.error('Operace se strukturou tříd selhala:', err);
+    setToast({ message: 'Změnu se nepodařilo uložit. Zkuste to prosím znovu.', type: 'error' });
+    setTimeout(() => setToast(null), 8000);
+  }
+
+  /** Obalí serverovou operaci: po úspěchu překreslí strom, při chybě to řekne nahlas. */
+  const provest = React.useCallback(async (akce: () => Promise<unknown>) => {
+    try {
+      await akce();
+      await reload();
+      return true;
+    } catch (err) {
+      hlasChybu(err);
+      return false;
+    }
+  }, [reload]);
+
+  const handleSaveEdit = React.useCallback(async () => {
     if (!editMode) return;
     const val = editValue.trim();
-    if (editMode.type === 'new_class' && val) {
-      const newClass: ClassData = {
-        id: `class-${Date.now()}`,
-        name: val,
-        expanded: true,
-        scenarios: [],
-      };
-      saveClasses([...classes, newClass]);
-    } else if (editMode.type === 'new_scenario' && val) {
-      const newScenId = `scen-${Date.now()}`;
-      const newClasses = classes.map(c => c.id === editMode.classId ? {
-        ...c, expanded: true,
-        scenarios: [...c.scenarios, { id: newScenId, name: val }],
-      } : c);
-      saveClasses(newClasses);
-      // Nový scénář se dřív needeaktivoval — lektor zůstal na starém scénáři, nahrál ÚZ
-      // pod ním, a teprve pozdější ruční přepnutí na nový scénář spustilo reset
-      // studentského stavu v TabEvaluation (vypadalo to jako "ztráta nahraných souborů").
-      onScenarioCreated?.(editMode.classId, newScenId);
-    } else if (editMode.type === 'rename_class' && val && val !== editMode.currentName) {
-      saveClasses(classes.map(c => c.id === editMode.classId ? { ...c, name: val } : c));
-    } else if (editMode.type === 'rename_scenario' && val && val !== editMode.currentName) {
-      saveClasses(classes.map(c => c.id === editMode.classId ? {
-        ...c,
-        scenarios: c.scenarios.map(s => s.id === editMode.scenId ? { ...s, name: val } : s),
-      } : c));
-    }
+    const rezim = editMode;
     setEditMode(null);
     setEditValue('');
-  }, [editMode, editValue, classes, saveClasses, onScenarioCreated]);
+
+    if (rezim.type === 'new_class' && val) {
+      await provest(() => createGroup(val));
+    } else if (rezim.type === 'new_scenario' && val) {
+      // Nový scénář je potřeba rovnou aktivovat. Dřív se tak nedělo a lektor nahrál ÚZ
+      // ještě pod starým scénářem; teprve pozdější ruční přepnutí resetovalo stav
+      // v TabEvaluation a vypadalo to jako ztráta nahraných souborů.
+      try {
+        const vytvorena = await createScenario(rezim.classId, val);
+        await reload();
+        onScenarioCreated?.(rezim.classId, vytvorena.key);
+      } catch (err) { hlasChybu(err); }
+    } else if (rezim.type === 'rename_class' && val && val !== rezim.currentName) {
+      await provest(() => renameGroup(rezim.classId, val));
+    } else if (rezim.type === 'rename_scenario' && val && val !== rezim.currentName) {
+      await provest(() => renameScenario(rezim.scenId, val));
+    }
+  }, [editMode, editValue, provest, reload, onScenarioCreated]);
 
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') { e.preventDefault(); handleSaveEdit(); }
@@ -112,65 +144,91 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
     setEditValue(initialValue);
   };
 
-  const toggleClassExpansion = React.useCallback((classId: string, e?: React.MouseEvent) => {
+  const toggleClassExpansion = React.useCallback((classId: number, e?: React.MouseEvent) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    saveClasses(classes.map(c => c.id === classId ? { ...c, expanded: !c.expanded } : c));
-  }, [classes, saveClasses]);
+    const sbalene = readCollapsed();
+    if (sbalene.has(classId)) sbalene.delete(classId); else sbalene.add(classId);
+    writeCollapsed(sbalene);
+    setClasses(prev => prev.map(c => c.id === classId ? { ...c, expanded: !c.expanded } : c));
+  }, [setClasses]);
 
-  const deleteClass = React.useCallback(async (id: string, name: string) => {
-    const conf = await showConfirm(`Opravdu chcete smazat třídu "${name}" i se všemi modelovými situacemi?`);
-    if (conf) {
-      saveClasses(classes.filter(c => c.id !== id));
-      if (activeClassId === id) onSelectScenario('', '');
-    }
-  }, [classes, saveClasses, showConfirm, activeClassId, onSelectScenario]);
-
-  const duplicateScenario = React.useCallback((classId: string, scenId: string) => {
-    saveClasses(classes.map(c => {
-      if (c.id === classId) {
-        const target = c.scenarios.find(s => s.id === scenId);
-        if (target) {
-          const newScenarios = [...c.scenarios];
-          const index = newScenarios.indexOf(target);
-          newScenarios.splice(index + 1, 0, { id: `scen-${Date.now()}`, name: `${target.name} (Kopie)` });
-          return { ...c, expanded: true, scenarios: newScenarios };
-        }
+  /**
+   * Smaže třídu nebo situaci. Server bez `force` odmítne cokoli, pod čím leží
+   * vyhodnocení, a vrátí počty — ty se ukážou v druhém dotazu. Tím se nikdy nestane,
+   * že by v databázi zůstala data, ke kterým nevede cesta (ADR-033).
+   */
+  const smazat = React.useCallback(async (
+    smaz: (force: boolean) => Promise<{ scenarios: number; evaluations: number } | null>,
+    prvniOtazka: string,
+    poUspechu: () => void,
+  ) => {
+    if (!await showConfirm(prvniOtazka)) return;
+    try {
+      const blokovano = await smaz(false);
+      if (blokovano) {
+        const { evaluations, scenarios } = blokovano;
+        const kde = scenarios > 1 ? ` ve ${scenarios} modelových situacích` : '';
+        const potvrd = await showConfirm(
+          `Pozor: je zde ${evaluations} vyhodnocených úředních záznamů${kde}. `
+          + 'Smazáním přijdete i o ně a nelze to vzít zpět. Opravdu pokračovat?'
+        );
+        if (!potvrd) return;
+        await smaz(true);
       }
-      return c;
-    }));
-  }, [classes, saveClasses]);
+      await reload();
+      poUspechu();
+    } catch (err) { hlasChybu(err); }
+  }, [showConfirm, reload]);
 
-  const deleteScenario = React.useCallback(async (classId: string, scenId: string, name: string) => {
-    const conf = await showConfirm(`Opravdu chcete smazat modelovou situaci "${name}"?`);
-    if (conf) {
-      saveClasses(classes.map(c => c.id === classId ? {
-        ...c, scenarios: c.scenarios.filter(s => s.id !== scenId),
-      } : c));
-      if (activeScenarioId === scenId) onSelectScenario(classId, '');
-    }
-  }, [classes, saveClasses, showConfirm, activeScenarioId, onSelectScenario]);
+  const deleteClass = React.useCallback((id: number, name: string) => smazat(
+    force => deleteGroup(id, force),
+    `Opravdu chcete smazat třídu "${name}" i se všemi modelovými situacemi?`,
+    () => { if (activeClassId === id) onSelectScenario(0, ''); },
+  ), [smazat, activeClassId, onSelectScenario]);
+
+  const duplicateScenario = React.useCallback((classId: number, scenId: number) => {
+    const zdroj = classes.find(c => c.id === classId)?.scenarios.find(s => s.id === scenId);
+    if (!zdroj) return;
+    // Kopie je prázdná situace se stejným názvem — kritéria ani vyhodnocení se nekopírují,
+    // stejně jako dřív.
+    provest(() => createScenario(classId, `${zdroj.name} (Kopie)`));
+  }, [classes, provest]);
+
+  const deleteScenario = React.useCallback((classId: number, scenId: number, name: string) => smazat(
+    force => deleteScenarioApi(scenId, force),
+    `Opravdu chcete smazat modelovou situaci "${name}"?`,
+    () => {
+      const klic = classes.find(c => c.id === classId)?.scenarios.find(s => s.id === scenId)?.key;
+      if (klic && activeScenarioId === klic) onSelectScenario(classId, '');
+    },
+  ), [smazat, classes, activeScenarioId, onSelectScenario]);
 
   const performSync = async (dirHandle: any) => {
     try {
       setIsSyncing(true);
-      let currentClasses = JSON.parse(JSON.stringify(classes)) as ClassData[];
+      // Strom je na serveru (ADR-033), takže se třídy i situace zakládají přes API
+      // a klíč vydává server. Dřív vznikaly lokálně jako `class-${Date.now()}` a žily
+      // jen v prohlížeči, odkud se spustil sync.
+      let strom = await reload();
       let totalFiles = 0; let newClassesCount = 0; let newScenariosCount = 0;
 
       for await (const [className, classHandle] of (dirHandle as any).entries()) {
         if ((classHandle as any).kind !== 'directory') continue;
-        let cls = currentClasses.find(c => c.name === className);
+        let cls = strom.find(c => c.name === className);
         if (!cls) {
-          cls = { id: `class-${Date.now()}-${Math.random()}`, name: className, expanded: true, scenarios: [] };
-          currentClasses.push(cls);
+          const zalozena = await createGroup(className);
+          strom = await reload();
+          cls = strom.find(c => c.id === zalozena.id)!;
           newClassesCount++;
-        } else { cls.expanded = true; }
+        }
 
         for await (const [scenName, scenHandle] of (classHandle as any).entries()) {
           if ((scenHandle as any).kind !== 'directory') continue;
           let scen = cls.scenarios.find(s => s.name === scenName);
           if (!scen) {
-            scen = { id: `scen-${Date.now()}-${Math.random()}`, name: scenName };
-            cls.scenarios.push(scen);
+            scen = await createScenario(cls.id, scenName);
+            strom = await reload();
+            cls = strom.find(c => c.id === cls!.id)!;
             newScenariosCount++;
           }
           const validFiles: File[] = [];
@@ -187,7 +245,7 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
             totalFiles += validFiles.length;
             const formData = new FormData();
             validFiles.forEach(f => formData.append('files', f));
-            formData.append('scenario_id', scen.id);
+            formData.append('scenario_id', scen.key);
             formData.append('scenario_display_name', scen.name || '');
             await fetch(`${API_BASE_URL}/evaluate/fast-scan`, {
               method: 'POST',
@@ -198,7 +256,7 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
         }
       }
 
-      saveClasses(currentClasses);
+      await reload();
       const msg = totalFiles > 0
         ? `Sync dokončen! ${newClassesCount > 0 ? newClassesCount + ' nových tříd, ' : ''}${newScenariosCount > 0 ? newScenariosCount + ' nových situací, ' : ''}${totalFiles} souborů nahráno.`
         : newClassesCount > 0 || newScenariosCount > 0
@@ -437,12 +495,12 @@ export function Sidebar({ classes, setClasses, activeClassId, activeScenarioId, 
             {!isCollapsed && cls.expanded && (
               <div className="sidebar-scenarios">
                 {cls.scenarios.map(scen => {
-                  const isSelected = scen.id === activeScenarioId;
+                  const isSelected = scen.key === activeScenarioId;
                   return (
                     <div
                       key={scen.id}
                       className={`sidebar-scenarios__item${isSelected ? ' sidebar-scenarios__item--active' : ''}`}
-                      onClick={() => onSelectScenario(cls.id, scen.id)}
+                      onClick={() => onSelectScenario(cls.id, scen.key)}
                     >
                       <Icon icon={faFileLines} className="sidebar-scenarios__item__icon" size="xs" />
                       {editMode?.type === 'rename_scenario' && editMode.scenId === scen.id ? (

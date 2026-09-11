@@ -1,9 +1,9 @@
 # Projektový Kontext — EVALUZ
-**Verze: 3.16.0 | Poslední aktualizace: 2026-09-08**
+**Verze: 3.17.0 | Poslední aktualizace: 2026-09-11**
 
 ## Aktuální Stav
 
-Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 165 testů pass.
+Systém v produkčním provozu na ÚPVSP, souběžně v pilotním testování na testovacím serveru. 173 testů pass.
 
 Poslední vývojová linie řešila **provozní robustnost dávkového vyhodnocování** odhalenou pilotem:
 - **v3.11.0** — náprava RBAC izolace dat (`DataScope`, fail-closed `PERSONAL`, ADR-014).
@@ -17,6 +17,7 @@ Poslední vývojová linie řešila **provozní robustnost dávkového vyhodnoco
 - **v3.15.2** — Každé dílčí hodnocení nese `jistota` 1–5; u hodnot ≤ 2 se v UI zobrazí výstraha, aby lektor věděl, kam se podívat (ADR-029). Je to tvrzení modelu o obtížnosti, ne měření nejistoty — vysoká jistota není důkazem správnosti. Zároveň opraven zdvojený příznak zásahu vyučujícího: `_lecturer_modified` z v3.15.0 sjednocen na existující `upraveno_lektorem`, které nově odvozuje server, ne klient.
 - **v3.15.3** — Metadata z `json_result` se do UI vůbec nedostávala: `CriterionResult` neměl `extra='allow'` a Pydantic v2 nedeklarovaná pole při serializaci tiše zahazuje (ADR-030). Postiženo bylo `jistota`, `upraveno_lektorem`, `_llm_omitted` i `_llm_actual_name` — v DB byla, v odpovědi API zmizela, v UI nebylo co zobrazit. Chyba je starší než ADR-029, nové pole ji jen zviditelnilo. Jistota se navíc zobrazuje vždy, ne jen při nízké hodnotě.
 - **v3.16.0** — Strom tříd a modelových situací se ukládá na server k lektorovi (ADR-031). Dřív žil jen v `localStorage`, takže situace vytvořená na jednom počítači na jiném neexistovala — kritéria a vyhodnocení v DB zůstala, ale jejich `scenario_id` nešlo zjistit. Zároveň se za jménem zobrazuje skutečná RBAC role místo funkčního zařazení, které je jen popiskem do doložky (ADR-032).
+- **v3.17.0** — Modelová situace je nově **řádek v databázi** patřící lektorovi; strom se z něj odvozuje (ADR-033, nahrazuje ADR-031). Dřív `scenario_id` vzniklo na klientovi a jediným záznamem o existenci situace byl strom — ten šlo ztratit i s cestou k datům. Klíč generuje server, smazání situace s daty vrací 409 s počty místo tichého osiření, odhlášení maže **celý** stav session (dřív jen token, což promíchalo účty na sdíleném počítači). Migrace složí každému lektorovi strom z jeho vlastních vyhodnocení.
 
 ## 1. Vize a Cíl
 
@@ -31,7 +32,7 @@ Provoz výhradně v uzavřené síti HERMES (bez internetu) na GPU serveru ÚPVS
 - **Databáze:** SQLite (dev/test) / PostgreSQL 17 (produkce) — Alembic migrace + `run_migrations()` kobercový nálet.
 - **LLM:** vLLM (primární), OpenRouter, Ollama, LM Studio — OpenAI-compatible API. Skutečné kontextové okno se čte ze serveru (`GET /v1/models` → `max_model_len`) a slouží jako strop nad nastavením v Administraci (ADR-018).
 - **Exporty:** Excel (openpyxl) a PDF (fpdf2).
-- **Testy:** pytest + pytest-asyncio + respx. 165 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
+- **Testy:** pytest + pytest-asyncio + respx. 173 testů. In-memory SQLite (se `StaticPool` tam, kde requesty obsluhuje TestClient v jiném vlákně), MockLLMRouter.
 - **Produkce:** Docker Compose (nginx + backend + PostgreSQL), non-root user `evaluz`, nginx reverse proxy s CSP hlavičkami, `SecurityHeadersMiddleware`, slowapi rate limiting.
 
 ## 3. Implementované Moduly

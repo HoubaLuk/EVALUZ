@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.16.0  
+**Verze:** 3.17.0  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -380,7 +380,8 @@ logger = logging.getLogger("evaluz.llm")
 | `evaluation_criteria` | Hodnotící metodiky (markdown). Filtrováno podle `lecturer_id`. |
 | `criteria` | Rozparsovaná jednotlivá kritéria z `evaluation_criteria`. Používána pro chunking a pro `expected_criteria_names`. |
 | `student_evaluations` | Výsledky evaluací. Klíčové sloupce: `json_result` (JSONB), `source_text` (text ÚZ), `student_identity` (JSONB), `cleaned_name`, `scenario_name`, `scenario_display_name`, `is_approved`, `created_at`. Auditní stopa lektorského zásahu (ADR-025): `ai_original_json` (JSONB, původní hodnocení AI před první ruční úpravou), `modified_at`, `modified_by` (FK na `lecturers`, `ON DELETE SET NULL`). NULL ve všech třech znamená „hodnocení nebylo ručně upravováno". |
-| `lecturer_workspaces` | Strom tříd a modelových situací lektora jako JSON (ADR-031). Dřív jen v `localStorage`, takže situace vytvořená na jednom počítači na jiném neexistovala. |
+| `study_groups` | „Třída" ve stromu vlevo — složka sdružující situace (ADR-033). NENÍ totéž co `classes`/`ClassRoom`, což je analytický kbelík pro `class_id`. |
+| `scenarios` | Modelová situace jako data: `scenario_key` (generuje SERVER, odpovídá `scenario_name` jinde), `display_name`, `group_id`, `lecturer_id` (ADR-033). Dřív situace existovala jen jako položka stromu v prohlížeči, takže šla ztratit i s cestou k datům. |
 | `class_analyses` | AI analytika třídy (Phase 3). `content_json` (JSONB), izolováno podle `lecturer_id` + `class_id`. |
 | `app_settings` | Dynamická konfigurace (LLM URL, klíče, modely, prahy, feature flags, CHUNK_SIZE, CHUNK_THRESHOLD_TOKENS_PCT). |
 | `system_prompts` | Prompty pro jednotlivé fáze (`phase_name`). Editovatelné v Admin UI. |
@@ -579,7 +580,7 @@ backend/tests/
 ├── test_seeder_prompts.py       # seeder nepřepisuje prompty správce (8 testů, ADR-028)
 ├── test_jistota.py              # normalizace pole `jistota` (24 testů, ADR-029)
 ├── test_evaluation_serialization.py # metadata z json_result dorazí do UI (8 testů, ADR-030)
-├── test_workspace.py            # strom tříd a situací na serveru (9 testů, ADR-031)
+├── test_workspace_tree.py       # situace jako data serveru, izolace, neosiřitelnost (17 testů, ADR-033)
 ├── test_data_isolation.py       # RBAC/cross-tenant regresní testy (3 testy, viz ADR-014)
 └── integration/
     ├── __init__.py
@@ -588,7 +589,7 @@ backend/tests/
     └── test_evaluate_endpoint.py  # integrační testy (9 testů)
 ```
 
-Celkem: **165 testů** (spuštění: `cd backend && pytest tests/ -v`).
+Celkem: **173 testů** (spuštění: `cd backend && pytest tests/ -v`).
 
 > **Pozor na in-memory SQLite napříč vlákny:** `sqlite:///:memory:` dává KAŽDÉMU spojení
 > vlastní prázdnou databázi, a `TestClient` obsluhuje requesty v jiném vlákně než test.
@@ -1144,6 +1145,8 @@ Postiženo bylo i `upraveno_lektorem`: frontend si ho nastavuje optimisticky, ta
 
 ### ADR-031: Strom tříd a modelových situací patří na server (v3.16.0)
 
+> **PŘEKONÁNO ADR-033 (v3.17.0).** Přesun stromu na server byl správný směr, ale neodstranil to podstatné: situace pořád existovala jen jako položka stromu. Řešení navíc zavedlo vytlačování obsahu prohlížeče na server, což na sdíleném počítači promíchalo účty. Popis níže je ponechán jako záznam rozhodnutí, ne jako platný stav.
+
 **Status:** Decided & Implemented
 
 **Kontext:** Strom tříd a modelových situací žil výhradně v `localStorage` prohlížeče (`upvsp_classes`) a `scenario_id` se generuje na klientovi jako `scen-${Date.now()}`. V databázi žádná tabulka scénářů neexistovala — backend zná `scenario_name` jen jako řetězec, na který se odkazují kritéria a vyhodnocení.
@@ -1178,6 +1181,36 @@ Odpověď rozlišuje dva stavy, na kterých závisí přechod ze staré verze:
 **Rozhodnutí:** Za jménem v hlavičce se nově zobrazuje **skutečná RBAC role**. Profil dostal panel „Přehled účtu" se čtyřmi řádky (role, co konkrétně smí, organizační článek, přihlašovací e-mail) a poznámkou, že roli mění výhradně superadministrátor. Pole níže je přejmenované na „Funkční zařazení (popisek do doložky)".
 
 **Kompromis:** Obě pole zůstávají — mají různé účely a slučovat je by znamenalo buď ztratit popisek do doložky, nebo dát uživateli možnost měnit si vlastní oprávnění. Řešením je pojmenování, ne odstranění.
+
+---
+
+### ADR-033: Modelová situace je řádek v databázi (v3.17.0) — nahrazuje ADR-031
+
+**Status:** Decided & Implemented
+
+**Kontext:** Lektorce zmizela nedávná práce a objevily se staré situace. Z logu je příčina prokazatelná na bajt: `GET /workspace` vrátil **34 B**, což je přesně `{"classes":null,"updated_at":null}` — server pro ni neměl nic. Frontend podle ADR-031 vytlačil na server strom z jejího prohlížeče, který byl starý, a ten se stal trvalou pravdou.
+
+Dvě spolupracující vady:
+
+1. **`upvsp_classes` nebyl vázaný na uživatele** — jeden klíč na celý prohlížeč. Z logu je vidět, že se na jednom počítači vystřídaly tři účty. Odhlášení přitom mazalo **pouze token**, takže strom předchozího lektora zůstal.
+2. **`syncWorkspaceOnLogin` zapisoval obsah prohlížeče na server**, když byl serverový strom prázdný. Tím se z lokální nepříjemnosti stala **trvalá kontaminace mezi účty**, která se odtud rozšířila na všechny počítače dotčeného lektora.
+
+Hlubší příčina byla ale návrhová a je v systému od začátku: **modelová situace nikdy neexistovala jako data.** `scenario_id` vzniklo na klientovi (`scen-${Date.now()}`) a jediným záznamem o tom, že situace existuje, byl strom — nejdřív v `localStorage`, po ADR-031 jako JSON blob na serveru. Kritéria a vyhodnocení se na klíč jen odkazovaly. Jakmile se strom ztratil nebo přepsal, data v DB zůstala, ale nevedla k nim žádná cesta.
+
+**Rozhodnutí:** Situace je řádek v databázi patřící konkrétnímu lektorovi; strom se z těch řádků **odvozuje**. Tabulky `study_groups` (třída ve stromu) a `scenarios`. `scenario_key` odpovídá `scenario_name` v `evaluation_criteria` i `student_evaluations` — ta vazba se nemění, backend se na ni váže na desítkách míst — ale **generuje ho server**, takže kolize mezi počítači nemůže vzniknout ani úmyslně.
+
+> **Pozor na jméno:** tabulka `classes` (`ClassRoom`) je něco jiného — analytický kbelík, jeden na lektora, na který se váže `class_id` u vyhodnocení. V českém UI se obojímu říká „třída", v kódu se to nesmí plést. Proto `study_groups`.
+
+**Dvě pravidla, na kterých to stojí:**
+
+- **Klíč generuje server.** Klient ho nesmí určit; pokud ho pošle, ignoruje se.
+- **Nic se nesmaže potichu.** Smazání situace nebo třídy s daty vrátí **409** s počty (`{"error": "has_evaluations", "scenarios": N, "evaluations": M}`). UI ta čísla ukáže a teprve na potvrzení zavolá `force=true`, kdy zmizí situace **i její vyhodnocení, kritéria a cache analytiky**. Stav „záznam v DB, ke kterému nevede cesta", tak nemůže vzniknout.
+
+**V prohlížeči po stromu nezůstává nic.** Žádná cache, žádné vytlačování lokálního stavu. Nová `clearSessionState()` maže při odhlášení **všechny** klíče `upvsp_*` a `evaluz_*` kromě `theme` a volá ji jak tlačítko odhlášení, tak větev 401. Zůstává jen kosmetika vázaná na zařízení (sbalení panelu, rozbalení tříd, motiv).
+
+**Migrace jako náprava:** backfill projde `student_evaluations` a `evaluation_criteria`, které jsou podle `lecturer_id` vedené správně, a každému lektorovi složí jeho vlastní strom. Tím se promíchání účtů rozplete — výsledek je z definice neprosáklý. Ověřeno proti skutečnému PostgreSQL se seedovanými daty tří lektorů.
+
+**Kompromis:** Tři endpointy navíc oproti jednomu `PUT` celého stromu a strom se po každé operaci načítá znovu. Za to se souběžná editace ze dvou počítačů přestala chovat jako „poslední zápis přepíše všechno" — konflikt je nyní omezený na jeden řádek.
 
 ---
 

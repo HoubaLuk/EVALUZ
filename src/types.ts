@@ -1,26 +1,27 @@
 export type Tab = 'criteria' | 'evaluation' | 'analytics' | 'statistics';
 
+/**
+ * Modelová situace (ADR-033).
+ *
+ * `id` je databázové ID — slouží k operacím nad stromem (přejmenovat, smazat).
+ * `key` je `scenario_key` ze serveru a je to to, co zbytek aplikace zná jako
+ * `scenario_id`: putuje do URL i do všech volání API. Dřív se generoval na klientovi
+ * jako `scen-${Date.now()}`, takže situace existovala jen ve stromu v prohlížeči;
+ * nyní ho vydává server a situace je řádek v databázi.
+ */
 export interface Scenario {
-  id: string;
+  id: number;
+  key: string;
   name: string;
 }
 
 export interface ClassData {
-  id: string;
+  id: number;
   name: string;
   scenarios: Scenario[];
+  /** Rozbalení ve stromu — čistě UI, drží se v prohlížeči a na serveru nemá co dělat. */
   expanded?: boolean;
 }
-
-export const DEFAULT_CLASS_DATA: ClassData[] = [{
-  id: "class-1",
-  name: "ZOP 01/2026",
-  expanded: true,
-  scenarios: [
-    { id: "scen-1", name: "MS1: Dopravní nehoda" },
-    { id: "scen-2", name: "MS2: Vstup do obydlí" }
-  ]
-}];
 
 export interface Criterion {
   id: number;

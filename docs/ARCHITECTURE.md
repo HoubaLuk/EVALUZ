@@ -2,6 +2,7 @@
 
 ## Datový Model
 - **Lecturer:** Příznaky `is_superadmin`, `is_admin`. Vazba `school_location` určuje organ. článek. Atributy hodnosti: `rank_shortcut`, `rank_full`, `title_before`, `title_after`.
+- **StudyGroup / Scenario [od v3.17.0, ADR-033]:** Strom vlevo. `Scenario.scenario_key` odpovídá `scenario_name` v kritériích i vyhodnoceních, ale **generuje ho server** — dřív vznikal na klientovi jako `scen-${Date.now()}` a situace existovala jen jako položka stromu v prohlížeči, takže šla ztratit i s cestou k datům. `StudyGroup` NENÍ `ClassRoom`: ta je analytický kbelík pro `class_id`, tohle je složka ve stromu.
 - **StudentEvaluation:** Ukládá vyhodnocení ÚZ. Klíčové sloupce: `scenario_name` (ID), `scenario_display_name` (čitelný název od v3.7.0), `json_result` (JSONType dict), `is_approved`, `student_identity` (JSONType), `cleaned_name`, `source_text`, `created_at`. Od v3.15.0 auditní stopa ruční opravy (ADR-025): `ai_original_json` (hodnocení od AI před prvním zásahem lektora), `modified_at`, `modified_by`. NULL ve všech třech = hodnocení nebylo ručně upravováno.
 - **ClassAnalysis:** Globální analýza třídy. `content_json` je JSONType — vždy `isinstance(raw, dict)` před `json.loads()`. Sloupce `computed_at` a `version` pro cache invalidaci.
 - **ClassRoom:** Zakládá se **zvlášť pro každého lektora** (fast-scan, výchozí název „Základní kurz", auto-increment ID). ID tedy NENÍ napříč lektory shodné — frontend si ho musí vyžádat přes `POST /evaluate/classes/ensure`, nesmí ho mít natvrdo (ADR-021).

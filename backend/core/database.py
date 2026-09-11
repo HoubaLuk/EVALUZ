@@ -211,22 +211,34 @@ def run_migrations(engine):
                 END $$;
             """))
 
-        # 4b. TABULKA: lecturer_workspaces (ADR-031)
-        # Na PostgreSQL tabulku vytvoří Alembic; tenhle blok je pro SQLite dev, kde
-        # `init_db()` → `create_all()` sice tabulku založí z modelu, ale u existující
-        # vývojové databáze by chyběla. `IF NOT EXISTS` je proto idempotentní.
+        # 4b. TABULKY: study_groups + scenarios (ADR-033)
+        # Na PostgreSQL je vytvoří Alembic; tenhle blok je pro SQLite dev, kde
+        # `init_db()` → `create_all()` je sice založí z modelu, ale u existující
+        # vývojové databáze by chyběly. `IF NOT EXISTS` je proto idempotentní.
         if is_sqlite:
             conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS lecturer_workspaces (
+                CREATE TABLE IF NOT EXISTS study_groups (
                     id INTEGER PRIMARY KEY,
                     lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE,
-                    tree TEXT,
-                    updated_at TIMESTAMP
+                    name VARCHAR,
+                    position INTEGER DEFAULT 0,
+                    created_at TIMESTAMP
                 );
             """))
             conn.execute(text("""
-                CREATE UNIQUE INDEX IF NOT EXISTS ix_lecturer_workspaces_lecturer_id
-                ON lecturer_workspaces(lecturer_id);
+                CREATE TABLE IF NOT EXISTS scenarios (
+                    id INTEGER PRIMARY KEY,
+                    lecturer_id INTEGER REFERENCES lecturers(id) ON DELETE CASCADE,
+                    group_id INTEGER REFERENCES study_groups(id) ON DELETE CASCADE,
+                    scenario_key VARCHAR,
+                    display_name VARCHAR,
+                    position INTEGER DEFAULT 0,
+                    created_at TIMESTAMP
+                );
+            """))
+            conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_scenarios_scenario_key
+                ON scenarios(scenario_key);
             """))
 
         # 5. TABULKA: golden_examples

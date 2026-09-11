@@ -2,6 +2,40 @@
 
 ---
 
+## [v3.17.0] — 2026-09-11 — Modelová situace je řádek v databázi
+
+### Problém
+
+Lektorce 11. 9. „zmizelo to poslední, co dělali, a objevily se staré věci". Příčina je z logu prokazatelná na bajt: `GET /workspace` vrátil **34 B**, přesně `{"classes":null,"updated_at":null}` — server pro ni neměl nic. Frontend podle ADR-031 vytlačil na server strom z jejího prohlížeče (`PUT` → 469 B), který byl ale starý (ID situací nesou razítka z konce června a srpna), a ten se stal trvalou pravdou.
+
+Dvě spolupracující vady, obě zavedené nebo zesílené ve v3.16.0:
+
+1. **`upvsp_classes` nebyl vázaný na uživatele** — jeden klíč na celý prohlížeč. Z logu je vidět, že se na jednom počítači vystřídaly **tři účty**. Odhlášení přitom mazalo **pouze token**, takže strom předchozího lektora zůstal.
+2. **`syncWorkspaceOnLogin` zapisoval obsah prohlížeče na server**, pokud byl serverový strom prázdný. Z lokální nepříjemnosti se tak stala **trvalá kontaminace mezi účty**.
+
+Hlubší příčina je návrhová a byla v systému od začátku: **situace nikdy neexistovala jako data.** `scenario_id` vzniklo na klientovi (`scen-${Date.now()}`) a jediným záznamem o její existenci byl strom. Kritéria a vyhodnocení se na klíč jen odkazovaly — když se strom ztratil, data v DB zůstala, ale nevedla k nim cesta.
+
+### Situace jako data (ADR-033, nahrazuje ADR-031)
+
+- **`backend/models/db_models.py`, migrace `e9f0a1b2c3d4`** — nové tabulky `study_groups` (třída ve stromu) a `scenarios`. `scenario_key` odpovídá `scenario_name` jinde (ta vazba se nemění, backend se na ni váže na 36 místech), ale **generuje ho server**. `lecturer_workspaces` zrušena.
+- **`backend/api/workspace.py`** — přepsáno na `GET /workspace` plus zakládání, přejmenování a mazání tříd i situací. Klientem poslaný klíč se ignoruje.
+- **Pojistka proti tichému osiření:** smazání situace nebo třídy s daty vrací **409** s počty (`{"error": "has_evaluations", "scenarios": N, "evaluations": M}`). UI ta čísla ukáže a teprve na potvrzení zavolá `force=true`, kdy zmizí situace **i její vyhodnocení, kritéria a cache analytiky**.
+- **Migrace je zároveň náprava** — backfill složí každému lektorovi strom z jeho `student_evaluations` a `evaluation_criteria`, které jsou podle `lecturer_id` vedené správně. Promíchání účtů se tím rozplete.
+
+### V prohlížeči po stromu nezůstává nic
+
+- **`src/utils/workspace.ts`, `src/App.tsx`, `src/components/Sidebar.tsx`** — zrušena cache i vytlačování lokálního stavu na server. Strom se jen načítá; každá operace jde na server a překreslí se z odpovědi.
+- **`clearSessionState()`** maže při odhlášení **všechny** klíče `upvsp_*` a `evaluz_*` kromě `theme`; volá ji tlačítko odhlášení i větev 401. Dřív se mazal jen token — to byl kořen prosakování mezi účty.
+- **`src/App.tsx`** — zrušen mrtvý zápis `upvsp_analysis_completed` (nikde se nečetl a ukládal data lektora pod neklíčovaný název).
+- V prohlížeči zůstává jen kosmetika vázaná na zařízení: motiv, sbalení panelu, rozbalení tříd.
+
+### Testy
+
+- **`backend/tests/test_workspace_tree.py`** (nový, 17 testů) nahrazuje `test_workspace.py` — izolace mezi lektory na všech operacích, server generuje klíče a klientův ignoruje, shodné názvy u dvou lektorů nekolidují, smazání s daty bez `force` **nic nezmění** a vrátí počty, s `force` uklidí i data, mazání nikdy nesáhne na cizí záznamy, a backfill složí každému jen jeho strom.
+- Celkem **173 testů**. Migrace ověřena proti skutečnému PostgreSQL přes `backend/scripts/verify_migrations.sh` (upgrade → downgrade → upgrade) **a navíc se seedovanými daty tří lektorů**, aby se ověřil i samotný backfill — verifikační skript běží nad prázdnou databází, takže datovou cestu sám neprověří.
+
+---
+
 ## [v3.16.0] — 2026-09-08 — Modelové situace následují lektora, ne prohlížeč
 
 ### Problém
