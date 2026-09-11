@@ -1,5 +1,5 @@
 # Technická dokumentace EVALUZ
-**Verze:** 3.17.0  
+**Verze:** 3.17.1  
 **Poslední aktualizace:** 5. srpna 2026  
 **Provozovatel:** ÚPVSP (Útvar policejního vzdělávání a služební přípravy)
 
@@ -381,7 +381,7 @@ logger = logging.getLogger("evaluz.llm")
 | `criteria` | Rozparsovaná jednotlivá kritéria z `evaluation_criteria`. Používána pro chunking a pro `expected_criteria_names`. |
 | `student_evaluations` | Výsledky evaluací. Klíčové sloupce: `json_result` (JSONB), `source_text` (text ÚZ), `student_identity` (JSONB), `cleaned_name`, `scenario_name`, `scenario_display_name`, `is_approved`, `created_at`. Auditní stopa lektorského zásahu (ADR-025): `ai_original_json` (JSONB, původní hodnocení AI před první ruční úpravou), `modified_at`, `modified_by` (FK na `lecturers`, `ON DELETE SET NULL`). NULL ve všech třech znamená „hodnocení nebylo ručně upravováno". |
 | `study_groups` | „Třída" ve stromu vlevo — složka sdružující situace (ADR-033). NENÍ totéž co `classes`/`ClassRoom`, což je analytický kbelík pro `class_id`. |
-| `scenarios` | Modelová situace jako data: `scenario_key` (generuje SERVER, odpovídá `scenario_name` jinde), `display_name`, `group_id`, `lecturer_id` (ADR-033). Dřív situace existovala jen jako položka stromu v prohlížeči, takže šla ztratit i s cestou k datům. |
+| `scenarios` | Modelová situace jako data: `scenario_key` (generuje SERVER, odpovídá `scenario_name` jinde, unikátní **v rámci lektora** — `uq_scenarios_lecturer_key`), `display_name`, `group_id`, `lecturer_id` (ADR-033). Dřív situace existovala jen jako položka stromu v prohlížeči, takže šla ztratit i s cestou k datům. |
 | `class_analyses` | AI analytika třídy (Phase 3). `content_json` (JSONB), izolováno podle `lecturer_id` + `class_id`. |
 | `app_settings` | Dynamická konfigurace (LLM URL, klíče, modely, prahy, feature flags, CHUNK_SIZE, CHUNK_THRESHOLD_TOKENS_PCT). |
 | `system_prompts` | Prompty pro jednotlivé fáze (`phase_name`). Editovatelné v Admin UI. |
@@ -1197,7 +1197,9 @@ Dvě spolupracující vady:
 
 Hlubší příčina byla ale návrhová a je v systému od začátku: **modelová situace nikdy neexistovala jako data.** `scenario_id` vzniklo na klientovi (`scen-${Date.now()}`) a jediným záznamem o tom, že situace existuje, byl strom — nejdřív v `localStorage`, po ADR-031 jako JSON blob na serveru. Kritéria a vyhodnocení se na klíč jen odkazovaly. Jakmile se strom ztratil nebo přepsal, data v DB zůstala, ale nevedla k nim žádná cesta.
 
-**Rozhodnutí:** Situace je řádek v databázi patřící konkrétnímu lektorovi; strom se z těch řádků **odvozuje**. Tabulky `study_groups` (třída ve stromu) a `scenarios`. `scenario_key` odpovídá `scenario_name` v `evaluation_criteria` i `student_evaluations` — ta vazba se nemění, backend se na ni váže na desítkách míst — ale **generuje ho server**, takže kolize mezi počítači nemůže vzniknout ani úmyslně.
+**Rozhodnutí:** Situace je řádek v databázi patřící konkrétnímu lektorovi; strom se z těch řádků **odvozuje**. Tabulky `study_groups` (třída ve stromu) a `scenarios`. `scenario_key` odpovídá `scenario_name` v `evaluation_criteria` i `student_evaluations` — ta vazba se nemění, backend se na ni váže na desítkách míst — ale u nově založených situací **generuje ho server**, takže kolize mezi počítači nemůže vzniknout ani úmyslně.
+
+> **Rozsah unikátnosti klíče (opraveno v3.17.1):** `scenario_key` je unikátní **v rámci lektora** (`uq_scenarios_lecturer_key`), ne globálně. Původní globální UNIQUE shodil migraci v produkci: výchozí strom v prohlížeči byl až do v3.16.0 pevně daný (`scen-1`, `scen-2`) a `StudentEvaluation.scenario_name` mělo tutéž serverovou default hodnotu, takže ty klíče má v datech každý lektor, který kdy něco vyhodnotil. Per-lektor je i sémanticky správně: ke klíči se přistupuje vždy přes `apply_data_isolation`, nikdy napříč lektory.
 
 > **Pozor na jméno:** tabulka `classes` (`ClassRoom`) je něco jiného — analytický kbelík, jeden na lektora, na který se váže `class_id` u vyhodnocení. V českém UI se obojímu říká „třída", v kódu se to nesmí plést. Proto `study_groups`.
 
@@ -1208,7 +1210,7 @@ Hlubší příčina byla ale návrhová a je v systému od začátku: **modelov�
 
 **V prohlížeči po stromu nezůstává nic.** Žádná cache, žádné vytlačování lokálního stavu. Nová `clearSessionState()` maže při odhlášení **všechny** klíče `upvsp_*` a `evaluz_*` kromě `theme` a volá ji jak tlačítko odhlášení, tak větev 401. Zůstává jen kosmetika vázaná na zařízení (sbalení panelu, rozbalení tříd, motiv).
 
-**Migrace jako náprava:** backfill projde `student_evaluations` a `evaluation_criteria`, které jsou podle `lecturer_id` vedené správně, a každému lektorovi složí jeho vlastní strom. Tím se promíchání účtů rozplete — výsledek je z definice neprosáklý. Ověřeno proti skutečnému PostgreSQL se seedovanými daty tří lektorů.
+**Migrace jako náprava:** backfill projde `student_evaluations` a `evaluation_criteria`, které jsou podle `lecturer_id` vedené správně, a každému lektorovi složí jeho vlastní strom. Tím se promíchání účtů rozplete — výsledek je z definice neprosáklý. Ověřeno proti skutečnému PostgreSQL, nově i s daty, kde dva lektoři sdílejí tentýž historický klíč (`verify_migrations.sh` krok 4b) — právě tenhle vstup v3.17.0 shodil.
 
 **Kompromis:** Tři endpointy navíc oproti jednomu `PUT` celého stromu a strom se po každé operaci načítá znovu. Za to se souběžná editace ze dvou počítačů přestala chovat jako „poslední zápis přepíše všechno" — konflikt je nyní omezený na jeden řádek.
 

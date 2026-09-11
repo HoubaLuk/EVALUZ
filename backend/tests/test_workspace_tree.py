@@ -276,6 +276,38 @@ class TestBackfill:
         assert klice_a == {"scen-aaa", "scen-bbb"}
         assert klice_b == {"scen-ccc"}
 
+    def test_shared_legacy_keys_do_not_collide(self, db_session, api_client):
+        """Regrese v3.17.1: migrace padala na `duplicate key ... (scenario_key)=(scen-2)`.
+
+        Výchozí strom v prohlížeči byl až do v3.16.0 pevně daný (`scen-1`, `scen-2`), takže
+        ty klíče má v datech KAŽDÝ lektor, který kdy něco vyhodnotil. Globální UNIQUE na
+        `scenario_key` proto migraci na reálných datech shodil — a s ní i celý backend,
+        protože `alembic upgrade head` běží v Dockerfile CMD před startem aplikace.
+        Ověřovací skript i ruční test běžely nad daty s unikátními klíči, takže kolizi
+        neprověřily; tenhle test tu mezeru zavírá.
+        """
+        a = _make_lecturer(db_session, email="legacy-a@pcr.cz")
+        b = _make_lecturer(db_session, email="legacy-b@pcr.cz")
+        for lektor in (a, b):
+            _add_evaluation(db_session, lektor, "scen-1", "nehoda.pdf")
+            _add_evaluation(db_session, lektor, "scen-2", "obydli.pdf")
+        db_session.query(StudyGroup).delete()
+        db_session.query(Scenario).delete()
+        db_session.commit()
+
+        _load_migration()._backfill(db_session.connection())
+        db_session.commit()
+
+        klice_a = {s["key"] for g in _tree(api_client, a)["groups"] for s in g["scenarios"]}
+        klice_b = {s["key"] for g in _tree(api_client, b)["groups"] for s in g["scenarios"]}
+
+        assert klice_a == {"scen-1", "scen-2"}
+        assert klice_b == {"scen-1", "scen-2"}
+
+        # Oba dostali vlastní řádky — sdílený klíč nesmí znamenat sdílenou situaci.
+        vsechny = db_session.query(Scenario).filter(Scenario.scenario_key == "scen-1").all()
+        assert {row.lecturer_id for row in vsechny} == {a.id, b.id}
+
     def test_criteria_without_evaluations_are_included(self, db_session, api_client):
         """Situace, kde lektor zatím jen uložil kritéria, se nesmí ztratit."""
         lecturer = _make_lecturer(db_session, email="bf-krit@pcr.cz")

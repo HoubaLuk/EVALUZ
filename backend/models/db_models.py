@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, DateTime
+from sqlalchemy import (
+    Column, Integer, String, Text, Float, Boolean, ForeignKey, DateTime, UniqueConstraint,
+)
 from sqlalchemy.orm import declarative_base
 from models.types import JSONType
 
@@ -114,14 +116,23 @@ class Scenario(Base):
     data v DB zůstala, ale nevedla k nim žádná cesta.
 
     `scenario_key` odpovídá `scenario_name` v `evaluation_criteria` i `student_evaluations`
-    (backend se na něj váže na desítkách míst, ta vazba se nemění). Generuje ho ale SERVER,
-    takže kolize mezi klienty nemůže vzniknout ani teoreticky.
+    (backend se na něj váže na desítkách míst, ta vazba se nemění). U nově založených situací
+    ho generuje SERVER, takže kolize mezi klienty nemůže vzniknout ani teoreticky.
+
+    Unikátní je ale jen **v rámci lektora**, ne globálně. Historické klíče vznikaly na
+    klientovi z pevné výchozí šablony (`scen-1`, `scen-2`), takže je má v datech každý lektor,
+    který kdy něco vyhodnotil. Globální UNIQUE by migraci na takových datech shodil — a shodil
+    ji (v3.17.0). Sémanticky je per-lektor správně i bez té historie: ke klíči se přistupuje
+    vždy přes `apply_data_isolation`, nikdy napříč lektory.
     """
     __tablename__ = "scenarios"
+    __table_args__ = (
+        UniqueConstraint("lecturer_id", "scenario_key", name="uq_scenarios_lecturer_key"),
+    )
     id = Column(Integer, primary_key=True, index=True)
     lecturer_id = Column(Integer, ForeignKey("lecturers.id", ondelete="CASCADE"), index=True)
     group_id = Column(Integer, ForeignKey("study_groups.id", ondelete="CASCADE"), index=True)
-    scenario_key = Column(String, unique=True, index=True)
+    scenario_key = Column(String, index=True)
     display_name = Column(String, default="")
     position = Column(Integer, default=0)
     created_at = Column(DateTime)

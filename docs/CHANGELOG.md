@@ -2,6 +2,64 @@
 
 ---
 
+## [v3.17.1] — 2026-09-11 — Oprava migrace: klíč situace je unikátní jen v rámci lektora
+
+### Problém
+
+Migrace `e9f0a1b2c3d4` z v3.17.0 na testovacím serveru padala na:
+
+```
+psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint
+    "ix_scenarios_scenario_key"
+DETAIL:  Key (scenario_key)=(scen-2) already exists.
+```
+
+Protože `alembic upgrade head` běží v `Dockerfile` CMD **před** startem aplikace, backend
+vůbec nenastartoval. Nginx pak na každý požadavek vracel 502, což v UI vypadalo jako
+zrušené účty — přihlášení i registrace selhávaly stejně. **Žádná data se neztratila:**
+PostgreSQL má transakční DDL, takže se celá migrace pokaždé vrátila zpět a schéma zůstalo
+na `d8e9f0a1b2c3`.
+
+### Příčina
+
+`scenario_key` měl **globální** UNIQUE index. To je špatně: výchozí strom v prohlížeči byl
+až do v3.16.0 pevně daný — `DEFAULT_CLASS_DATA` v `src/types.ts` obsahovalo `scen-1`
+a `scen-2` — a `StudentEvaluation.scenario_name` mělo serverovou default hodnotu `"scen-1"`.
+Ty klíče má proto v datech **každý** lektor, který kdy něco vyhodnotil. Backfill je poctivě
+rozdělil podle `lecturer_id`, ale narazil na index, který o lektorovi nic neví.
+
+Sémanticky je per-lektor správně i bez té historie: ke klíči se přistupuje vždy přes
+`apply_data_isolation`, nikdy napříč lektory.
+
+### Proč to neodhalilo ověření před nasazením
+
+`verify_migrations.sh` běžel nad **prázdnou** databází a ruční kontrola backfillu proti
+PostgreSQL použila data s unikátními klíči na lektora. Datová cesta migrace tak nebyla
+prověřena na tom jediném vstupu, na kterém mohla selhat.
+
+### Změny
+
+- **`backend/models/db_models.py`** — `Scenario.scenario_key` už není globálně `unique`;
+  místo toho `UniqueConstraint("lecturer_id", "scenario_key", name="uq_scenarios_lecturer_key")`.
+- **`backend/alembic/versions/e9f0a1b2c3d4_scenarios_as_data.py`** — index `ix_scenarios_scenario_key`
+  je nově obyčejný, unikátnost zajišťuje `uq_scenarios_lecturer_key`. Migrace se upravuje
+  na místě, ne navazující revizí: v produkci nikdy neproběhla, schéma je pořád na
+  `d8e9f0a1b2c3`.
+- **`backend/core/database.py`** — stejná změna v SQLite DDL větvi.
+- **`backend/tests/test_workspace_tree.py`** — nový `test_shared_legacy_keys_do_not_collide`:
+  dva lektoři sdílejí `scen-1` i `scen-2`, backfill musí každému dát vlastní řádky.
+  Ověřeno, že proti původnímu modelu test padá se stejnou `IntegrityError` jako produkce.
+- **`backend/scripts/verify_migrations.sh`** — mezi `downgrade -1` a opětovný `upgrade head`
+  se nově nasypou data dvou lektorů se sdílenými klíči a výsledný rozpad `scenarios`
+  se porovná proti očekávání. Skript už neprochází zeleně nad prázdnou databází.
+
+### Ověření
+
+- 174 backend testů prochází.
+- `verify_migrations.sh` zelený proti PostgreSQL 17 — včetně nové kontroly backfillu nad daty.
+
+---
+
 ## [v3.17.0] — 2026-09-11 — Modelová situace je řádek v databázi
 
 ### Problém

@@ -233,11 +233,12 @@ def run_migrations(engine):
                     scenario_key VARCHAR,
                     display_name VARCHAR,
                     position INTEGER DEFAULT 0,
-                    created_at TIMESTAMP
+                    created_at TIMESTAMP,
+                    CONSTRAINT uq_scenarios_lecturer_key UNIQUE (lecturer_id, scenario_key)
                 );
             """))
             conn.execute(text("""
-                CREATE UNIQUE INDEX IF NOT EXISTS ix_scenarios_scenario_key
+                CREATE INDEX IF NOT EXISTS ix_scenarios_scenario_key
                 ON scenarios(scenario_key);
             """))
 

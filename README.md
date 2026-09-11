@@ -462,4 +462,4 @@ EVALUZ/
 
 ---
 
-*EVALUZ — Vyvinuto na ÚPVSP. Verze 3.17.0.*
+*EVALUZ — Vyvinuto na ÚPVSP. Verze 3.17.1.*

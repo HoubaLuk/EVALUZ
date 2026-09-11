@@ -52,10 +52,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['lecturer_id'], ['lecturers.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['group_id'], ['study_groups.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
+        # Klíč je unikátní JEN v rámci lektora. Globálně být nemůže: historické klíče
+        # vznikaly na klientovi z pevné výchozí šablony (`scen-1`, `scen-2`), takže je
+        # v datech má každý lektor, který kdy něco vyhodnotil.
+        sa.UniqueConstraint('lecturer_id', 'scenario_key', name='uq_scenarios_lecturer_key'),
     )
     op.create_index('ix_scenarios_lecturer_id', 'scenarios', ['lecturer_id'])
     op.create_index('ix_scenarios_group_id', 'scenarios', ['group_id'])
-    op.create_index('ix_scenarios_scenario_key', 'scenarios', ['scenario_key'], unique=True)
+    op.create_index('ix_scenarios_scenario_key', 'scenarios', ['scenario_key'])
 
     _backfill(op.get_bind())
 

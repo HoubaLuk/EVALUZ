@@ -101,9 +101,46 @@ echo "==> alembic downgrade -1"
 "$ALEMBIC" downgrade -1 >/dev/null
 echo "    sloupců po downgrade: $(count_cols student_evaluations)"
 
-echo "==> alembic upgrade head (znovu)"
+# --- 4b. Backfill nad REÁLNÝMI daty ----------------------------------------------
+# Prázdná databáze datovou cestu migrace neprověří. Konkrétně v3.17.0 prošla tímhle
+# skriptem zeleně a v produkci pak spadla na `duplicate key (scenario_key)=(scen-2)`:
+# výchozí strom v prohlížeči byl pevně daný (`scen-1`, `scen-2`) a `scenario_name` mělo
+# tutéž serverovou default hodnotu, takže ty klíče má v datech každý lektor. Proto se
+# sem před posledním upgradem nasypou data dvou lektorů se SDÍLENÝMI klíči.
+echo "==> Nasazuji testovací data se sdílenými klíči (scen-1, scen-2)"
+LC_ALL=C "$PGBIN/psql" -h 127.0.0.1 -p "$PORT" -U evaluz -d evaluz_migtest -q <<'SQL'
+INSERT INTO lecturers (email, password_hash) VALUES
+    ('mig-a@pcr.cz', 'x'), ('mig-b@pcr.cz', 'x');
+INSERT INTO classes (lecturer_id, name)
+    SELECT id, 'Základní kurz' FROM lecturers WHERE email LIKE 'mig-%@pcr.cz';
+INSERT INTO student_evaluations
+    (lecturer_id, class_id, student_name, scenario_name, scenario_display_name, created_at)
+SELECT c.lecturer_id, c.id, 'novak.pdf', k.klic, k.nazev, now()
+FROM classes c
+CROSS JOIN (VALUES ('scen-1', 'MS1: Dopravní nehoda'),
+                   ('scen-2', 'MS2: Vstup do obydlí')) AS k(klic, nazev)
+WHERE c.lecturer_id IN (SELECT id FROM lecturers WHERE email LIKE 'mig-%@pcr.cz');
+SQL
+echo "    OK"
+echo
+
+echo "==> alembic upgrade head (znovu, už nad daty)"
 "$ALEMBIC" upgrade head >/dev/null
 echo "    sloupců po opětovném upgrade: $(count_cols student_evaluations)"
+
+# Každý lektor musí mít vlastní řádek pro každý svůj klíč — sdílený klíč nesmí
+# znamenat sdílenou situaci ani chybu.
+ROZPAD="$(LC_ALL=C "$PGBIN/psql" -h 127.0.0.1 -p "$PORT" -U evaluz -d evaluz_migtest -tAc \
+    "SELECT string_agg(l.email || '=' || s.scenario_key, ',' ORDER BY l.email, s.scenario_key)
+     FROM scenarios s JOIN lecturers l ON l.id = s.lecturer_id;")"
+OCEKAVANO="mig-a@pcr.cz=scen-1,mig-a@pcr.cz=scen-2,mig-b@pcr.cz=scen-1,mig-b@pcr.cz=scen-2"
+if [ "$ROZPAD" != "$OCEKAVANO" ]; then
+    echo "CHYBA: backfill nerozdělil situace podle lektorů." >&2
+    echo "       očekáváno: $OCEKAVANO" >&2
+    echo "       nalezeno:  $ROZPAD" >&2
+    exit 1
+fi
+echo "    backfill: každý lektor dostal své scen-1 i scen-2"
 echo
 
 # --- 5. Kontrola jednoho headu ---------------------------------------------------

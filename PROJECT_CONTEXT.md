@@ -1,5 +1,5 @@
 # Projektový Kontext — EVALUZ
-**Verze: 3.17.0 | Poslední aktualizace: 2026-09-11**
+**Verze: 3.17.1 | Poslední aktualizace: 2026-09-11**
 
 ## Aktuální Stav
 
@@ -17,6 +17,7 @@ Poslední vývojová linie řešila **provozní robustnost dávkového vyhodnoco
 - **v3.15.2** — Každé dílčí hodnocení nese `jistota` 1–5; u hodnot ≤ 2 se v UI zobrazí výstraha, aby lektor věděl, kam se podívat (ADR-029). Je to tvrzení modelu o obtížnosti, ne měření nejistoty — vysoká jistota není důkazem správnosti. Zároveň opraven zdvojený příznak zásahu vyučujícího: `_lecturer_modified` z v3.15.0 sjednocen na existující `upraveno_lektorem`, které nově odvozuje server, ne klient.
 - **v3.15.3** — Metadata z `json_result` se do UI vůbec nedostávala: `CriterionResult` neměl `extra='allow'` a Pydantic v2 nedeklarovaná pole při serializaci tiše zahazuje (ADR-030). Postiženo bylo `jistota`, `upraveno_lektorem`, `_llm_omitted` i `_llm_actual_name` — v DB byla, v odpovědi API zmizela, v UI nebylo co zobrazit. Chyba je starší než ADR-029, nové pole ji jen zviditelnilo. Jistota se navíc zobrazuje vždy, ne jen při nízké hodnotě.
 - **v3.16.0** — Strom tříd a modelových situací se ukládá na server k lektorovi (ADR-031). Dřív žil jen v `localStorage`, takže situace vytvořená na jednom počítači na jiném neexistovala — kritéria a vyhodnocení v DB zůstala, ale jejich `scenario_id` nešlo zjistit. Zároveň se za jménem zobrazuje skutečná RBAC role místo funkčního zařazení, které je jen popiskem do doložky (ADR-032).
+- **v3.17.1** — Oprava migrace z v3.17.0: `scenario_key` je unikátní **v rámci lektora**, ne globálně. Globální UNIQUE shodil `alembic upgrade head`, který běží před startem backendu — aplikace tak vůbec nenaběhla a nginx vracel 502, což vypadalo jako zrušené účty. Data se neztratila (transakční DDL). Výchozí klíče `scen-1`/`scen-2` má totiž z pevné šablony každý lektor. `verify_migrations.sh` nově ověřuje backfill i nad daty, ne jen nad prázdnou databází.
 - **v3.17.0** — Modelová situace je nově **řádek v databázi** patřící lektorovi; strom se z něj odvozuje (ADR-033, nahrazuje ADR-031). Dřív `scenario_id` vzniklo na klientovi a jediným záznamem o existenci situace byl strom — ten šlo ztratit i s cestou k datům. Klíč generuje server, smazání situace s daty vrací 409 s počty místo tichého osiření, odhlášení maže **celý** stav session (dřív jen token, což promíchalo účty na sdíleném počítači). Migrace složí každému lektorovi strom z jeho vlastních vyhodnocení.
 
 ## 1. Vize a Cíl
